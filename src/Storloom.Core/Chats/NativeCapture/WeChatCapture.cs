@@ -1,0 +1,846 @@
+// Adapted from chatlog-keeper, Copyright (c) 2026 labazhou2024 (MIT).
+// See THIRD-PARTY-NOTICES.md. Calibration hooks removed.
+#nullable disable
+#pragma warning disable CS0649, SYSLIB0060
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace Storloom.Core.Chats.NativeCapture
+{
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct STARTUPINFOW
+    {
+        public int cb;
+        public IntPtr lpReserved;
+        public IntPtr lpDesktop;
+        public IntPtr lpTitle;
+        public int dwX; public int dwY; public int dwXSize; public int dwYSize;
+        public int dwXCountChars; public int dwYCountChars; public int dwFillAttribute;
+        public int dwFlags; public short wShowWindow; public short cbReserved2;
+        public IntPtr lpReserved2; public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PROCESS_INFORMATION
+    {
+        public IntPtr hProcess; public IntPtr hThread; public int dwProcessId; public int dwThreadId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct DEBUG_EVENT
+    {
+        public uint dwDebugEventCode;
+        public uint dwProcessId;
+        public uint dwThreadId;
+        private uint _padding;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 160)]
+        public byte[] u;
+    }
+
+    internal static class DebugEventParser
+    {
+        public static uint GetExceptionCode(byte[] u) { return BitConverter.ToUInt32(u, 0); }
+        public static ulong GetExceptionAddress(byte[] u) { return BitConverter.ToUInt64(u, 16); }
+        public static IntPtr GetFileHandle(byte[] u) { return (IntPtr)BitConverter.ToInt64(u, 0); }
+        public static uint GetExitCode(byte[] u) { return BitConverter.ToUInt32(u, 0); }
+        // CREATE_PROCESS_DEBUG_INFO: hFile(0) hProcess(8) hThread(16) lpBaseOfImage(24)…
+        public static IntPtr GetCreateProcessHandle(byte[] u) { return (IntPtr)BitConverter.ToInt64(u, 8); }
+        public static IntPtr GetCreateThreadHandle(byte[] u) { return (IntPtr)BitConverter.ToInt64(u, 16); }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct MODULEENTRY32W
+    {
+        public uint dwSize; public uint th32ModuleID; public uint th32ProcessID;
+        public uint GlblcntUsage; public uint ProccntUsage; public IntPtr modBaseAddr;
+        public uint modBaseSize; public IntPtr hModule;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szModule;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExePath;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 16)]
+    internal struct CONTEXT64
+    {
+        public ulong P1Home; public ulong P2Home; public ulong P3Home; public ulong P4Home;
+        public ulong P5Home; public ulong P6Home;
+        public uint ContextFlags; public uint MxCsr;
+        public ushort SegCs; public ushort SegDs; public ushort SegEs; public ushort SegFs;
+        public ushort SegGs; public ushort SegSs; public uint EFlags;
+        public ulong Dr0; public ulong Dr1; public ulong Dr2; public ulong Dr3; public ulong Dr6; public ulong Dr7;
+        public ulong Rax; public ulong Rcx; public ulong Rdx; public ulong Rbx; public ulong Rsp; public ulong Rbp;
+        public ulong Rsi; public ulong Rdi; public ulong R8; public ulong R9; public ulong R10; public ulong R11;
+        public ulong R12; public ulong R13; public ulong R14; public ulong R15; public ulong Rip;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 512)] public byte[] FltSave;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 26)] public ulong[] VectorRegister;
+        public ulong VectorControl; public ulong DebugControl; public ulong LastBranchToRip;
+        public ulong LastBranchFromRip; public ulong LastExceptionToRip; public ulong LastExceptionFromRip;
+    }
+
+    internal static class Native
+    {
+        public const int DEBUG_PROCESS = 0x00000001;            // 调试整个进程树 (含子进程)
+        public const int DEBUG_ONLY_THIS_PROCESS = 0x00000002;
+        public const uint EXCEPTION_DEBUG_EVENT = 1;
+        public const uint CREATE_PROCESS_DEBUG_EVENT = 3;
+        public const uint EXIT_THREAD_DEBUG_EVENT = 4;
+        public const uint EXIT_PROCESS_DEBUG_EVENT = 5;
+        public const uint LOAD_DLL_DEBUG_EVENT = 6;
+        public const uint UNLOAD_DLL_DEBUG_EVENT = 7;
+        public const uint OUTPUT_DEBUG_STRING_EVENT = 8;
+        public const uint EXCEPTION_BREAKPOINT = 0x80000003;
+        public const uint EXCEPTION_SINGLE_STEP = 0x80000004;
+        public const uint DBG_CONTINUE = 0x00010002;
+        public const uint DBG_EXCEPTION_NOT_HANDLED = 0x80010001;
+        public const uint CONTEXT_AMD64 = 0x00100000;
+        public const uint CONTEXT_CONTROL = CONTEXT_AMD64 | 0x0001;
+        public const uint CONTEXT_INTEGER = CONTEXT_AMD64 | 0x0002;
+        public const uint CONTEXT_FULL = CONTEXT_CONTROL | CONTEXT_INTEGER | (CONTEXT_AMD64 | 0x0008);
+        public const uint CONTEXT_ALL = CONTEXT_FULL | (CONTEXT_AMD64 | 0x0004) | (CONTEXT_AMD64 | 0x0010);
+        public const uint TH32CS_SNAPMODULE = 0x00000008;
+        public const uint TH32CS_SNAPMODULE32 = 0x00000010;
+        public const uint THREAD_ALL_ACCESS = 0x1FFFFF;
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool CreateProcessW(string lpApplicationName, IntPtr lpCommandLine,
+            IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, int dwCreationFlags,
+            IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFOW lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool WaitForDebugEvent(out DEBUG_EVENT lpDebugEvent, uint dwMilliseconds);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool ContinueDebugEvent(uint dwProcessId, uint dwThreadId, uint dwContinueStatus);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool TerminateProcess(IntPtr hProcess, int uExitCode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr hObject);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, UIntPtr nSize, out UIntPtr lpNumberOfBytesRead);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, UIntPtr nSize, out UIntPtr lpNumberOfBytesWritten);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool FlushInstructionCache(IntPtr hProcess, IntPtr lpBaseAddress, UIntPtr dwSize);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenThread(uint dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetThreadContext(IntPtr hThread, ref CONTEXT64 lpContext);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetThreadContext(IntPtr hThread, ref CONTEXT64 lpContext);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool Module32FirstW(IntPtr hSnapshot, ref MODULEENTRY32W lpme);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool Module32NextW(IntPtr hSnapshot, ref MODULEENTRY32W lpme);
+    }
+
+    /// <summary>
+    /// Debugger that breakpoints WCDB's cipher-config function and reads the
+    /// 32-byte master key, identified by an HMAC oracle (no register hard-coding).
+    /// </summary>
+    public sealed class KeyExtractor
+    {
+        private readonly string _exePath;
+        private readonly ulong[] _functionRvas;
+        private readonly byte[] _dbPage1;
+        private readonly Action<string> _log;
+        private readonly Action<string> _logVerbose;
+        private readonly DateTime _deadlineUtc;
+
+        // 多进程: 微信登录后 spawn 子进程, message 库的解密调用可能在子进程, 故用 DEBUG_PROCESS
+        // 调试整个进程树, 每个加载 Weixin.dll 的进程独立维护断点 (per-process ProcCtx)。
+        // 多断点: wx_key 签名命中 >=1 个候选函数, 每个进程对每个候选地址各设一个 INT3。
+        private sealed class ProcCtx { public IntPtr hProcess; public ulong moduleBase; public Dictionary<ulong, byte> bps = new Dictionary<ulong, byte>(); public bool installed; }
+        private readonly Dictionary<uint, ProcCtx> _procs = new Dictionary<uint, ProcCtx>();
+        private uint _mainPid;
+        private Dictionary<uint, ulong> _steppingThreads = new Dictionary<uint, ulong>();
+
+        // Bounded verifier backlog: one source is one (PID, breakpoint address).
+        // A source retains one full register/stack snapshot (<=186 addresses today),
+        // while 32 sources x 192 values (including any in-flight value) bounds
+        // copied candidate bytes at 192 KiB (plus collection overhead).
+        // Once admitted, work is immutable until verification, deadline, or cleanup.
+        // Overflow rejects and zeroes only the new arrival; every returned key still
+        // passes the database HMAC oracle.
+        private const int MaxCandidateSources = 32;
+        private const int MaxCandidatesPerSource = 192;
+        private const int VerificationIterationsPerSlice = 1024;
+        private sealed class CandidateBatch
+        {
+            public string sourceKey;
+            public Queue<byte[]> candidates = new Queue<byte[]>();
+            public bool scheduled;
+        }
+        private sealed class CandidateVerification : IDisposable
+        {
+            public readonly byte[] candidate;
+            private readonly byte[] page1;
+            private HMACSHA512 kdf;
+            private byte[] u;
+            private byte[] accumulator;
+            private int iterations;
+            private bool initialized;
+            public bool complete;
+            public bool verified;
+
+            public CandidateVerification(byte[] candidateBytes, byte[] databasePage)
+            { candidate = candidateBytes; page1 = databasePage; }
+
+            public void Advance(int iterationBudget)
+            {
+                if (complete) return;
+                try
+                {
+                    if (!initialized)
+                    {
+                        initialized = true;
+                        if (KeyExtractor.HmacCheck(candidate, page1))
+                        { verified = true; complete = true; return; }
+                        byte[] saltBlock = new byte[20];
+                        Array.Copy(page1, 0, saltBlock, 0, 16);
+                        saltBlock[19] = 1; // PBKDF2 block index 1, big-endian
+                        kdf = new HMACSHA512(candidate);
+                        u = kdf.ComputeHash(saltBlock);
+                        accumulator = (byte[])u.Clone();
+                        iterations = 1;
+                    }
+                    while (iterationBudget-- > 0 && iterations < 256000)
+                    {
+                        byte[] previous = u;
+                        u = kdf.ComputeHash(previous);
+                        Array.Clear(previous, 0, previous.Length);
+                        for (int i = 0; i < accumulator.Length; i++) accumulator[i] ^= u[i];
+                        iterations++;
+                    }
+                    if (iterations == 256000)
+                    {
+                        byte[] derived = new byte[32];
+                        Array.Copy(accumulator, derived, 32);
+                        verified = KeyExtractor.HmacCheck(derived, page1);
+                        Array.Clear(derived, 0, derived.Length);
+                        complete = true;
+                    }
+                }
+                catch { verified = false; complete = true; }
+                finally { if (complete) Dispose(); }
+            }
+
+            public void Dispose()
+            {
+                if (kdf != null) { kdf.Dispose(); kdf = null; }
+                if (u != null) { Array.Clear(u, 0, u.Length); u = null; }
+                if (accumulator != null) { Array.Clear(accumulator, 0, accumulator.Length); accumulator = null; }
+            }
+        }
+        private readonly Dictionary<string, CandidateBatch> _candidateBatches = new Dictionary<string, CandidateBatch>();
+        private readonly Queue<CandidateBatch> _candidateSchedule = new Queue<CandidateBatch>();
+        private readonly HashSet<string> _candidateDigests = new HashSet<string>();
+        private CandidateVerification _activeVerification;
+        private string _activeSourceKey;
+        private string _verifiedKey;
+
+        public KeyExtractor(string exePath, ulong[] functionRvas, byte[] dbPage1, Action<string> log, Action<string> logVerbose, int timeoutSeconds)
+        {
+            _exePath = exePath; _functionRvas = functionRvas; _dbPage1 = dbPage1;
+            _log = log ?? (s => { }); _logVerbose = logVerbose ?? (s => { });
+            _deadlineUtc = DateTime.UtcNow.AddSeconds(Math.Max(1, timeoutSeconds));
+        }
+
+        private static byte[] HexToBytes(string h) { byte[] b = new byte[h.Length / 2]; for (int i = 0; i < b.Length; i++) b[i] = Convert.ToByte(h.Substring(i * 2, 2), 16); return b; }
+        private static int IndexOfBytes(byte[] hay, byte[] needle)
+        {
+            if (hay == null || needle == null || needle.Length == 0 || hay.Length < needle.Length) return -1;
+            for (int i = 0; i <= hay.Length - needle.Length; i++) { int j = 0; for (; j < needle.Length; j++) if (hay[i + j] != needle[j]) break; if (j == needle.Length) return i; }
+            return -1;
+        }
+
+        // ── HMAC cryptographic oracle (SQLCipher 4.x raw-key page-key derivation) ──
+        private static bool HmacCheck(byte[] pageKey, byte[] page1)
+        {
+            if (pageKey == null || pageKey.Length != 32 || page1 == null || page1.Length < 4096) return false;
+            try
+            {
+                byte[] macSalt = new byte[16];
+                for (int i = 0; i < 16; i++) macSalt[i] = (byte)(page1[i] ^ 0x3A);
+                byte[] macKey;
+                using (var kdf = new Rfc2898DeriveBytes(pageKey, macSalt, 2, HashAlgorithmName.SHA512))
+                    macKey = kdf.GetBytes(32);
+                using (var h = new HMACSHA512(macKey))
+                {
+                    h.TransformBlock(page1, 16, 4096 - 64 - 16, null, 0);
+                    h.TransformFinalBlock(BitConverter.GetBytes((uint)1), 0, 4);
+                    byte[] mac = h.Hash;
+                    for (int i = 0; i < 64; i++) if (mac[i] != page1[4096 - 64 + i]) return false;
+                    return true;
+                }
+            }
+            catch { return false; }
+        }
+
+        private static string BytesToHex(byte[] bytes)
+        {
+            var sb = new StringBuilder(bytes.Length * 2);
+            for (int i = 0; i < bytes.Length; i++) sb.Append(bytes[i].ToString("x2"));
+            return sb.ToString();
+        }
+
+        private static string CandidateDigest(byte[] candidate)
+        {
+            using (var sha = SHA256.Create())
+                return Convert.ToBase64String(sha.ComputeHash(candidate));
+        }
+
+        private void DropCandidate(byte[] candidate)
+        {
+            _candidateDigests.Remove(CandidateDigest(candidate));
+            Array.Clear(candidate, 0, candidate.Length);
+        }
+
+        private void QueueCandidateBatch(uint pid, ulong breakpointAddress, List<byte[]> captured)
+        {
+            if (_verifiedKey != null)
+            {
+                foreach (byte[] capturedCandidate in captured)
+                    if (capturedCandidate != null) Array.Clear(capturedCandidate, 0, capturedCandidate.Length);
+                return;
+            }
+            string sourceKey = pid.ToString("X8") + ":" + breakpointAddress.ToString("X16");
+            CandidateBatch batch;
+            if (!_candidateBatches.TryGetValue(sourceKey, out batch))
+            {
+                bool activeSameSource = _activeVerification != null && _activeSourceKey == sourceKey;
+                if (!activeSameSource && AdmittedSourceCount() >= MaxCandidateSources)
+                {
+                    foreach (byte[] capturedCandidate in captured)
+                        if (capturedCandidate != null) Array.Clear(capturedCandidate, 0, capturedCandidate.Length);
+                    _logVerbose("候选校验队列达到 source 上限，已拒绝并清零新批次");
+                    return;
+                }
+                batch = new CandidateBatch { sourceKey = sourceKey };
+                _candidateBatches[sourceKey] = batch;
+            }
+            foreach (byte[] candidate in captured)
+            {
+                if (candidate == null) continue;
+                if (candidate.Length != 32) { Array.Clear(candidate, 0, candidate.Length); continue; }
+                int nz = 0; for (int i = 0; i < candidate.Length; i++) if (candidate[i] != 0) nz++;
+                if (nz < 8) { Array.Clear(candidate, 0, candidate.Length); continue; }
+                string digest = CandidateDigest(candidate);
+                if (_candidateDigests.Contains(digest)) { Array.Clear(candidate, 0, candidate.Length); continue; }
+                int activeForSource = (_activeVerification != null && _activeSourceKey == sourceKey) ? 1 : 0;
+                if (batch.candidates.Count + activeForSource >= MaxCandidatesPerSource)
+                {
+                    Array.Clear(candidate, 0, candidate.Length);
+                    _logVerbose("候选校验队列达到 per-source 上限，已拒绝并清零新候选");
+                    continue;
+                }
+                _candidateDigests.Add(digest);
+                batch.candidates.Enqueue(candidate);
+            }
+            if (!batch.scheduled && batch.candidates.Count > 0)
+            {
+                batch.scheduled = true;
+                _candidateSchedule.Enqueue(batch);
+            }
+        }
+
+        private int AdmittedSourceCount()
+        {
+            int count = _candidateBatches.Count;
+            if (_activeVerification != null && _activeSourceKey != null &&
+                !_candidateBatches.ContainsKey(_activeSourceKey)) count++;
+            return count;
+        }
+
+        private byte[] TakeNextCandidate()
+        {
+            if (_candidateSchedule.Count == 0) return null;
+            CandidateBatch batch = _candidateSchedule.Dequeue();
+            batch.scheduled = false;
+            byte[] candidate = batch.candidates.Dequeue();
+            if (batch.candidates.Count > 0)
+            {
+                // Requeue before any new debug event can append work.  This makes the
+                // schedule strict round-robin even under sustained breakpoint hits.
+                batch.scheduled = true;
+                _candidateSchedule.Enqueue(batch);
+            }
+            else _candidateBatches.Remove(batch.sourceKey);
+            _activeSourceKey = batch.sourceKey;
+            return candidate;
+        }
+
+        private string GetVerifiedKey()
+        {
+            return _verifiedKey;
+        }
+
+        private bool HasCandidateWork()
+        {
+            return _activeVerification != null || _candidateSchedule.Count > 0;
+        }
+
+        private void ProcessCandidateVerificationSlice()
+        {
+            if (_verifiedKey != null) return;
+            if (_activeVerification == null)
+            {
+                byte[] next = TakeNextCandidate();
+                if (next == null) return;
+                _activeVerification = new CandidateVerification(next, _dbPage1);
+            }
+            _activeVerification.Advance(VerificationIterationsPerSlice);
+            if (!_activeVerification.complete) return;
+            byte[] completedCandidate = _activeVerification.candidate;
+            if (_activeVerification.verified) _verifiedKey = BytesToHex(completedCandidate);
+            _candidateDigests.Remove(CandidateDigest(completedCandidate));
+            Array.Clear(completedCandidate, 0, completedCandidate.Length);
+            _activeVerification.Dispose();
+            _activeVerification = null;
+            _activeSourceKey = null;
+        }
+
+        private void ClearCandidateVerifier()
+        {
+            if (_activeVerification != null)
+            {
+                byte[] active = _activeVerification.candidate;
+                _activeVerification.Dispose();
+                _activeVerification = null;
+                _candidateDigests.Remove(CandidateDigest(active));
+                Array.Clear(active, 0, active.Length);
+            }
+            _activeSourceKey = null;
+            while (_candidateSchedule.Count > 0)
+            {
+                CandidateBatch batch = _candidateSchedule.Dequeue();
+                batch.scheduled = false;
+                while (batch.candidates.Count > 0) DropCandidate(batch.candidates.Dequeue());
+            }
+            _candidateBatches.Clear();
+            _candidateDigests.Clear();
+        }
+
+        private byte[] Read(IntPtr hProcess, ulong addr, int n)
+        {
+            if (addr < 0x10000UL || addr > 0x7FFFFFFFFFFFUL) return null;
+            byte[] b = new byte[n]; UIntPtr nr;
+            if (Native.ReadProcessMemory(hProcess, (IntPtr)addr, b, new UIntPtr((uint)n), out nr) && (ulong)nr == (ulong)n)
+                return b;
+            return null;
+        }
+        private ulong ReadPtr(IntPtr hProcess, ulong addr)
+        {
+            byte[] b = Read(hProcess, addr, 8);
+            return b == null ? 0UL : BitConverter.ToUInt64(b, 0);
+        }
+
+        public string ExtractKey()
+        {
+            _log("正在以调试方式启动微信 (Weixin.exe, DEBUG_PROCESS 调试整个进程树)…");
+            _log("  EXE: " + _exePath);
+            { var sb = new StringBuilder(); foreach (var r in _functionRvas) sb.Append("0x" + r.ToString("X") + " "); _log("  目标函数 RVA (" + _functionRvas.Length + "): " + sb.ToString().Trim()); }
+            if (!StartDebugProcess())
+                throw new Exception("CreateProcessW(DEBUG) 失败, 错误: " + Marshal.GetLastWin32Error());
+            _log("CHATLOG_KEY_RECOVERY_CLIENT_OPEN_V1");
+            _log("微信主进程已启动, PID=" + _mainPid + " — 请在弹出的微信里扫码/登录目标账号。");
+            try { return DebugLoop(); }
+            finally { Cleanup(); }
+        }
+
+        private bool StartDebugProcess()
+        {
+            STARTUPINFOW si = new STARTUPINFOW();
+            si.cb = Marshal.SizeOf(typeof(STARTUPINFOW));
+            PROCESS_INFORMATION pi;
+            // DEBUG_PROCESS: 调试整个进程树 (含微信登录后 spawn 的子进程; message 库解密
+            // 调用可能在子进程, DEBUG_ONLY_THIS_PROCESS 收不到子进程的调试事件)。
+            bool ok = Native.CreateProcessW(_exePath, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, false,
+                Native.DEBUG_PROCESS, IntPtr.Zero, null, ref si, out pi);
+            if (ok)
+            {
+                _mainPid = (uint)pi.dwProcessId;
+                _procs[_mainPid] = new ProcCtx { hProcess = pi.hProcess };
+                if (pi.hThread != IntPtr.Zero) Native.CloseHandle(pi.hThread);
+            }
+            return ok;
+        }
+
+        private ulong GetModuleBaseAddress(uint pid, string moduleName)
+        {
+            IntPtr snap = Native.CreateToolhelp32Snapshot(Native.TH32CS_SNAPMODULE | Native.TH32CS_SNAPMODULE32, pid);
+            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return 0;
+            try
+            {
+                MODULEENTRY32W e = new MODULEENTRY32W();
+                e.dwSize = (uint)Marshal.SizeOf(typeof(MODULEENTRY32W));
+                if (Native.Module32FirstW(snap, ref e))
+                {
+                    do { if (string.Equals(e.szModule, moduleName, StringComparison.OrdinalIgnoreCase)) return (ulong)e.modBaseAddr; }
+                    while (Native.Module32NextW(snap, ref e));
+                }
+            }
+            finally { Native.CloseHandle(snap); }
+            return 0;
+        }
+
+        // 给某进程设断点 (它刚加载 Weixin.dll 时调用; 幂等: installed 即已设)。对每个候选函数各设一个 INT3。
+        private void TrySetBreakpoint(uint pid)
+        {
+            ProcCtx pc; if (!_procs.TryGetValue(pid, out pc)) return;
+            if (pc.installed || pc.hProcess == IntPtr.Zero) return;
+            ulong b = GetModuleBaseAddress(pid, "Weixin.dll");
+            if (b == 0) return;
+            pc.moduleBase = b; pc.installed = true;
+            foreach (ulong rva in _functionRvas)
+            {
+                ulong addr = b + rva;
+                byte[] one = Read(pc.hProcess, addr, 1);
+                if (one == null) { _logVerbose("PID=" + pid + " 读断点原字节失败 @0x" + addr.ToString("X")); continue; }
+                UIntPtr w;
+                if (!Native.WriteProcessMemory(pc.hProcess, (IntPtr)addr, new byte[] { 0xCC }, new UIntPtr(1), out w) || w != new UIntPtr(1))
+                { _logVerbose("PID=" + pid + " 写 INT3 失败 @0x" + addr.ToString("X")); continue; }
+                Native.FlushInstructionCache(pc.hProcess, (IntPtr)addr, new UIntPtr(1));
+                pc.bps[addr] = one[0];
+                _log("断点已设 (PID=" + pid + ") 于 0x" + addr.ToString("X"));
+            }
+        }
+        private void RestoreOriginalByte(ProcCtx pc, ulong addr)
+        {
+            byte orig; if (!pc.bps.TryGetValue(addr, out orig)) return;
+            UIntPtr w;
+            Native.WriteProcessMemory(pc.hProcess, (IntPtr)addr, new byte[] { orig }, new UIntPtr(1), out w);
+            Native.FlushInstructionCache(pc.hProcess, (IntPtr)addr, new UIntPtr(1));
+        }
+        private void ReinstallBreakpoint(ProcCtx pc, ulong addr)
+        {
+            if (!pc.bps.ContainsKey(addr)) return;
+            UIntPtr w;
+            Native.WriteProcessMemory(pc.hProcess, (IntPtr)addr, new byte[] { 0xCC }, new UIntPtr(1), out w);
+            Native.FlushInstructionCache(pc.hProcess, (IntPtr)addr, new UIntPtr(1));
+        }
+
+        private string DebugLoop()
+        {
+            DEBUG_EVENT ev; bool debuggeeRunning = true; string foundKey = null;
+            try
+            {
+                while (debuggeeRunning || HasCandidateWork())
+                {
+                    // One bounded PBKDF2 slice runs only between debug events.  No
+                    // verifier thread or disposable wait handle can outlive us.
+                    ProcessCandidateVerificationSlice();
+                    foundKey = GetVerifiedKey();
+                    if (foundKey != null && _steppingThreads.Count == 0)
+                    { _log("master key HMAC 校验命中"); break; }
+                    double remainingMs = (_deadlineUtc - DateTime.UtcNow).TotalMilliseconds;
+                    if (remainingMs <= 0) { _log("等待登录/密钥超时，已安全结束调试实例"); break; }
+                    // Once the main debuggee exits, finish already-copied candidates
+                    // within the same deadline without waiting for further events.
+                    if (!debuggeeRunning) continue;
+                    uint pollCeiling = HasCandidateWork() ? 1u : 100u;
+                    uint waitMs = (uint)Math.Max(1, Math.Min(pollCeiling, remainingMs));
+                    if (!Native.WaitForDebugEvent(out ev, waitMs)) { continue; }
+                    uint pid = ev.dwProcessId;
+                    uint cont = Native.DBG_CONTINUE;
+                    try
+                    {
+                        switch (ev.dwDebugEventCode)
+                        {
+                            case Native.CREATE_PROCESS_DEBUG_EVENT:
+                            {
+                                IntPtr hProc = DebugEventParser.GetCreateProcessHandle(ev.u);
+                                IntPtr hThr  = DebugEventParser.GetCreateThreadHandle(ev.u);
+                                IntPtr hFile = DebugEventParser.GetFileHandle(ev.u);
+                                ProcCtx pc;
+                                if (!_procs.TryGetValue(pid, out pc)) { _procs[pid] = new ProcCtx { hProcess = hProc }; if (pid != _mainPid) _logVerbose("子进程创建 PID=" + pid); }
+                                else if (pc.hProcess == IntPtr.Zero) { pc.hProcess = hProc; }
+                                TrySetBreakpoint(pid); // Weixin.dll 在 CREATE 时可能已加载
+                                if (hThr != IntPtr.Zero && hThr != new IntPtr(-1)) Native.CloseHandle(hThr);
+                                if (hFile != IntPtr.Zero && hFile != new IntPtr(-1)) Native.CloseHandle(hFile);
+                            }
+                            break;
+                            case Native.LOAD_DLL_DEBUG_EVENT:
+                            {
+                                IntPtr h = DebugEventParser.GetFileHandle(ev.u); if (h != IntPtr.Zero && h != new IntPtr(-1)) Native.CloseHandle(h);
+                                TrySetBreakpoint(pid); // 该进程加载新 dll, 试设断点 (含 Weixin.dll)
+                            }
+                            break;
+                            case Native.EXCEPTION_DEBUG_EVENT:
+                            {
+                                uint code = DebugEventParser.GetExceptionCode(ev.u);
+                                ulong addr = DebugEventParser.GetExceptionAddress(ev.u);
+                                ProcCtx pc; bool known = _procs.TryGetValue(pid, out pc);
+                                if (code == Native.EXCEPTION_BREAKPOINT && known && pc.bps.ContainsKey(addr))
+                                {
+                                    RestoreOriginalByte(pc, addr);
+                                    CaptureBreakpointCandidates(pc, pid, ev.dwThreadId, addr);
+                                    SetSingleStepForRearm(pc, ev.dwThreadId, addr);
+                                }
+                                else if (code == Native.EXCEPTION_SINGLE_STEP)
+                                {
+                                    ulong rearmAddr; bool inStep = _steppingThreads.TryGetValue(ev.dwThreadId, out rearmAddr);
+                                    _logVerbose("[rearm] 单步异常 T=" + ev.dwThreadId + " inStep=" + inStep + " PID=" + pid);
+                                    if (inStep)
+                                    { ClearTrapFlag(ev.dwThreadId); if (known) { ReinstallBreakpoint(pc, rearmAddr); _logVerbose("[rearm] 已重装0xCC @0x" + rearmAddr.ToString("X") + " PID=" + pid); } _steppingThreads.Remove(ev.dwThreadId); }
+                                }
+                                else if (code != Native.EXCEPTION_BREAKPOINT) { cont = Native.DBG_EXCEPTION_NOT_HANDLED; } // 交给微信自己的 SEH
+                            }
+                            break;
+                            case Native.EXIT_THREAD_DEBUG_EVENT:
+                                _steppingThreads.Remove(ev.dwThreadId);
+                                break;
+                            case Native.EXIT_PROCESS_DEBUG_EVENT:
+                            {
+                                ProcCtx pc; if (_procs.TryGetValue(pid, out pc)) { if (pc.hProcess != IntPtr.Zero) Native.CloseHandle(pc.hProcess); _procs.Remove(pid); }
+                                if (pid == _mainPid) debuggeeRunning = false;
+                            }
+                            break;
+                        }
+                    }
+                    finally
+                    {
+                        if (!Native.ContinueDebugEvent(ev.dwProcessId, ev.dwThreadId, cont))
+                            throw new Exception("ContinueDebugEvent 失败, 错误: " + Marshal.GetLastWin32Error());
+                    }
+                }
+                if (foundKey == null) foundKey = GetVerifiedKey();
+                return foundKey;
+            }
+            finally { ClearCandidateVerifier(); }
+        }
+
+        // Snapshot every plausible 32-byte buffer reachable from registers/stack.
+        // The cooperative verifier applies the HMAC oracle in bounded slices after
+        // this debug event is continued, so a false candidate cannot pause the client.
+        // No register layout is assumed; the [rdx+0x08] heuristic is tried first.
+        private void CaptureBreakpointCandidates(ProcCtx pc, uint pid, uint threadId, ulong breakpointAddress)
+        {
+            IntPtr hThread = Native.OpenThread(Native.THREAD_ALL_ACCESS, false, threadId);
+            if (hThread == IntPtr.Zero) return;
+            try
+            {
+                CONTEXT64 ctx = new CONTEXT64();
+                // 只取 整数+控制 寄存器, 绝不碰 FltSave/VectorRegister (结构 VectorRegister 定义为
+                // ulong[26]=208B 但真实 M128A[26]=416B, CONTEXT_ALL 读写会损坏线程 FPU/SSE → 崩)。
+                ctx.ContextFlags = Native.CONTEXT_INTEGER | Native.CONTEXT_CONTROL;
+                ctx.FltSave = new byte[512];
+                ctx.VectorRegister = new ulong[26];
+                if (!Native.GetThreadContext(hThread, ref ctx)) return;
+                ctx.Rip = ctx.Rip - 1; // step back over the 0xCC
+                ctx.ContextFlags = Native.CONTEXT_CONTROL; // 只写回 Rip/EFlags 控制寄存器
+                Native.SetThreadContext(hThread, ref ctx);
+
+                IntPtr hp = pc.hProcess;
+                var tried = new HashSet<ulong>();
+                var captured = new List<byte[]>();
+                Action<ulong> captureAddr = (addr) =>
+                {
+                    if (addr < 0x10000UL || addr > 0x7FFFFFFFFFFFUL) return;
+                    if (!tried.Add(addr)) return;
+                    byte[] b = Read(hp, addr, 32);
+                    if (b != null) captured.Add(b);
+                };
+
+                ulong[] regs = { ctx.Rdx, ctx.Rcx, ctx.R8, ctx.R9, ctx.Rax, ctx.Rbx,
+                                 ctx.Rsi, ctx.Rdi, ctx.Rbp, ctx.R10, ctx.R11, ctx.R12, ctx.R13, ctx.R14, ctx.R15 };
+                ulong[] offs = { 0x0, 0x8, 0x10, 0x18, 0x20, 0x28, 0x30 };
+
+                // 1. Heuristic first: key pointer at [rdx+0x08], size at [rdx+0x10]==32
+                ulong sz = ReadPtr(hp, ctx.Rdx + 0x10);
+                if (sz == 32)
+                    captureAddr(ReadPtr(hp, ctx.Rdx + 0x08));
+                // 2. each register: as a direct pointer to the key, and via [reg+off] indirections
+                foreach (ulong r in regs)
+                {
+                    captureAddr(r);
+                    foreach (ulong o in offs)
+                        captureAddr(ReadPtr(hp, r + o));
+                }
+                // 3. stack: pointers in the first 0x200 bytes from rsp
+                for (ulong off = 0; off <= 0x200; off += 8)
+                    captureAddr(ReadPtr(hp, ctx.Rsp + off));
+                QueueCandidateBatch(pid, breakpointAddress, captured);
+                _logVerbose("Captured candidate count: " + captured.Count);
+            }
+            finally { Native.CloseHandle(hThread); }
+        }
+
+        private void SetSingleStepForRearm(ProcCtx pc, uint threadId, ulong addr)
+        {
+            IntPtr hThread = Native.OpenThread(Native.THREAD_ALL_ACCESS, false, threadId);
+            if (hThread == IntPtr.Zero) { _logVerbose("[rearm] OpenThread 失败 T=" + threadId); return; }
+            try
+            {
+                CONTEXT64 ctx = new CONTEXT64();
+                ctx.ContextFlags = Native.CONTEXT_CONTROL; ctx.FltSave = new byte[512]; ctx.VectorRegister = new ulong[26];
+                if (Native.GetThreadContext(hThread, ref ctx))
+                {
+                    ctx.EFlags = ctx.EFlags | 0x100; // trap flag → 单步过被恢复的原指令
+                    ctx.ContextFlags = Native.CONTEXT_CONTROL;
+                    bool ok = Native.SetThreadContext(hThread, ref ctx);
+                    if (ok) _steppingThreads[threadId] = addr;
+                    _logVerbose("[rearm] 设单步 T=" + threadId + " addr=0x" + addr.ToString("X") + " setctx=" + ok + " ef=0x" + ctx.EFlags.ToString("X"));
+                }
+                else { _logVerbose("[rearm] GetThreadContext 失败 T=" + threadId); }
+            }
+            finally { Native.CloseHandle(hThread); }
+        }
+        private void ClearTrapFlag(uint threadId)
+        {
+            IntPtr hThread = Native.OpenThread(Native.THREAD_ALL_ACCESS, false, threadId);
+            if (hThread == IntPtr.Zero) return;
+            try
+            {
+                CONTEXT64 ctx = new CONTEXT64();
+                ctx.ContextFlags = Native.CONTEXT_CONTROL; ctx.FltSave = new byte[512]; ctx.VectorRegister = new ulong[26];
+                if (Native.GetThreadContext(hThread, ref ctx)) { ctx.EFlags = ctx.EFlags & ~0x100u; Native.SetThreadContext(hThread, ref ctx); }
+            }
+            finally { Native.CloseHandle(hThread); }
+        }
+        private void Cleanup()
+        {
+            foreach (var kv in _procs) { if (kv.Value.hProcess != IntPtr.Zero) Native.CloseHandle(kv.Value.hProcess); }
+            _procs.Clear();
+        }
+    }
+
+    // Static locator: find WCDB cipher-config function RVA in Weixin.dll via the
+    // version-stable string "com.Tencent.WCDB.Config.Cipher" (string -> RIP-relative
+    // LEA -> enclosing function via the exception directory). In C# because scanning
+    // a 100+MB .text in a PowerShell byte loop would take minutes.
+    public static class Locator
+    {
+        private static int IndexOf(byte[] hay, byte[] needle)
+        {
+            int end = hay.Length - needle.Length;
+            for (int i = 0; i <= end; i++) { bool ok = true; for (int j = 0; j < needle.Length; j++) if (hay[i + j] != needle[j]) { ok = false; break; } if (ok) return i; }
+            return -1;
+        }
+        public static ulong FindCipherFunctionRva(byte[] d, Action<string> log)
+        {
+            if (BitConverter.ToUInt16(d, 0) != 0x5A4D) throw new Exception("not a PE (DOS header)");
+            int pe = BitConverter.ToInt32(d, 0x3C);
+            if (BitConverter.ToUInt32(d, pe) != 0x00004550) throw new Exception("not a PE (PE signature)");
+            int coff = pe + 4;
+            int numSec = BitConverter.ToUInt16(d, coff + 2);
+            int sizeOpt = BitConverter.ToUInt16(d, coff + 16);
+            int opt = coff + 20;
+            if (BitConverter.ToUInt16(d, opt) != 0x20B) throw new Exception("only PE32+ supported");
+            uint excRVA = BitConverter.ToUInt32(d, opt + 112 + 3 * 8);
+            uint excSize = BitConverter.ToUInt32(d, opt + 112 + 3 * 8 + 4);
+            int secOff = opt + sizeOpt;
+            int N = numSec;
+            string[] nm = new string[N]; long[] va = new long[N]; long[] vs = new long[N]; int[] rp = new int[N]; int[] rs = new int[N];
+            for (int i = 0; i < N; i++)
+            {
+                int so = secOff + i * 40;
+                nm[i] = Encoding.ASCII.GetString(d, so, 8).TrimEnd('\0');
+                vs[i] = BitConverter.ToUInt32(d, so + 8);
+                va[i] = BitConverter.ToUInt32(d, so + 12);
+                rs[i] = (int)BitConverter.ToUInt32(d, so + 16);
+                rp[i] = (int)BitConverter.ToUInt32(d, so + 20);
+            }
+            byte[] needle = Encoding.ASCII.GetBytes("com.Tencent.WCDB.Config.Cipher");
+            int strFo = IndexOf(d, needle);
+            if (strFo < 0) throw new Exception("WCDB cipher string not found in Weixin.dll (incompatible version?)");
+            long strRva = -1;
+            for (int i = 0; i < N; i++) if (strFo >= rp[i] && strFo < rp[i] + rs[i]) { strRva = va[i] + (strFo - rp[i]); break; }
+            if (strRva < 0) throw new Exception("string RVA resolve failed");
+            if (log != null) log("  string RVA=0x" + strRva.ToString("X"));
+            int ti = -1; for (int i = 0; i < N; i++) if (nm[i] == ".text") { ti = i; break; }
+            if (ti < 0) throw new Exception(".text section not found");
+            int tStart = rp[ti]; int tEnd = rp[ti] + rs[ti]; long tVA = va[ti];
+            long leaRva = -1;
+            for (int i = tStart; i < tEnd - 7; i++)
+            {
+                if (d[i + 1] != 0x8D) continue;
+                if ((d[i] & 0xF8) != 0x48) continue;
+                if ((d[i + 2] & 0xC7) != 0x05) continue;
+                int disp = BitConverter.ToInt32(d, i + 3);
+                long instrRva = tVA + (i - tStart);
+                if (instrRva + 7 + disp == strRva) { leaRva = instrRva; break; }
+            }
+            if (leaRva < 0) throw new Exception("no LEA referencing the string");
+            if (log != null) log("  LEA RVA=0x" + leaRva.ToString("X"));
+            int excFo = -1; for (int i = 0; i < N; i++) if (excRVA >= va[i] && excRVA < va[i] + vs[i]) { excFo = (int)(rp[i] + (excRVA - va[i])); break; }
+            if (excFo < 0) throw new Exception("exception directory locate failed");
+            int n = (int)(excSize / 12); uint t = (uint)leaRva;
+            int lo = 0, hi = n - 1; long func = -1;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) / 2; int eo = excFo + mid * 12;
+                uint b = BitConverter.ToUInt32(d, eo); uint e = BitConverter.ToUInt32(d, eo + 4);
+                if (t < b) hi = mid - 1; else if (t >= e) lo = mid + 1; else { func = b; break; }
+            }
+            if (func < 0) throw new Exception("enclosing function not found in exception directory");
+            if (log != null) log("  function RVA=0x" + func.ToString("X"));
+            return (ulong)func;
+        }
+
+        // PRIMARY anchor (2026-06-08): scan Weixin.dll .text for the empirically-proven
+        // WCDB key-set prologue signature (the wx_key signature that captured the
+        // 4.1.10.31 master key). Returns the enclosing-function RVAs (>=1). The old
+        // com.Tencent.WCDB.Config.Cipher string anchor is DEAD: it points to a
+        // config-NAME-string initializer (runs once at DLL load, never carries the
+        // key). This prologue is the real key-set entry: at entry rdx -> a WCDB Data
+        // blob {+0x08 = key ptr, +0x10 = key len == 0x20}. Sig (idx 5 = wildcard):
+        //   24 50 48 C7 45 ?? FE FF FF FF 44 89 CF 44 89 C3 49 89 D6
+        public static ulong[] FindKeySetFunctionRvas(byte[] d, Action<string> log)
+        {
+            if (BitConverter.ToUInt16(d, 0) != 0x5A4D) throw new Exception("not a PE (DOS header)");
+            int pe = BitConverter.ToInt32(d, 0x3C);
+            if (BitConverter.ToUInt32(d, pe) != 0x00004550) throw new Exception("not a PE (PE signature)");
+            int coff = pe + 4;
+            int numSec = BitConverter.ToUInt16(d, coff + 2);
+            int sizeOpt = BitConverter.ToUInt16(d, coff + 16);
+            int opt = coff + 20;
+            if (BitConverter.ToUInt16(d, opt) != 0x20B) throw new Exception("only PE32+ supported");
+            uint excRVA = BitConverter.ToUInt32(d, opt + 112 + 3 * 8);
+            uint excSize = BitConverter.ToUInt32(d, opt + 112 + 3 * 8 + 4);
+            int secOff = opt + sizeOpt;
+            int N = numSec;
+            string[] nm = new string[N]; long[] va = new long[N]; long[] vs = new long[N]; int[] rp = new int[N]; int[] rs = new int[N];
+            for (int i = 0; i < N; i++)
+            {
+                int so = secOff + i * 40;
+                nm[i] = Encoding.ASCII.GetString(d, so, 8).TrimEnd('\0');
+                vs[i] = BitConverter.ToUInt32(d, so + 8);
+                va[i] = BitConverter.ToUInt32(d, so + 12);
+                rs[i] = (int)BitConverter.ToUInt32(d, so + 16);
+                rp[i] = (int)BitConverter.ToUInt32(d, so + 20);
+            }
+            int ti = -1; for (int i = 0; i < N; i++) if (nm[i] == ".text") { ti = i; break; }
+            if (ti < 0) throw new Exception(".text section not found");
+            int tStart = rp[ti]; int tEnd = rp[ti] + rs[ti]; long tVA = va[ti];
+            int excFo = -1; for (int i = 0; i < N; i++) if (excRVA >= va[i] && excRVA < va[i] + vs[i]) { excFo = (int)(rp[i] + (excRVA - va[i])); break; }
+            if (excFo < 0) throw new Exception("exception directory locate failed");
+            int nExc = (int)(excSize / 12);
+            byte[] sig = { 0x24,0x50,0x48,0xC7,0x45,0x00,0xFE,0xFF,0xFF,0xFF,0x44,0x89,0xCF,0x44,0x89,0xC3,0x49,0x89,0xD6 };
+            bool[] wild = new bool[sig.Length]; wild[5] = true;
+            var rvas = new List<ulong>(); var seen = new HashSet<ulong>();
+            int limit = tEnd - sig.Length;
+            for (int i = tStart; i <= limit; i++)
+            {
+                if (d[i] != 0x24) continue;
+                bool ok = true;
+                for (int j = 1; j < sig.Length; j++) { if (wild[j]) continue; if (d[i + j] != sig[j]) { ok = false; break; } }
+                if (!ok) continue;
+                long matchRva = tVA + (i - tStart);
+                uint t = (uint)matchRva; int lo = 0, hi = nExc - 1; long func = -1;
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) / 2; int eo = excFo + mid * 12;
+                    uint b = BitConverter.ToUInt32(d, eo); uint e = BitConverter.ToUInt32(d, eo + 4);
+                    if (t < b) hi = mid - 1; else if (t >= e) lo = mid + 1; else { func = b; break; }
+                }
+                ulong fr = func >= 0 ? (ulong)func : (ulong)(matchRva - 3);
+                if (seen.Add(fr)) { rvas.Add(fr); if (log != null) log("  key-set sig @0x" + matchRva.ToString("X") + " -> func RVA=0x" + fr.ToString("X")); }
+                if (rvas.Count >= 8) break;
+            }
+            if (rvas.Count == 0) throw new Exception("wx_key 函数签名未在 Weixin.dll 找到 (微信版本变化, 需重新取证)");
+            return rvas.ToArray();
+        }
+    }
+}

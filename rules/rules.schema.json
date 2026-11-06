@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Storloom rule catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "rules"
+  ],
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "const": 1
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "roots"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,63}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "names": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "descriptions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "enum": [
+              "Delete",
+              "Copy",
+              "Move"
+            ],
+            "default": "Delete"
+          },
+          "destinationRoot": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 3
+            }
+          },
+          "include": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[^\\\\/:*?\"<>|]+$"
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "recursive": {
+            "type": "boolean",
+            "default": true
+          },
+          "risk": {
+            "enum": [
+              "Low",
+              "Review"
+            ],
+            "default": "Review"
+          },
+          "minimumAgeHours": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 876000,
+            "default": 168
+          },
+          "minimumBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maximumBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "Copy",
+                    "Move"
+                  ]
+                }
+              },
+              "required": [
+                "action"
+              ]
+            },
+            "then": {
+              "required": [
+                "destinationRoot"
+              ],
+              "properties": {
+                "destinationRoot": {
+                  "type": "string",
+                  "minLength": 3
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

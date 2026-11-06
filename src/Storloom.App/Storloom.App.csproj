@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>Storloom</AssemblyName>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Storloom.Core/Storloom.Core.csproj" />
+    <Content Include="../../rules/builtin.json" Link="rules/builtin.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../rules/rules.schema.json" Link="rules/rules.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../docs/*.md" Link="docs/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

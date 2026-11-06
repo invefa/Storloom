@@ -1,0 +1,326 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "user-temp",
+      "name": "User temporary files",
+      "description": "Keep files created or modified in the last seven days.",
+      "roots": [
+        "%LocalAppData%\\Temp"
+      ],
+      "minimumAgeHours": 168,
+      "risk": "Low",
+      "exclude": [
+        "**/*.lock"
+      ]
+    },
+    {
+      "id": "windows-temp",
+      "name": "Windows temporary files",
+      "description": "Only the Temp directory; inaccessible files are skipped without changing permissions.",
+      "roots": [
+        "%Windows%\\Temp"
+      ],
+      "minimumAgeHours": 168,
+      "risk": "Low"
+    },
+    {
+      "id": "shader-cache",
+      "name": "DirectX and NVIDIA shader cache",
+      "description": "Games may compile shaders again after cleanup.",
+      "roots": [
+        "%LocalAppData%\\D3DSCache",
+        "%LocalAppData%\\NVIDIA\\DXCache",
+        "%LocalAppData%\\NVIDIA\\GLCache"
+      ],
+      "minimumAgeHours": 24,
+      "risk": "Low"
+    },
+    {
+      "id": "vscode-packages",
+      "name": "VS Code extension packages",
+      "description": "Keep installed extensions and settings; installers may be downloaded again.",
+      "roots": [
+        "%AppData%\\Code\\CachedExtensionVSIXs"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "Code"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "vscode-cache",
+      "name": "VS Code render and code cache",
+      "description": "Preserve User, Backups, sessions, and workspaces.",
+      "roots": [
+        "%AppData%\\Code\\Cache",
+        "%AppData%\\Code\\Code Cache",
+        "%AppData%\\Code\\GPUCache",
+        "%AppData%\\Code\\CachedData"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "Code"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "vscode-dumps",
+      "name": "VS Code crash dumps",
+      "description": "Deleting dumps removes evidence for the corresponding crashes.",
+      "roots": [
+        "%AppData%\\Code\\Crashpad"
+      ],
+      "minimumAgeHours": 72,
+      "processes": [
+        "Code"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "music-cache",
+      "name": "NetEase Cloud Music cache",
+      "description": "Only Cache/Cache; cached songs may need an Internet connection again.",
+      "roots": [
+        "%LocalAppData%\\Netease\\CloudMusic\\Cache\\Cache"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "cloudmusic"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "jetbrains-downloads",
+      "name": "JetBrains Toolbox downloads",
+      "description": "Future installations and updates may download these files again.",
+      "roots": [
+        "%LocalAppData%\\JetBrains\\Toolbox\\cache\\download"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "jetbrains-toolbox"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "jetbrains-backups",
+      "name": "JetBrains Toolbox previous versions",
+      "description": "Removes the ability to roll back instantly to these previous versions.",
+      "roots": [
+        "%LocalAppData%\\JetBrains\\Toolbox\\cache\\backup"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "jetbrains-toolbox",
+        "idea64",
+        "pycharm64",
+        "webstorm64",
+        "rider64"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "electron-updaters",
+      "name": "Electron updater installers",
+      "description": "Only EXE installers older than one day in *-updater directories; confirm the update has completed.",
+      "roots": [
+        "%LocalAppData%\\*-updater"
+      ],
+      "include": [
+        "installer.exe",
+        "pending/*.exe"
+      ],
+      "minimumAgeHours": 24,
+      "risk": "Review"
+    },
+    {
+      "id": "edge-cache",
+      "name": "Edge browser cache",
+      "description": "Preserve cookies, passwords, history, and site storage.",
+      "roots": [
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\Code Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\GPUCache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Profile *\\Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Profile *\\Code Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Profile *\\GPUCache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "msedge"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "chrome-cache",
+      "name": "Chrome browser cache",
+      "description": "Skip relocated junctions; preserve personal profile data.",
+      "roots": [
+        "%LocalAppData%\\Google\\Chrome\\User Data\\Default\\Cache",
+        "%LocalAppData%\\Google\\Chrome\\User Data\\Default\\Code Cache",
+        "%LocalAppData%\\Google\\Chrome\\User Data\\Profile *\\Cache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "chrome"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "firefox-cache",
+      "name": "Firefox browser cache",
+      "description": "Only cache2 under local profile directories.",
+      "roots": [
+        "%LocalAppData%\\Mozilla\\Firefox\\Profiles\\*\\cache2"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "firefox"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "nuget-http",
+      "name": "NuGet HTTP cache",
+      "description": "Keep global packages; HTTP metadata may be downloaded again.",
+      "roots": [
+        "%LocalAppData%\\NuGet\\v3-cache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "dotnet",
+        "devenv"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "npm-cache",
+      "name": "npm download cache",
+      "description": "Only _cacache; skip relocated directory links.",
+      "roots": [
+        "%LocalAppData%\\npm-cache\\_cacache"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "npm",
+        "node"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "pip-cache",
+      "name": "pip download cache",
+      "description": "Keep environments; use uv itself to manage its cache.",
+      "roots": [
+        "%LocalAppData%\\pip\\Cache"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "pip",
+        "python"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "yy-logs",
+      "name": "YY old logs",
+      "description": "Only the log directory; preserve accounts and business data.",
+      "roots": [
+        "%AppData%\\duowan\\yy\\log"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "YY",
+        "YYClient"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "yy-cache",
+      "name": "YY resource cache",
+      "description": "Only the cache directory; resources may be downloaded again.",
+      "roots": [
+        "%AppData%\\duowan\\yy\\cache"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "YY",
+        "YYClient"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "wechat-logs",
+      "name": "WeChat old logs",
+      "description": "Preserve chat databases, pictures, and attachments.",
+      "roots": [
+        "%AppData%\\Tencent\\xwechat\\log",
+        "%AppData%\\Tencent\\WeChat\\log"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "Weixin",
+        "WeChat"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "lghub-cache",
+      "name": "Logitech G HUB cache",
+      "description": "Only cache, not depots or device configuration.",
+      "roots": [
+        "%ProgramData%\\LGHUB\\cache"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "lghub",
+        "lghub_updater"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "bilibili-cache",
+      "name": "Bilibili browser cache",
+      "description": "Only browser caches, not downloaded videos.",
+      "roots": [
+        "%AppData%\\bilibili\\Cache",
+        "%AppData%\\bilibili\\Code Cache",
+        "%AppData%\\bilibili\\GPUCache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "bilibili"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "crash-dumps",
+      "name": "Old crash dumps",
+      "description": "Deleting dumps removes the corresponding diagnostic evidence.",
+      "roots": [
+        "%LocalAppData%\\CrashDumps",
+        "%Windows%\\Minidump"
+      ],
+      "minimumAgeHours": 168,
+      "include": [
+        "**/*.dmp",
+        "**/*.hdmp"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "windows-reports",
+      "name": "Windows error reports",
+      "description": "Only archived and queued error reports; inaccessible files are skipped.",
+      "roots": [
+        "%ProgramData%\\Microsoft\\Windows\\WER\\ReportArchive",
+        "%ProgramData%\\Microsoft\\Windows\\WER\\ReportQueue",
+        "%LocalAppData%\\Microsoft\\Windows\\WER\\ReportArchive"
+      ],
+      "minimumAgeHours": 168,
+      "risk": "Review"
+    }
+  ]
+}

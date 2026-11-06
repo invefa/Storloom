@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
+    <EmbeddedResource Include="Localization/Locales/*.json" />
+  </ItemGroup>
+</Project>

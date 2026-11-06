@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Storloom.Core/Storloom.Core.csproj" />
+    <Content Include="../../rules/builtin.json" Link="rules/builtin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
