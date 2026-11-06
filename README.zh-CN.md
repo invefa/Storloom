@@ -35,6 +35,8 @@
 
 Windows 上安装 .NET 10 SDK：
 
+也可以把隔离 SDK 放在被忽略的 `artifacts/toolchain/dotnet/` 中。`global.json` 先检查这个相对目录，再检查宿主所在位置的系统 SDK；该发现功能需要 .NET 10 或更新版本的宿主。这样 VS Code 和普通 `dotnet` 命令使用相同 SDK，无需在仓库中写入本机绝对路径。未提供隔离 SDK 时，正常安装的 .NET 10 SDK 仍可使用。
+
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release

@@ -41,6 +41,8 @@ Give an AI the [rule guide](docs/ai-rules.md) and [JSON Schema](rules/rules.sche
 
 Install a .NET 10 SDK on Windows. The pinned baseline rolls forward within the .NET 10 feature bands.
 
+An optional isolated SDK can live in ignored `artifacts/toolchain/dotnet/`. `global.json` checks this relative directory first, then the SDKs beside the invoking host (`$host$`). This discovery feature needs a .NET 10 or newer host. VS Code and ordinary `dotnet` commands can then use the same SDK without machine-specific paths in the repository. If no isolated SDK is present, a regular .NET 10 SDK installation works as usual.
+
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
