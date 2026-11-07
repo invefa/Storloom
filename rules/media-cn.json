@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "music-cache",
+      "name": "NetEase Cloud Music cache",
+      "description": "Only Cache/Cache; cached songs may need an Internet connection again.",
+      "roots": [
+        "%LocalAppData%\\Netease\\CloudMusic\\Cache\\Cache"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "cloudmusic"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "bilibili-cache",
+      "name": "Bilibili browser cache",
+      "description": "Only browser caches, not downloaded videos.",
+      "roots": [
+        "%AppData%\\bilibili\\Cache",
+        "%AppData%\\bilibili\\Code Cache",
+        "%AppData%\\bilibili\\GPUCache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "bilibili"
+      ],
+      "risk": "Low"
+    }
+  ]
+}

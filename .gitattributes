@@ -2,3 +2,4 @@
 *.png binary
 *.exe binary
 *.pdb binary
+*.ico binary

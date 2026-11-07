@@ -4,7 +4,8 @@ using System.Text.Json.Serialization;
 namespace Storloom.Core;
 
 public enum RiskLevel { Low, Review }
-public enum CleanupAction { Delete, Copy, Move }
+public enum CleanupAction { Delete, Copy, Move, Command }
+public enum CleanupTool { NuGetHttpCache, NpmCache, PipCache, UvPrune }
 
 public sealed record CleanupRule {
     public string Id { get; init; } = "";
@@ -13,6 +14,7 @@ public sealed record CleanupRule {
     public Dictionary<string, string> Names { get; init; } = [];
     public Dictionary<string, string> Descriptions { get; init; } = [];
     public CleanupAction Action { get; init; }
+    public CleanupTool? Tool { get; init; }
     public string? DestinationRoot { get; init; }
     public string[] Roots { get; init; } = [];
     public string[] Include { get; init; } = ["**"];
@@ -37,6 +39,8 @@ public sealed record CleanerSettings {
         .Where(d => d.IsReady && d.DriveType == DriveType.Fixed).Select(d => d.Name).ToArray();
     public string? BackupRoot { get; init; }
     public string[] ProtectedRoots { get; init; } = [];
+    public Dictionary<string, string> ToolPaths { get; init; } = [];
+    public int CommandTimeoutSeconds { get; init; } = 300;
     public int PlanLifetimeHours { get; init; } = 24;
     public int MaximumCandidates { get; init; } = 500_000;
 }
@@ -57,6 +61,7 @@ public sealed record CleanupPlan {
     public string CatalogHash { get; init; } = "";
     public string SettingsHash { get; init; } = "";
     public List<Candidate> Files { get; init; } = [];
+    public List<ToolCommandPlan> Commands { get; init; } = [];
     public List<ScanIssue> Issues { get; init; } = [];
 }
 

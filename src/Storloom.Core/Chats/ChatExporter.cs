@@ -26,14 +26,23 @@ public sealed class ChatExporter {
             "CopiedWithRetainedSources" or "CancelledAfterVerification") ||
             manifest.Receipts.Count != manifest.Plan.Files.Count)
             throw new InvalidDataException("The backup has not completed verification.");
+        var expected = manifest.Plan.Files.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var received = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in manifest.Receipts) {
             cancellation.ThrowIfCancellationRequested();
+            if (!received.Add(entry.RelativePath) || !expected.TryGetValue(entry.RelativePath, out var planned) ||
+                planned.Stamp.Bytes != entry.Bytes)
+                throw new InvalidDataException("Backup receipts do not match the planned files.");
             string path = TransferService.Child(manifest.Plan.Destination, entry.RelativePath);
             PathPolicy.AssertNoLinks(path);
             using var input = File.OpenRead(path);
-            if (input.Length != entry.Bytes || Convert.ToHexString(SHA256.HashData(input)) != entry.Sha256)
+            if (input.Length != entry.Bytes || Convert.ToHexString(TransferService.Hash(input, cancellation)) != entry.Sha256)
                 throw new InvalidDataException("The archived copy changed since verification.");
         }
+        foreach (string database in FindDatabases(manifest.Plan.Destination, platform))
+            foreach (string file in new[] { database, database + "-wal", database + "-shm" }.Where(File.Exists))
+                if (!received.Contains(Path.GetRelativePath(manifest.Plan.Destination, file)))
+                    throw new InvalidDataException("An unverified message database or WAL was added to the archive.");
         return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false);
     }
 

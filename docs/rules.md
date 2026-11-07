@@ -7,8 +7,9 @@ Catalogs are local JSON data with `version: 1` and a non-empty `rules` array. Un
 | `id` | Unique `^[a-z][a-z0-9-]{1,63}$` identifier |
 | `name`, `description` | Human-readable fallback text; name required |
 | `names`, `descriptions` | Optional dictionaries keyed by `en`, `zh-CN`, etc. |
-| `action` | `Delete` (default), `Copy`, or `Move` |
-| `roots` | Non-empty absolute root patterns; each root is checked independently |
+| `action` | `Delete` (default), `Copy`, `Move`, or `Command` |
+| `roots` | Non-empty absolute root patterns for file rules; empty for Command |
+| `tool` | Command recipe: `NuGetHttpCache`, `NpmCache`, `PipCache`, or `UvPrune` |
 | `destinationRoot` | Required for Copy/Move; new directory, never merged |
 | `include`, `exclude` | Relative file globs; includes default to `["**"]`, excludes to `[]` |
 | `processes` | Executable names without `.exe`; must be closed before execution |
@@ -44,9 +45,9 @@ Example: copy old logs from one application into a **new** backup directory:
 }
 ```
 
-`Copy`/`Move` rules transfer only the matched files and their relative paths. They are not complete-folder backups and do not include unmatched or empty directories. Use the dedicated transfer page or raw chat backup for complete folders. Scans skip read-only/system/hard-linked files and links; inspect diagnostics and rule matches before acting. Never use a partial selection as a claim of complete chat backup.
+`Copy`/`Move` rules transfer only the matched files and their relative paths. They are not complete-folder backups and do not include unmatched or empty directories. Use raw chat backup or the CLI full-folder transfer commands for complete folders. The GUI offers archive treatment inside Cleanup and archive. Scans skip read-only/system/hard-linked files and links; inspect diagnostics and rule matches before acting. Never use a partial selection as a claim of complete chat backup.
 
-GUI imports replace the local catalog in `data/rules.json`; add built-in rules to your new catalog first if you wish to retain them. Editing the file requires Reload. Changing the catalog/settings invalidates previously saved plans. Plans expire after 24 hours by default and are bound to the machine, user, and configuration. Copy/move execution uses a separate transfer plan with a fixed 24-hour lifetime.
+The GUI combines enabled sets from `rules/sets.json` with `data/rules.json` overrides by ID. Imports merge into local overrides; packaged rule files stay unchanged. Preferences controls the selected sets. Editing the file requires Reload. Changing the catalog/settings invalidates previously saved plans. Plans expire after 24 hours by default and are bound to the machine, user, and configuration. Copy/move execution uses a separate transfer plan with a fixed 24-hour lifetime.
 
 ## Local settings
 
@@ -67,3 +68,39 @@ The drive letters above are placeholders. `allowedDrives`/`protectedRoots` restr
 Deletion is permanent file-by-file deletion, not a recursive directory wipe. System directories, installed program directories, desktop/documents/downloads, credentials, repository internals, and broad roots are protected. Cache cleanup never assumes the entire application folder is disposable. File age, identity, metadata, link count, process status, and path boundaries are checked again before deletion. Permission failures are reported without taking ownership.
 
 中文：规则只描述数据匹配，不执行脚本。导入后先扫描，检查“动作、根目录、目标目录、候选文件、跳过原因”。`Move` 仅对命中的文件执行“复制、整体核验、再次检查、删除源文件”；完整聊天备份请使用聊天页的原始目录备份。`Low` 只影响界面默认勾选，不代表任何文件都可无条件删除。
+
+## Native tool recipes
+
+```json
+{
+  "version": 1,
+  "rules": [{
+    "id": "prune-unused-uv",
+    "name": "Prune unused uv cache",
+    "description": "May also remove shared project environments; review before execution.",
+    "action": "Command",
+    "tool": "UvPrune",
+    "roots": [],
+    "risk": "Review"
+  }]
+}
+```
+
+Command rules must have Review risk, no roots, and no destination. They select an application-owned fixed recipe, not a shell program or arbitrary argument list. Unknown fields such as script, executable, or arguments are rejected. The scan records executable SHA-256 and any required npm script hash, without running cleanup. The executor recreates the recipe and holds executable/script files read-only while starting the child. Output is drained with a 1,048,576-character retained limit. Nonzero exits, timeout, and cancellation are recorded distinctly. Tool changes already completed are not rolled back.
+
+| Recipe | Actual arguments |
+| --- | --- |
+| NuGetHttpCache | `dotnet nuget locals http-cache --clear` |
+| NpmCache | `node <installed npm-cli.js> cache clean --force` |
+| PipCache | `python -m pip cache purge` |
+| UvPrune | `uv cache prune` |
+
+These commands operate on each tool's configured cache as a whole, including configured relocated caches. Individual file exclusions and file age/size limits do not apply. uv prune can remove shared project environments. Use either a native recipe or a file rule for the same cache to avoid duplicate work. Private settings can supply `toolPaths` (dotnet/node/python/uv) and `commandTimeoutSeconds` (default 300, range 1..3600). The application never elevates or invokes a shell for these recipes.
+
+Official references: [NuGet](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-nuget-locals), [npm](https://docs.npmjs.com/cli/commands/npm-cache/), [pip](https://pip.pypa.io/en/stable/cli/pip_cache/), [uv](https://docs.astral.sh/uv/concepts/cache/).
+
+## Rule-set categories and local archive treatment
+
+The default selected sets are system, browsers, and development. Optional sets add desktop-apps, communication-cn, media-cn, and native-tools. `builtin.json` contains the system category, not every category. CLI defaults load the manifest defaults; `--catalog` loads exactly that file.
+
+A GUI archive treatment does not rewrite the rule definition. It creates a verified transfer plan from the same scanned, checked matches. Destinations are separated by rule ID, source-root hash, and a fresh run directory. It cannot convert a Command rule to a file archive. Scan plans save candidate matches; reselect and review treatment after loading a saved plan. File rule links remain blocked; explicitly name a verified physical cache leaf in local overrides instead of following a broad junction.

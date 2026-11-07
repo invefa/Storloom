@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "tool-nuget-http",
+      "name": "NuGet HTTP cache",
+      "description": "Use dotnet to clear NuGet HTTP cache. Installed packages remain.",
+      "action": "Command",
+      "tool": "NuGetHttpCache",
+      "risk": "Review",
+      "roots": [],
+      "names": {
+        "zh-CN": "NuGet HTTP 缓存"
+      },
+      "descriptions": {
+        "zh-CN": "使用 dotnet 自身清理 HTTP 缓存, 保留已还原的软件包"
+      }
+    },
+    {
+      "id": "tool-npm-cache",
+      "name": "npm download cache",
+      "description": "Use npm to clear its download cache.",
+      "action": "Command",
+      "tool": "NpmCache",
+      "risk": "Review",
+      "roots": [],
+      "names": {
+        "zh-CN": "npm 下载缓存"
+      },
+      "descriptions": {
+        "zh-CN": "使用 npm 自身清理下载缓存, 后续安装可能需要重新下载"
+      }
+    },
+    {
+      "id": "tool-pip-cache",
+      "name": "pip download cache",
+      "description": "Use pip to purge HTTP and wheel caches.",
+      "action": "Command",
+      "tool": "PipCache",
+      "risk": "Review",
+      "roots": [],
+      "names": {
+        "zh-CN": "pip 下载缓存"
+      },
+      "descriptions": {
+        "zh-CN": "使用 pip 自身清理 HTTP 和 wheel 缓存, 保留已安装的软件包"
+      }
+    },
+    {
+      "id": "tool-uv-prune",
+      "name": "uv unused cache",
+      "description": "Use uv to prune unused cache entries. Shared project environments may also be removed.",
+      "action": "Command",
+      "tool": "UvPrune",
+      "risk": "Review",
+      "roots": [],
+      "names": {
+        "zh-CN": "uv 过期缓存"
+      },
+      "descriptions": {
+        "zh-CN": "使用 uv prune 清理过期缓存, 可能移除共享项目环境, 再次使用时需要重建"
+      }
+    }
+  ]
+}

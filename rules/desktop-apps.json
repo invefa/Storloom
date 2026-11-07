@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "lghub-cache",
+      "name": "Logitech G HUB cache",
+      "description": "Only cache, not depots or device configuration.",
+      "roots": [
+        "%ProgramData%\\LGHUB\\cache"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "lghub",
+        "lghub_updater"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "steam-web-cache",
+      "name": "Steam web renderer caches",
+      "description": "Only renderer and shader cache directories. Keep Local Storage, Network, session data, and installed games.",
+      "names": {
+        "zh-CN": "Steam 网页渲染缓存"
+      },
+      "descriptions": {
+        "zh-CN": "仅清理网页渲染和着色器缓存, 保留登录状态, 本地存储和游戏"
+      },
+      "roots": [
+        "%LocalAppData%\\Steam\\htmlcache\\Cache",
+        "%LocalAppData%\\Steam\\htmlcache\\Code Cache",
+        "%LocalAppData%\\Steam\\htmlcache\\GPUCache",
+        "%LocalAppData%\\Steam\\htmlcache\\DawnCache",
+        "%LocalAppData%\\Steam\\htmlcache\\DawnGraphiteCache",
+        "%LocalAppData%\\Steam\\htmlcache\\DawnWebGPUCache",
+        "%LocalAppData%\\Steam\\htmlcache\\GraphiteDawnCache",
+        "%LocalAppData%\\Steam\\htmlcache\\GrShaderCache",
+        "%LocalAppData%\\Steam\\htmlcache\\ShaderCache",
+        "%LocalAppData%\\Steam\\htmlcache\\Default\\Cache",
+        "%LocalAppData%\\Steam\\htmlcache\\Default\\Code Cache",
+        "%LocalAppData%\\Steam\\htmlcache\\Default\\GPUCache"
+      ],
+      "processes": [
+        "steam",
+        "steamwebhelper"
+      ],
+      "minimumAgeHours": 168,
+      "risk": "Review"
+    }
+  ]
+}

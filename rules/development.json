@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "vscode-packages",
+      "name": "VS Code extension packages",
+      "description": "Keep installed extensions and settings; installers may be downloaded again.",
+      "roots": [
+        "%AppData%\\Code\\CachedExtensionVSIXs"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "Code"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "vscode-cache",
+      "name": "VS Code render and code cache",
+      "description": "Preserve User, Backups, sessions, and workspaces.",
+      "roots": [
+        "%AppData%\\Code\\Cache",
+        "%AppData%\\Code\\Code Cache",
+        "%AppData%\\Code\\GPUCache",
+        "%AppData%\\Code\\CachedData"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "Code"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "vscode-dumps",
+      "name": "VS Code crash dumps",
+      "description": "Deleting dumps removes evidence for the corresponding crashes.",
+      "roots": [
+        "%AppData%\\Code\\Crashpad"
+      ],
+      "minimumAgeHours": 72,
+      "processes": [
+        "Code"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "jetbrains-downloads",
+      "name": "JetBrains Toolbox downloads",
+      "description": "Future installations and updates may download these files again.",
+      "roots": [
+        "%LocalAppData%\\JetBrains\\Toolbox\\cache\\download"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "jetbrains-toolbox"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "jetbrains-backups",
+      "name": "JetBrains Toolbox previous versions",
+      "description": "Removes the ability to roll back instantly to these previous versions.",
+      "roots": [
+        "%LocalAppData%\\JetBrains\\Toolbox\\cache\\backup"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "jetbrains-toolbox",
+        "idea64",
+        "pycharm64",
+        "webstorm64",
+        "rider64"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "electron-updaters",
+      "name": "Electron updater installers",
+      "description": "Only EXE installers older than one day in *-updater directories; confirm the update has completed.",
+      "roots": [
+        "%LocalAppData%\\*-updater"
+      ],
+      "include": [
+        "installer.exe",
+        "pending/*.exe"
+      ],
+      "minimumAgeHours": 24,
+      "risk": "Review"
+    },
+    {
+      "id": "nuget-http",
+      "name": "NuGet HTTP cache",
+      "description": "Keep global packages; HTTP metadata may be downloaded again.",
+      "roots": [
+        "%LocalAppData%\\NuGet\\v3-cache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "dotnet",
+        "devenv"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "npm-cache",
+      "name": "npm download cache",
+      "description": "Only _cacache; skip relocated directory links.",
+      "roots": [
+        "%LocalAppData%\\npm-cache\\_cacache"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "npm",
+        "node"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "pip-cache",
+      "name": "pip download cache",
+      "description": "Keep environments; use uv itself to manage its cache.",
+      "roots": [
+        "%LocalAppData%\\pip\\Cache"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "pip",
+        "python"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "android-studio-cache",
+      "name": "Android Studio caches",
+      "description": "Only rebuildable IDE caches, indexes, logs, and temporary files. Keep LocalHistory, projects, and settings.",
+      "names": {
+        "zh-CN": "Android Studio 缓存"
+      },
+      "descriptions": {
+        "zh-CN": "仅清理可重建的缓存, 索引, 日志和临时文件, 保留本地历史和项目"
+      },
+      "roots": [
+        "%LocalAppData%\\Google\\AndroidStudio*\\caches",
+        "%LocalAppData%\\Google\\AndroidStudio*\\index",
+        "%LocalAppData%\\Google\\AndroidStudio*\\log",
+        "%LocalAppData%\\Google\\AndroidStudio*\\tmp",
+        "%LocalAppData%\\Google\\AndroidStudio*\\icon-cache",
+        "%LocalAppData%\\Google\\AndroidStudio*\\global-model-cache"
+      ],
+      "processes": [
+        "studio64",
+        "studio"
+      ],
+      "minimumAgeHours": 168,
+      "risk": "Review"
+    }
+  ]
+}

@@ -1,58 +1,53 @@
 # Storloom
 
-A Windows storage manager for understanding disk usage, reviewing cleanup rules, verifying transfers, and keeping local chat archives. Written in C# with a native WinForms interface; no Python runtime or cloud service is required.
+A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local QQ/WeChat archives. C# and WinForms, English and Simplified Chinese.
 
-[简体中文](README.zh-CN.md) · [Rule reference](docs/rules.md) · [AI rule guide](docs/ai-rules.md) · [Chat compatibility and research](docs/chat-exporters.md)
-
-## What it does
-
-- **Storage overview:** scan a mounted drive or folder, drill into directory sizes, inspect the 100 largest files, and review skipped paths.
-- **Rules and cleanup:** preview file matches, filter and uncheck individual candidates, save/load plans, and explicitly execute Delete, Copy, or Move rules. Includes 23 cache/log/package rules.
-- **Copy and move:** preview a new destination, copy all files and empty directories, verify SHA-256, and retain a manifest beside the archive. Move removes originals only after the complete destination is verified and each source/target pair is rechecked.
-- **Chat archives:** discover QQ/WeChat folders or select one manually; make a verified raw backup including media; export supported message databases to offline HTML and JSONL. Keys remain in memory. Export reports distinguish complete, incomplete, and cancelled work.
-- **Languages:** English and Simplified Chinese, selectable at runtime. Rule authors can supply translated names and descriptions. Low-level diagnostics and the CLI command interface use English or OS messages.
+[简体中文](README.zh-CN.md) · [Getting started](docs/quickstart.md) · [Rule reference](docs/rules.md) · [AI rule guide](docs/ai-rules.md) · [Chat compatibility](docs/chat-exporters.md)
 
 ## Run
 
-On 64-bit Windows 10/11, extract the Windows x64 package into a writable directory and run **Storloom.exe**. The package includes the .NET runtime. `cli/Storloom.Cli.exe --help` provides the command interface.
+Extract the Windows x64 package into a writable folder and run **Storloom.exe**. Windows 10/11 x64; the runtime is included. The application and chat exporters need no Python backend. `cli/Storloom.Cli.exe --help` lists CLI commands.
 
-1. Scan a folder in **Storage overview**. Sizes represent logical file lengths, not guaranteed reclaimable physical space; sparse, compressed, and hard-linked files can differ.
-2. In **Rules and cleanup**, scan and inspect both candidates and diagnostics. Review-risk rules start unchecked. Deletion bypasses the Recycle Bin.
-3. In **Copy and move**, use **Copy and verify** for the first backup. Choose a destination that does not exist; existing directories are never merged or overwritten.
-4. In **Chat archives**, choose a backup destination, discover/select the account, obtain a key if needed while logged in, then close the client and back up the raw account folder. Export the verified snapshot. Read the report and retain the raw backup even when readable export succeeds.
+- **Cleanup and archive:** choose rule sets, scan, inspect and check items, then review exact operations before executing. Every item starts unchecked. For a file cleanup item, choose the rule's action, archive while retaining originals, or archive then remove originals. Copy/move is part of the cleanup workflow; there is no separate GUI file mover.
+- **Storage analysis:** scan a mounted local drive/folder, drill into directory totals, inspect the largest 100 files, and read diagnostics. Sizes are logical lengths, not a promise of physical reclaimable bytes; hard links, compression, and sparse files can differ.
+- **Chat archives:** follow the account -> verified raw backup -> reading-copy steps. Raw backup needs no key and includes media. Supported databases export to JSONL and offline HTML with a completeness report. Previous verified backups are remembered privately.
 
-A backup copy alone does not release source space. A readable chat export does not authorize deleting the account folder. For a later deliberate move use the transfer page; clients may recreate their original folder, and Storloom does not create junctions or rewrite client storage settings. Readable export covers supported database records, not guaranteed playback or rendering of every media/message type.
+Language, backup/archive destinations, and enabled rule sets live in **Tools > Preferences**. **Help > Getting started** (F1) explains each workflow. About shows version, developer, and the repository. Lists use native double buffering and bulk updates; progress notifications are throttled.
 
-## Boundaries and local data
+## Rules and native cleanup
 
-Analysis is read-only. Rules never run shell commands. Cleanup protects system/application components, credentials, broad roots, and user document folders; locked applications, reparse points, changed file identities, hard links, and expired plans are refused or skipped. Default cleanup settings allow ready fixed drives, while built-in rules target known cache paths. Restrict `allowedDrives` and `protectedRoots` before using custom delete rules on backup disks.
+`rules/sets.json` lists independently selectable rule sets. Windows, browser, and developer-tool categories are enabled by default; desktop utilities, regional application categories, and native cleanup recipes are optional. The GUI combines enabled sets with private `data/rules.json` overrides by ID. Imports merge into local overrides; they do not erase packaged sets. CLI supports `--sets ID,ID` or an explicit `--catalog FILE`.
 
-Transfers reject overlapping roots, links, existing destinations, and protected move sources. They preserve file contents, last-write times, and empty directories, not NTFS ACLs, alternate streams, or a bootable system image. Interrupted staging directories and journals are retained for inspection; there is no automatic resume or merge. Empty source directories remain after moves. A manifest verifies bytes, not future client restorability; restore to a separate directory and test with the appropriate client version.
+AI can author data-only JSON using the [schema](rules/rules.schema.json) and [guide](docs/ai-rules.md). Import, scan, inspect actions and destinations, then confirm. There is no embedded AI service or automatic upload.
 
-Paths must be canonical absolute Windows drive paths. UNC paths are unsupported; a mapped drive can be selected explicitly for analysis/transfers. Windows system SQLite is used for read-only message queries. No elevation, scheduled cleanup, telemetry, or external AI API is configured by the application.
+`Command` rules select reviewed application-owned recipes: NuGet HTTP cache, npm cache, pip cache, and uv prune. Executable, fixed arguments, and SHA-256 are previewed and revalidated. No arbitrary shell, script, or custom argument execution is accepted. Native cleanup acts on the tool's whole configured cache; per-file age/size/exclusion filters do not apply. The optional pip recipe invokes the user's existing Python. uv prune can also remove shared project environments. See [getting started](docs/quickstart.md) for scope, timeout, and cancellation details.
 
-Preferences, custom rules/settings, scans, plans, and journals are created under executable-adjacent `data/`. They can contain private paths and account information. Backups and readable exports are also private, and readable messages are plaintext. These files are excluded from Git and release packaging. Release archives contain no user's settings or data. The optional signed-client login capture is version-dependent; see the compatibility document before using it.
+## Data boundaries
 
-## AI-authored rules
+Nothing is cleaned on startup. Deletion bypasses the Recycle Bin and validates age, identity, paths, processes, link count, and plan lifetime. System/application components, credentials, broad roots, and user document locations are protected. Default settings permit ready fixed drives; restrict `allowedDrives` and `protectedRoots` for backup/other-system volumes. Those settings restrict file Delete rules, not explicitly chosen transfers or a native tool's own cache scope.
 
-Give an AI the [rule guide](docs/ai-rules.md) and [JSON Schema](rules/rules.schema.json), describe the folders and desired operation, then import its JSON. Import only validates data; **scan, inspect the exact paths/actions/destinations, and confirm** before execution. Rules contain no executable code. AI integration is a local import workflow, not an embedded chat service.
+Unknown junctions/symlinks stay blocked. A relocated cache can be handled by private rules explicitly naming a verified physical cache leaf. Do not disable link checks globally or classify a whole app/profile/chat folder as cache.
 
-## Build and package
+Archive destinations must be new and non-overlapping. Selected files are copied and SHA-256 verified as a complete batch before any Move removes originals; each source/target pair is checked again before removal. Existing folders are not merged. File content, modification times, and empty directories (for full-folder backups) are preserved, not ACLs/alternate streams or a bootable system image. Interrupted partial directories and journals remain; automatic resume/merge is not implemented. Empty source directories remain after moves.
 
-Install a .NET 10 SDK on Windows. The pinned baseline rolls forward within the .NET 10 feature bands.
+Chat backup/export never removes originals, creates junctions, or rewrites client storage settings. Readable export does not replace the raw archive or guarantee all contact names/media playback/client versions. Inspect incomplete reports and test restore separately with an appropriate client version. Keys stay in memory; process crashes can leave decrypted `.work-*` files in the chosen export folder. The optional WeChat login capture runs in an isolated signed-client worker; see [compatibility](docs/chat-exporters.md).
 
-An optional isolated SDK can live in ignored `artifacts/toolchain/dotnet/`. `global.json` checks this relative directory first, then the SDKs beside the invoking host (`$host$`). This discovery feature needs a .NET 10 or newer host. VS Code and ordinary `dotnet` commands can then use the same SDK without machine-specific paths in the repository. If no isolated SDK is present, a regular .NET 10 SDK installation works as usual.
+Paths must be canonical absolute drive paths. UNC is unsupported; mapped drives can be explicitly selected for analysis/transfers. No automatic elevation, scheduled cleanup, telemetry, or cloud AI is configured. Windows system SQLite provides read-only message queries.
+
+Preferences, rule overrides, settings, scans, plans, error records, and journals live in executable-adjacent `data/` (or an explicit `Storloom.exe --data-dir DIRECTORY`). They can contain private paths. Backups/exports are also private and reading copies are plaintext. These files are excluded from Git and release packaging. Public product attribution is intentional; workstation paths/account records are not distributed.
+
+## Build
+
+Install .NET 10 SDK on Windows. The baseline rolls forward within .NET 10 feature bands. An optional ignored SDK in `artifacts/toolchain/dotnet/` is discovered through relative `global.json` paths; this feature requires a .NET 10+ host. With no isolated SDK, the system installation is the fallback.
 
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.2.0
+./scripts/Publish.ps1 -Version 0.3.0
 ```
 
-Packaging publishes self-contained x64 binaries into a fresh ignored directory, copies an allowlist of public documentation/rules/licenses, and writes a ZIP plus SHA-256. No local configuration is copied. The Windows CI workflow builds/tests on pushes and PRs; the release workflow builds an artifact on manual dispatch or a version tag. It does not publish a GitHub release automatically.
+The package script copies only public binaries, rules, documentation, and notices into a fresh directory, audits local identity paths, and emits ZIP/SHA-256. It never copies `data/` or test fixtures. CI builds/tests on Windows; the packaging workflow creates artifacts without publishing a GitHub Release. The icon source is SVG; `scripts/Build-Icon.ps1` regenerates the multi-size Windows ICO.
 
-Tests cover cleanup boundaries/identity, copy/move verification and cancellation, encrypted pages and committed WAL frames, synthetic QQ/WeChat exports, HTML escaping, duplicate preservation, locale parity, and rendering all four pages in both languages. Real client versions, login capture, media playback, and account restorability are **not certified by fixture tests**.
+Tests cover identity/boundary guards, copy/move/archive verification, native-recipe tampering/output/cancellation/timeout using a separate test executable, synthetic encrypted chat/WAL data, a complete verified-backup GUI export, locale parity, and bilingual page/dialog rendering. Fixture tests do not certify every real client version, login capture, or restorability.
 
-## License
-
-MIT. The adapted WeChat native capture component and ZstdSharp dependency retain their own notices in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). .NET runtime notices accompany self-contained packages. QQ/WeChat names belong to their respective owners; this project is independent.
+MIT. See [third-party notices](THIRD-PARTY-NOTICES.md) for the adapted WeChat capture component and ZstdSharp. Exact .NET runtime license/notice files accompany self-contained packages.

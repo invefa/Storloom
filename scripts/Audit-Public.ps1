@@ -12,11 +12,32 @@ foreach ($path in $paths) {
         $path -match '\.(db|db-wal|db-shm|key|pem|pfx|jsonl|log|trx|zip|exe|dll|pdb)$') {
         $failures.Add("Forbidden indexed file: $path"); continue
     }
-    $lines = & git -C $repo show ":$path"
-    if ($LASTEXITCODE -ne 0) { throw "Cannot inspect indexed content: $path" }
+    if ($path -eq 'src/Storloom.App/Assets/storloom.ico') {
+        $start = [Diagnostics.ProcessStartInfo]::new('git')
+        $start.WorkingDirectory = $repo; $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+        $start.RedirectStandardOutput = $true
+        $start.ArgumentList.Add('show'); $start.ArgumentList.Add(":$path")
+        $process = [Diagnostics.Process]::Start($start); $buffer = [IO.MemoryStream]::new()
+        try {
+            $process.StandardOutput.BaseStream.CopyTo($buffer); $process.WaitForExit()
+            if ($process.ExitCode -ne 0) { throw 'Cannot inspect indexed icon.' }
+            $content = [Text.Encoding]::UTF8.GetString($buffer.ToArray()) + [Text.Encoding]::Unicode.GetString($buffer.ToArray())
+            $lines = @($content)
+            $readExit = 0
+        } finally { $buffer.Dispose(); $process.Dispose() }
+    } else { $lines = & git -C $repo show ":$path"; $readExit = $LASTEXITCODE }
+    if ($readExit -ne 0) { throw "Cannot inspect indexed content: $path" }
     $content = $lines -join "`n"
     foreach ($marker in $markers) {
-        if ($content.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        $inspect = $content
+        # Public product attribution is intentional; full private paths are still checked unchanged.
+        if ($path -eq 'src/Storloom.App/ProductInfo.cs' -and $marker -eq $env:USERNAME) {
+            $inspect = ($lines | Where-Object {
+                $_ -notmatch '^\s*public const string Developer = "[a-zA-Z0-9_-]+";$' -and
+                $_ -notmatch '^\s*public const string Repository = "https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+";$'
+            }) -join "`n"
+        }
+        if ($inspect.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
             $failures.Add("Local identity/path in: $path"); break
         }
     }

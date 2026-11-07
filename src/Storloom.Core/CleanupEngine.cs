@@ -52,6 +52,11 @@ public sealed class CleanupEngine {
             string[] running = RunningProcesses(rule);
             if (running.Length > 0) plan.Issues.Add(new(rule.Id, "",
                 "Close running applications before cleanup: " + string.Join(", ", running)));
+            if (rule.Action == CleanupAction.Command) {
+                try { plan.Commands.Add(ToolCleanupService.Plan(rule, Settings)); }
+                catch (Exception ex) when (Recoverable(ex)) { AddIssue(plan, rule.Id, "", ex.Message); }
+                continue;
+            }
             foreach (string pattern in rule.Roots) {
                 cancellation.ThrowIfCancellationRequested();
                 try {
@@ -212,7 +217,7 @@ public sealed class CleanupEngine {
             (filePaths == null || filePaths.Contains(f.Path))).GroupBy(f => (f.RuleId, f.Root))) {
             var matcher = matchers[group.Key.RuleId];
             var rule = matcher.Rule;
-            if (rule.Action == CleanupAction.Delete) throw new InvalidDataException("Select copy/move rules.");
+            if (rule.Action is not (CleanupAction.Copy or CleanupAction.Move)) throw new InvalidDataException("Select copy/move rules.");
             var roots = rule.Roots.SelectMany(p => resolver.Resolve(p, false))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!roots.Contains(group.Key.Root)) throw new InvalidDataException("Transfer root no longer matches its rule.");
@@ -225,11 +230,64 @@ public sealed class CleanupEngine {
             }
             string target = resolver.Expand(rule.DestinationRoot!).Replace("{RootName}",
                 Path.GetFileName(group.Key.Root), StringComparison.Ordinal);
-            result.Add(new() { Source = group.Key.Root, Destination = PathPolicy.Normalize(target),
-                Mode = rule.Action == CleanupAction.Copy ? TransferMode.Copy : TransferMode.Move,
+            var mode = rule.Action == CleanupAction.Copy ? TransferMode.Copy : TransferMode.Move;
+            TransferService.ValidateBoundaries(group.Key.Root, target, mode);
+            result.Add(new() { Source = group.Key.Root, Destination = PathPolicy.Normalize(target), Mode = mode,
                 Processes = rule.Processes, Files = files });
         }
         return result;
+    }
+
+    public List<TransferPlan> CreateArchivePlans(CleanupPlan plan, IEnumerable<string> ruleIds,
+        string destinationRoot, TransferMode mode, ISet<string>? filePaths = null) {
+        ValidatePlan(plan);
+        destinationRoot = PathPolicy.Normalize(destinationRoot);
+        var selected = SelectRules(ruleIds, true);
+        if (selected.Any(id => matchers[id].Rule.Action == CleanupAction.Command))
+            throw new InvalidDataException("Tool cleanup cannot be converted into a file archive.");
+        var result = new List<TransferPlan>();
+        foreach (var group in plan.Files.Where(f => selected.Contains(f.RuleId) &&
+            (filePaths == null || filePaths.Contains(f.Path))).GroupBy(f => (f.RuleId, f.Root))) {
+            var matcher = matchers[group.Key.RuleId];
+            var rule = matcher.Rule;
+            var roots = rule.Roots.SelectMany(p => resolver.Resolve(p, rule.Action == CleanupAction.Delete))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!roots.Contains(group.Key.Root)) throw new InvalidDataException("Archive root no longer matches its rule.");
+            var files = new List<TransferFile>();
+            foreach (var file in group) {
+                if (rule.Action == CleanupAction.Delete) policy.ValidateFile(file.Path);
+                if (!PathPolicy.Under(file.Path, file.Root) || !matcher.Matches(
+                    Path.GetRelativePath(file.Root, file.Path), file.Stamp, plan.CreatedAt))
+                    throw new InvalidDataException("Archive candidate no longer matches its rule.");
+                files.Add(new(Path.GetRelativePath(file.Root, file.Path), file.Stamp));
+            }
+            string target = Path.Combine(destinationRoot, rule.Id, Path.GetFileName(group.Key.Root) + "-" +
+                JsonFiles.Hash(group.Key.Root)[..8], DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
+            TransferService.ValidateBoundaries(group.Key.Root, target, mode);
+            result.Add(new() { Source = group.Key.Root, Destination = target, Mode = mode,
+                Processes = rule.Processes, Files = files });
+        }
+        return result;
+    }
+
+    public async Task<List<ToolCommandResult>> ApplyCommands(CleanupPlan plan, IEnumerable<string> ruleIds,
+        string journalDirectory, CancellationToken cancellation = default) {
+        ValidatePlan(plan);
+        var selected = SelectRules(ruleIds, true);
+        if (selected.Any(id => matchers[id].Rule.Action != CleanupAction.Command))
+            throw new InvalidDataException("Select only command rules for the tool executor.");
+        var commands = plan.Commands.Where(c => selected.Contains(c.RuleId)).ToArray();
+        if (commands.Length != selected.Count || commands.Select(c => c.RuleId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != selected.Count)
+            throw new InvalidDataException("Missing or duplicate tool plans. Scan again.");
+        foreach (var command in commands) ToolCleanupService.Validate(command, matchers[command.RuleId].Rule, Settings);
+        var results = new List<ToolCommandResult>();
+        foreach (var command in commands) {
+            cancellation.ThrowIfCancellationRequested();
+            var result = await ToolCleanupService.Execute(command, matchers[command.RuleId].Rule, Settings, journalDirectory, cancellation);
+            results.Add(result);
+            if (result.Cancelled || result.TimedOut || result.ExitCode != 0) break;
+        }
+        return results;
     }
 
     private HashSet<string> SelectRules(IEnumerable<string>? ids, bool explicitRequired) {

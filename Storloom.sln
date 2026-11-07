@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Storloom.Tests", "tests\Sto
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Storloom.App.Tests", "tests\Storloom.App.Tests\Storloom.App.Tests.csproj", "{BDB769EE-D6B5-46B0-BA7B-E82865411C6F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Storloom.ToolFixture", "tests\Storloom.ToolFixture\Storloom.ToolFixture.csproj", "{99A4768E-9576-423D-AA3C-7DA49B811F75}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -25,9 +27,6 @@ Global
 		Release|Any CPU = Release|Any CPU
 		Release|x64 = Release|x64
 		Release|x86 = Release|x86
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{59D5FC26-8C2B-45F0-9566-277B89E47BB8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -90,6 +89,21 @@ Global
 		{BDB769EE-D6B5-46B0-BA7B-E82865411C6F}.Release|x64.Build.0 = Release|Any CPU
 		{BDB769EE-D6B5-46B0-BA7B-E82865411C6F}.Release|x86.ActiveCfg = Release|Any CPU
 		{BDB769EE-D6B5-46B0-BA7B-E82865411C6F}.Release|x86.Build.0 = Release|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Debug|x64.Build.0 = Debug|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Debug|x86.Build.0 = Debug|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Release|Any CPU.Build.0 = Release|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Release|x64.ActiveCfg = Release|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Release|x64.Build.0 = Release|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Release|x86.ActiveCfg = Release|Any CPU
+		{99A4768E-9576-423D-AA3C-7DA49B811F75}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{59D5FC26-8C2B-45F0-9566-277B89E47BB8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
@@ -97,5 +111,6 @@ Global
 		{880042DB-AF91-48E4-A8AE-9316C8907288} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{EC7A3408-6640-4FA3-8DB5-EFDF299817FD} = {D1D21C77-BD84-45C6-8825-A89AF609DDED}
 		{BDB769EE-D6B5-46B0-BA7B-E82865411C6F} = {D1D21C77-BD84-45C6-8825-A89AF609DDED}
+		{99A4768E-9576-423D-AA3C-7DA49B811F75} = {D1D21C77-BD84-45C6-8825-A89AF609DDED}
 	EndGlobalSection
 EndGlobal

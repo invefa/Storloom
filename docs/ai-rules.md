@@ -16,7 +16,7 @@ My requested operation and folders:
 ## Review workflow
 
 1. Validate the output against [the schema](../rules/rules.schema.json) in an editor.
-2. Import it from Rules and cleanup. Imports replace the private catalog; combine with existing rules beforehand if needed.
+2. Import it from Rules and cleanup. Imports merge by ID into private overrides; enabled packaged sets remain available.
 3. Scan. Read the paths, action, retention, process restrictions, diagnostics, and Copy/Move destinations. Uncheck anything uncertain.
 4. Confirm the concrete plan. Keep journals/backup manifests private. A new scan is required after configuration changes or expiration.
 
@@ -29,3 +29,9 @@ AI output does not grant permission to delete. The UI confirmation and engine ch
 我的需求：[填写目录、清理或归档范围、必须保留内容、时间/大小条件和目标目录。]
 
 生成后仍须在本机导入、扫描、审核候选与目标，最后确认执行。只向 AI 提供愿意披露的目录和元数据，无需发送聊天正文或密钥。
+
+## Native cleanup instead of file deletion
+
+If the user wants the producing tool to manage its cache, use action `Command`, risk `Review`, roots `[]`, and one supported tool enum: NuGetHttpCache, NpmCache, PipCache, or UvPrune. Explain the whole-cache scope and the uv shared-environment effect. Do not invent executable/script/arguments fields or embed shell commands. The app owns fixed recipes and the user reviews the actual resolved command. For custom tools outside this list, request a reviewed provider addition rather than disguising arbitrary code as a cleanup rule.
+
+中文: 需要原软件清理缓存时, 使用 Command 和已支持的 tool 类型, 设置 risk=Review, roots=[], 不填写目标目录或任意脚本参数。说明整缓存范围以及 uv prune 可能移除共享项目环境。清理前用户仍需审核实际程序和命令。

@@ -2,6 +2,6 @@
   <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Storloom.Core/Storloom.Core.csproj" />
-    <Content Include="../../rules/builtin.json" Link="rules/builtin.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../rules/*.json" Link="rules/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

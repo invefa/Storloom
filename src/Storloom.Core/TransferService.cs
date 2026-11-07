@@ -222,7 +222,7 @@ public sealed class TransferService {
         return hash.GetHashAndReset();
     }
 
-    private static void ValidateBoundaries(string source, string destination, TransferMode mode) {
+    internal static void ValidateBoundaries(string source, string destination, TransferMode mode) {
         source = PathPolicy.Normalize(source);
         destination = PathPolicy.Normalize(destination);
         if (source.Length <= 3 || source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||

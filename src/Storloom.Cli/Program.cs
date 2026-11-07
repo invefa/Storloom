@@ -20,7 +20,7 @@ try {
             chat-discover [--root FOLDER]
             chat-export --platform QQ|WeChat (--root ACCOUNT | --backup MANIFEST.json)
                         --destination NEW_FOLDER [--key-file PRIVATE_FILE]
-            Common options: --language en|zh-CN, --journal FOLDER.
+            Common options: --language en|zh-CN, --journal FOLDER, --sets ID,ID.
             No key text is accepted in command-line arguments. Chat export never deletes its source.
             """);
         return 0;
@@ -28,7 +28,7 @@ try {
     var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     string[] flags = ["--yes", "--dry-run", "--allow-review"];
     string[] values = ["--catalog", "--settings", "--rules", "--out", "--plan", "--journal", "--root",
-        "--source", "--destination", "--mode", "--platform", "--key-file", "--backup", "--language"];
+        "--source", "--destination", "--mode", "--platform", "--key-file", "--backup", "--language", "--sets"];
     for (int i = 1; i < args.Length; i++) {
         string key = args[i];
         if (flags.Contains(key)) options.Add(key, "true");
@@ -80,7 +80,8 @@ try {
             Print(result); return result.Complete ? 0 : 2;
         } finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
     }
-    var catalog = JsonFiles.Read<RuleCatalog>(Option("--catalog") ?? Path.Combine(AppContext.BaseDirectory, "rules", "builtin.json"));
+    var catalog = Option("--catalog") is string catalogFile ? JsonFiles.Read<RuleCatalog>(catalogFile) :
+        RuleSets.Load(Path.Combine(AppContext.BaseDirectory, "rules"), Option("--sets")?.Split(',', StringSplitOptions.RemoveEmptyEntries));
     var settings = Option("--settings") is string settingsPath ? JsonFiles.Read<CleanerSettings>(settingsPath) : new();
     var engine = new CleanupEngine(catalog, settings);
     string[]? selected = Option("--rules")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -91,6 +92,7 @@ try {
         var plan = engine.Scan(selected, cancellation: cancellation.Token); JsonFiles.Write(output, plan);
         foreach (var group in plan.Files.GroupBy(f => f.RuleId))
             Console.WriteLine($"{group.Key,-24} {group.Count(),7} files  {group.Sum(f => f.Stamp.Bytes) / 1073741824d,8:F3} GiB");
+        foreach (var command in plan.Commands) Print(command);
         Console.WriteLine($"Plan: {Path.GetFullPath(output)}\nIssues: {plan.Issues.Count}\nNo files deleted.");
     } else if (args[0] == "apply") {
         if (selected == null || selected.Length == 0) throw new ArgumentException("--rules is required.");
@@ -104,7 +106,8 @@ try {
         if (ids.Any(id => !catalog.Rules.Any(r => r.Id.Equals(id, StringComparison.OrdinalIgnoreCase))))
             throw new ArgumentException("Unknown rule ID.");
         string[] deletes = catalog.Rules.Where(r => ids.Contains(r.Id) && r.Action == CleanupAction.Delete).Select(r => r.Id).ToArray();
-        string[] transfers = ids.Except(deletes, StringComparer.OrdinalIgnoreCase).ToArray();
+        string[] commands = catalog.Rules.Where(r => ids.Contains(r.Id) && r.Action == CleanupAction.Command).Select(r => r.Id).ToArray();
+        string[] transfers = ids.Except(deletes.Concat(commands), StringComparer.OrdinalIgnoreCase).ToArray();
         var transferPlans = transfers.Length == 0 ? [] : engine.CreateTransferPlans(plan, transfers);
         int exit = 0;
         foreach (var transfer in transferPlans) {
@@ -113,6 +116,13 @@ try {
                 var result = new TransferService().Execute(transfer, journal, cancellation: cancellation.Token); Print(result);
                 if (result.Cancelled) return 130;
                 if (result.Issues.Count > 0) exit = 2;
+            }
+        }
+        if (commands.Length > 0) {
+            if (dryRun) Print(plan.Commands.Where(c => commands.Contains(c.RuleId)));
+            else foreach (var result in await engine.ApplyCommands(plan, commands, journal, cancellation.Token)) {
+                Print(result); if (result.Cancelled) return 130;
+                if (result.ExitCode != 0 || result.TimedOut) return 2;
             }
         }
         if (deletes.Length > 0) {

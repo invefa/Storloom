@@ -59,12 +59,15 @@ public sealed class RuleMatcher {
     public RuleMatcher(CleanupRule rule) {
         Rule = rule;
         if (!Regex.IsMatch(rule.Id, "^[a-z][a-z0-9-]{1,63}$") ||
-            string.IsNullOrWhiteSpace(rule.Name) || rule.Roots.Length == 0 ||
+            string.IsNullOrWhiteSpace(rule.Name) || (rule.Action != CleanupAction.Command && rule.Roots.Length == 0) ||
             rule.Include.Length == 0 || !double.IsFinite(rule.MinimumAgeHours) ||
             rule.MinimumAgeHours is < 0 or > 876000 || rule.MinimumBytes < 0 ||
             rule.MaximumBytes < rule.MinimumBytes || !Enum.IsDefined(rule.Risk) ||
-            !Enum.IsDefined(rule.Action) || (rule.Action != CleanupAction.Delete &&
-                string.IsNullOrWhiteSpace(rule.DestinationRoot))) {
+            !Enum.IsDefined(rule.Action) || (rule.Action is CleanupAction.Copy or CleanupAction.Move &&
+                string.IsNullOrWhiteSpace(rule.DestinationRoot)) ||
+            (rule.Action == CleanupAction.Command && (rule.Tool == null || !Enum.IsDefined(rule.Tool.Value) ||
+                rule.Roots.Length != 0 || rule.DestinationRoot != null || rule.Risk != RiskLevel.Review)) ||
+            (rule.Action != CleanupAction.Command && rule.Tool != null)) {
             throw new InvalidDataException($"Invalid rule: {rule.Id}");
         }
         includes = rule.Include.Select(Glob.Compile).ToArray();

@@ -165,6 +165,20 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Fact]
+    public void VerifiedExportRejectsDatabasesAddedAfterTheBackup() {
+        string source = Dir("account");
+        CreateDatabase(Path.Combine(source,"nt_msg.db"), "CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");");
+        var service = new TransferService(); var backup = service.Execute(service.Plan(source,
+            Path.Combine(root,"backup")),Dir("journals"));
+        string extra = Path.Combine(backup.Destination,"added"); Directory.CreateDirectory(extra);
+        File.Copy(Path.Combine(source,"nt_msg.db"),Path.Combine(extra,"nt_msg.db"));
+        Assert.Throws<InvalidDataException>(() => new ChatExporter().ExportVerifiedBackup(backup.Manifest,
+            Path.Combine(root,"export"),ChatPlatform.QQ));
+        Assert.False(Directory.Exists(Path.Combine(root,"export")));
+        Assert.True(File.Exists(Path.Combine(source,"nt_msg.db")));
+    }
+
+    [Fact]
     public void EncryptedWechatDatabaseExportsWithoutPython() {
         string source = Dir("account"); string plain = Path.Combine(root, "plain.db");
         CreateDatabase(plain, "CREATE TABLE Name2Id(user_name TEXT);INSERT INTO Name2Id VALUES('fixture-sender');" +

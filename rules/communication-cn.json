@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "yy-logs",
+      "name": "YY old logs",
+      "description": "Only the log directory; preserve accounts and business data.",
+      "roots": [
+        "%AppData%\\duowan\\yy\\log"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "YY",
+        "YYClient"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "yy-cache",
+      "name": "YY resource cache",
+      "description": "Only the cache directory; resources may be downloaded again.",
+      "roots": [
+        "%AppData%\\duowan\\yy\\cache"
+      ],
+      "minimumAgeHours": 0,
+      "processes": [
+        "YY",
+        "YYClient"
+      ],
+      "risk": "Review"
+    },
+    {
+      "id": "wechat-logs",
+      "name": "WeChat old logs",
+      "description": "Preserve chat databases, pictures, and attachments.",
+      "roots": [
+        "%AppData%\\Tencent\\xwechat\\log",
+        "%AppData%\\Tencent\\WeChat\\log"
+      ],
+      "minimumAgeHours": 168,
+      "processes": [
+        "Weixin",
+        "WeChat"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "qq-web-cache",
+      "name": "QQ web renderer cache",
+      "description": "Only named web renderer cache directories, not account databases or attachments.",
+      "names": {
+        "zh-CN": "QQ 网页渲染缓存"
+      },
+      "descriptions": {
+        "zh-CN": "仅清理明确的网页渲染缓存, 保留聊天数据库和附件"
+      },
+      "roots": [
+        "%AppData%\\Tencent\\QQ\\webkit_cache\\Cache",
+        "%AppData%\\Tencent\\QQ\\webkit_cache\\Code Cache",
+        "%AppData%\\Tencent\\QQ\\webkit_cache\\GPUCache",
+        "%AppData%\\QQ\\Cache",
+        "%AppData%\\QQ\\Code Cache",
+        "%AppData%\\QQ\\GPUCache"
+      ],
+      "processes": [
+        "QQ"
+      ],
+      "minimumAgeHours": 168,
+      "risk": "Review"
+    }
+  ]
+}

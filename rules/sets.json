@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "sets": [
+    {
+      "id": "system",
+      "file": "builtin.json",
+      "name": "Windows",
+      "description": "Temporary files, shader cache, and diagnostics",
+      "names": {
+        "zh-CN": "Windows"
+      },
+      "descriptions": {
+        "zh-CN": "临时文件, 着色器缓存和诊断文件"
+      },
+      "defaultEnabled": true
+    },
+    {
+      "id": "browsers",
+      "file": "browsers.json",
+      "name": "Browsers",
+      "description": "Edge, Chrome, and Firefox cache",
+      "names": {
+        "zh-CN": "浏览器"
+      },
+      "descriptions": {
+        "zh-CN": "Edge, Chrome 和 Firefox 缓存"
+      },
+      "defaultEnabled": true
+    },
+    {
+      "id": "development",
+      "file": "development.json",
+      "name": "Developer tools",
+      "description": "VS Code, JetBrains, and package caches",
+      "names": {
+        "zh-CN": "开发工具"
+      },
+      "descriptions": {
+        "zh-CN": "VS Code, JetBrains 和包管理器缓存"
+      },
+      "defaultEnabled": true
+    },
+    {
+      "id": "desktop-apps",
+      "file": "desktop-apps.json",
+      "name": "Desktop utilities",
+      "description": "Device utilities and additional desktop applications",
+      "names": {
+        "zh-CN": "桌面工具"
+      },
+      "descriptions": {
+        "zh-CN": "设备管理等桌面工具"
+      },
+      "defaultEnabled": false
+    },
+    {
+      "id": "communication-cn",
+      "file": "communication-cn.json",
+      "name": "Regional communication apps",
+      "description": "Optional QQ, WeChat, and YY cache/log rules",
+      "names": {
+        "zh-CN": "国内通信软件"
+      },
+      "descriptions": {
+        "zh-CN": "QQ, 微信和 YY 的缓存及日志规则"
+      },
+      "defaultEnabled": false
+    },
+    {
+      "id": "media-cn",
+      "file": "media-cn.json",
+      "name": "Regional media apps",
+      "description": "Optional NetEase Cloud Music and Bilibili caches",
+      "names": {
+        "zh-CN": "国内媒体软件"
+      },
+      "descriptions": {
+        "zh-CN": "网易云音乐和哔哩哔哩的缓存规则"
+      },
+      "defaultEnabled": false
+    },
+    {
+      "id": "native-tools",
+      "file": "native-tools.json",
+      "name": "Application cleanup commands",
+      "description": "Reviewed cleanup recipes run by the original tool",
+      "names": {
+        "zh-CN": "软件自带清理"
+      },
+      "descriptions": {
+        "zh-CN": "调用原软件清理, 执行前显示具体命令"
+      },
+      "defaultEnabled": false
+    }
+  ]
+}

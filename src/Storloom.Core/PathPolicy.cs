@@ -9,7 +9,8 @@ public sealed class PathPolicy {
     public PathPolicy(CleanerSettings settings) {
         this.settings = settings;
         if (settings.PlanLifetimeHours is < 1 or > 168 || settings.MaximumCandidates < 1 ||
-            settings.AllowedDrives.Length == 0) throw new InvalidDataException("Invalid settings.");
+            settings.AllowedDrives.Length == 0 || settings.CommandTimeoutSeconds is < 1 or > 3600)
+            throw new InvalidDataException("Invalid settings.");
         forbidden = new[] {
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
@@ -30,7 +31,9 @@ public sealed class PathPolicy {
     }
 
     public static string Normalize(string path) {
-        if (string.IsNullOrWhiteSpace(path) || path.Length < 3 ||
+        if (string.IsNullOrWhiteSpace(path)) throw new InvalidDataException("A local absolute path is required.");
+        path = path.Replace('/', '\\');
+        if (path.Length < 3 ||
             !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] != '\\' ||
             path.AsSpan(2).Contains(':') || path.StartsWith(@"\\") ||
             path.Split('\\').Any(s => s.EndsWith(' ') || s.EndsWith('.'))) {

@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "edge-cache",
+      "name": "Edge browser cache",
+      "description": "Preserve cookies, passwords, history, and site storage.",
+      "roots": [
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\Code Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\GPUCache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Profile *\\Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Profile *\\Code Cache",
+        "%LocalAppData%\\Microsoft\\Edge\\User Data\\Profile *\\GPUCache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "msedge"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "chrome-cache",
+      "name": "Chrome browser cache",
+      "description": "Skip relocated junctions; preserve personal profile data.",
+      "roots": [
+        "%LocalAppData%\\Google\\Chrome\\User Data\\Default\\Cache",
+        "%LocalAppData%\\Google\\Chrome\\User Data\\Default\\Code Cache",
+        "%LocalAppData%\\Google\\Chrome\\User Data\\Profile *\\Cache"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "chrome"
+      ],
+      "risk": "Low"
+    },
+    {
+      "id": "firefox-cache",
+      "name": "Firefox browser cache",
+      "description": "Only cache2 under local profile directories.",
+      "roots": [
+        "%LocalAppData%\\Mozilla\\Firefox\\Profiles\\*\\cache2"
+      ],
+      "minimumAgeHours": 24,
+      "processes": [
+        "firefox"
+      ],
+      "risk": "Low"
+    }
+  ]
+}

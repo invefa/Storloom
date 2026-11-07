@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '0.2.0',
+    [string] $Version = '0.3.0',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -43,8 +43,9 @@ foreach ($file in @('README.md', 'README.zh-CN.md', 'LICENSE', 'THIRD-PARTY-NOTI
 foreach ($folder in @('rules', 'docs')) {
     $target = Join-Path $package $folder
     New-Item -ItemType Directory -Path $target -Force | Out-Null
-    $files = if ($folder -eq 'rules') { @('builtin.json', 'rules.schema.json') } else {
-        @('rules.md', 'ai-rules.md', 'chat-exporters.md')
+    $files = if ($folder -eq 'rules') { @('builtin.json', 'browsers.json', 'development.json', 'desktop-apps.json',
+        'communication-cn.json', 'media-cn.json', 'native-tools.json', 'sets.json', 'rules.schema.json') } else {
+        @('rules.md', 'ai-rules.md', 'chat-exporters.md', 'quickstart.md', 'quickstart.zh-CN.md')
     }
     foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $repo "$folder/$file") -Destination $target -Force }
 }
