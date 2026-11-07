@@ -19,14 +19,14 @@ try {
             transfer-apply --plan PLAN.json --yes [--journal FOLDER]
             chat-discover [--root FOLDER]
             chat-export --platform QQ|WeChat (--root ACCOUNT | --backup MANIFEST.json)
-                        --destination NEW_FOLDER [--key-file PRIVATE_FILE] [--workers 1|2|4]
+                        --destination NEW_FOLDER [--key-file PRIVATE_FILE] [--workers 1|2|4] [--local-image-keys]
             Common options: --language en|zh-CN, --journal FOLDER, --sets ID,ID.
             No key text is accepted in command-line arguments. Chat export never deletes its source.
             """);
         return 0;
     }
     var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    string[] flags = ["--yes", "--dry-run", "--allow-review"];
+    string[] flags = ["--yes", "--dry-run", "--allow-review", "--local-image-keys"];
     string[] values = ["--catalog", "--settings", "--rules", "--out", "--plan", "--journal", "--root",
         "--source", "--destination", "--mode", "--platform", "--key-file", "--backup", "--language", "--sets", "--workers"];
     for (int i = 1; i < args.Length; i++) {
@@ -72,7 +72,7 @@ try {
                 string value = File.ReadAllText(keyFile).Trim();
                 key = platform == ChatPlatform.QQ ? Encoding.ASCII.GetBytes(value) : Convert.FromHexString(value);
             }
-            var exporter = new ChatExporter(int.Parse(Option("--workers") ?? "2"));
+            var exporter = new ChatExporter(int.Parse(Option("--workers") ?? "2"), options.ContainsKey("--local-image-keys"));
             var result = Option("--backup") is string backup ? exporter.ExportVerifiedBackup(backup,
                 Required("--destination"), platform, key, cancellation: cancellation.Token) :
                 exporter.Export(Required("--root"), Required("--destination"), platform, key,

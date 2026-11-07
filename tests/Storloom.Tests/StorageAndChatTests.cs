@@ -168,7 +168,7 @@ public sealed class StorageAndChatTests : IDisposable {
         Assert.Equal(2, result.Messages); Assert.False(result.Complete); Assert.Equal(2, result.UnsupportedMessages);
         string html = File.ReadAllText(Path.Combine(result.Directory, "messages.html"));
         Assert.DoesNotContain("<script>alert", html);
-        string page = File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory, "conversations"), "*.js").Single());
+        string page = File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory, "conversations"), "*-?.js").Single());
         Assert.DoesNotContain("<script>", page); Assert.Contains("\\u003Cscript\\u003E", page);
         string reader = File.ReadAllText(Path.Combine(result.Directory, "reader.js"));
         Assert.Contains("node.textContent = text", reader); Assert.DoesNotContain("innerHTML", reader);

@@ -16,6 +16,10 @@ public sealed record ChatMessage(string Platform, string Conversation, string Se
     public MessagePart[] Parts { get; init; } = [];
     public string? ExtraRawBase64 { get; init; }
     public string? SourceText { get; init; }
+    public string? Id { get; init; }
+    public string? ServerId { get; init; }
+    public string? Sequence { get; init; }
+    public string[] LocalMediaKeys { get; init; } = [];
 }
 public sealed record ChatExportResult(string Directory, long Messages, int Databases,
     List<ScanIssue> Issues, bool Complete) {
@@ -29,7 +33,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
     public long VerifiedBackupBytes { get; init; }
 }
 
-public sealed class ChatExporter(int maximumParallelism = 2) {
+public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false) {
     private readonly int parallelism = maximumParallelism is >= 1 and <= 4 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     public ChatExportResult Export(string source, string destination, ChatPlatform platform,
         byte[]? secret = null, IProgress<ScanProgress>? progress = null,
@@ -138,7 +142,7 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
                 finally { DeletePlain(plain); }
             });
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source));
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration);
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {
                 string output = Path.Combine(work, $"{index}.jsonl"); if (!File.Exists(output)) continue;
@@ -270,9 +274,11 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
                 string[] required = modern ? ["local_type", "create_time", "real_sender_id", "message_content"] :
                     ["Type", "CreateTime", "StrTalker", "StrContent"];
                 if (!required.All(columns.Contains)) throw new InvalidDataException("Unsupported WeChat message schema.");
+                string Optional(params string[] choices) => choices.FirstOrDefault(columns.Contains) is string column ? SqliteReader.Identifier(column) : "NULL";
                 string sql = "SELECT " + string.Join(',', required.Select(SqliteReader.Identifier)) +
                     "," + (!modern && columns.Contains("IsSender") ? SqliteReader.Identifier("IsSender") : "0") +
                     "," + (!modern && columns.Contains("CompressContent") ? SqliteReader.Identifier("CompressContent") : "NULL") +
+                    "," + Optional("server_id", "MsgSvrID") + "," + Optional("packed_info_data", "BytesExtra") +
                     " FROM " + SqliteReader.Identifier(table) + " ORDER BY " + SqliteReader.Identifier(required[1]);
                 foreach (var row in reader.Query(sql, cancellation)) {
                     long sender = modern ? Convert.ToInt64(row[2] ?? 0) : 0;
@@ -288,7 +294,9 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
                         Convert.ToInt64(row[1] ?? 0), Convert.ToInt64(row[0] ?? 0), text, raw == null ? null : Convert.ToBase64String(raw)) {
                             IsSelf = !modern && Convert.ToInt64(row[4] ?? 0) != 0,
                             SourceText = sourceText == text ? null : sourceText,
-                            ExtraRawBase64 = extra == null ? null : Convert.ToBase64String(extra) };
+                            ExtraRawBase64 = extra == null ? null : Convert.ToBase64String(extra),
+                            ServerId = row[6] is long id && id < 0 ? unchecked((ulong)id).ToString(System.Globalization.CultureInfo.InvariantCulture) : row[6]?.ToString(), LocalMediaKeys = row[7] is byte[] packed ?
+                                Regex.Matches(Encoding.Latin1.GetString(packed), "(?<![a-fA-F0-9])[a-fA-F0-9]{32}(?![a-fA-F0-9])").Select(m => m.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() : [] };
                 }
             }
         } else {
@@ -298,15 +306,28 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
                 string peer = group ? "40021" : "40030";
                 string[] required = [peer, "40033", "40050", "40800"];
                 if (!required.All(columns.Contains)) throw new InvalidDataException("Unsupported NTQQ message schema.");
+                string Optional(string name) => columns.Contains(name) ? SqliteReader.Identifier(name) : "NULL";
                 string sql = "SELECT " + string.Join(',', required.Select(SqliteReader.Identifier)) +
                     "," + (columns.Contains("40011") ? "\"40011\"" : "0") +
+                    "," + string.Join(',', new[] { "40001", "40003", "40013", "40090", "40093", "40850", "40900" }.Select(Optional)) +
                     " FROM " + SqliteReader.Identifier(table) + " ORDER BY \"40050\"";
                 foreach (var row in reader.Query(sql, cancellation)) {
                     byte[]? raw = row[3] as byte[];
                     string body = raw == null ? row[3]?.ToString() ?? "" : DecodeProto(raw);
+                    var parts = raw == null ? [] : QQMessageParser.Parse(raw, Convert.ToInt64(row[4] ?? 0));
+                    if (row[11] is byte[] cached && parts.Any(p => p.Kind == "forward")) {
+                        var forwarded = QQMessageParser.ParseForwardCache(cached);
+                        parts = parts.Select(p => p.Kind == "forward" && p.Forwarded.Length == 0 ? p with { Forwarded = forwarded,
+                            MediaKeys = [.. p.MediaKeys ?? [], .. forwarded.SelectMany(f => f.Parts).SelectMany(c => c.MediaKeys ?? [])] } : p).ToArray();
+                    }
+                    if (Convert.ToInt64(row[7] ?? 0) == 3) parts = [new("system", Text: parts.Length == 0 ? body : string.Join("\n", parts.Select(p => p.Text).Where(t => t.Length > 0)))];
+                    else if (group && row[10]?.ToString() is string reference && reference != "0")
+                        parts = parts.Select(p => p.Kind == "reply" ? p with { ReferenceId = "seq:" + reference } : p).ToArray();
                     yield return new("QQ", (group ? "group:" : "direct:") + row[0], row[1]?.ToString() ?? "",
                         Convert.ToInt64(row[2] ?? 0), Convert.ToInt64(row[4] ?? 0), body, raw == null ? null : Convert.ToBase64String(raw)) {
-                            Parts = raw == null ? [] : QQMessageParser.Parse(raw, Convert.ToInt64(row[4] ?? 0)) };
+                            ServerId = row[5]?.ToString(), Sequence = row[6]?.ToString(),
+                            SenderName = new[] { row[8]?.ToString(), row[9]?.ToString() }.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+                            IsSelf = Convert.ToInt64(row[7] ?? 0) is 1 or 2, Parts = parts };
                 }
             }
         }

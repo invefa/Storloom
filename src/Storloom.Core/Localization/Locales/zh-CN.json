@@ -354,5 +354,14 @@
   "AboutComponents": "基于 .NET, WPF UI 和 WebView2 构建. 第三方许可证随附在程序目录中",
   "FitColumn": "将列调整为合适的大小",
   "FitAllColumns": "将所有列调整为合适的大小",
-  "ResetColumns": "恢复默认列宽"
+  "ResetColumns": "恢复默认列宽",
+  "CloseBehavior": "关闭按钮",
+  "ConfirmExitTask": "当前任务仍在运行。是否取消任务，并在取消完成后退出？未完成的输出会保留以供检查。",
+  "HideToTray": "隐藏到托盘",
+  "CloseToTray": "关闭窗口时隐藏到托盘",
+  "ConfirmBackgroundTask": "当前任务仍在运行。是否隐藏窗口，让任务在后台继续？可通过托盘图标返回。",
+  "ShowWindow": "显示 Storloom",
+  "ReaderJumpReference": "跳转到被引用的消息",
+  "ReaderThumbnail": "仅显示缩略图，原图不可用。",
+  "ReaderForwardMissing": "此备份只有转发卡片，未包含可读取的内嵌消息。可在下方查看原始内容。"
 }

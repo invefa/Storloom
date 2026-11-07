@@ -13,4 +13,5 @@ public sealed record AppPreferences {
     public double LogHeight { get; init; } = 200;
     public double SidebarWidth { get; init; } = 136;
     public bool SidebarCollapsed { get; init; }
+    public bool CloseToTray { get; init; }
 }

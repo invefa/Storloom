@@ -8,6 +8,20 @@ using Xunit;
 namespace Storloom.Tests;
 
 public sealed class MessagePresentationTests {
+    [Fact]
+    public void EmbeddedForwardsReferencesAndSystemTemplatesPreserveTheirMeaning() {
+        var reply = MessagePresentation.Parse(new("WeChat", "fixture", "friend", 0, 49,
+            "<msg><appmsg><type>57</type><title>Reply</title><refermsg><svrid>9223372036854775806</svrid><type>3</type><content><msg><img md5=\"0123456789abcdef0123456789abcdef\"/></msg></content></refermsg></appmsg></msg>"))[0];
+        Assert.Equal("reply", reply.Kind); Assert.Equal("9223372036854775806", reply.ReferenceId); Assert.Equal("image", reply.ReferenceKind);
+        var system = MessagePresentation.Parse(new("WeChat", "fixture", "", 0, 10002,
+            "<sysmsg><sysmsgtemplate><content_template><template>$actor$ invited $member$</template><link_list><link name=\"actor\"><memberlist><member><nickname>Alex</nickname></member></memberlist></link><link name=\"member\"><memberlist><member><nickname>Sam</nickname></member></memberlist></link></link_list></content_template></sysmsgtemplate></sysmsg>"))[0];
+        Assert.Equal("system", system.Kind); Assert.Equal("Alex invited Sam", system.Text);
+        var forward = MessagePresentation.Parse(new("WeChat", "fixture", "friend", 0, 49,
+            "<msg><appmsg><type>19</type><title>Forward</title><recorditem><![CDATA[<recordinfo><datalist><dataitem datatype=\"1\"><sourcename>Alex</sourcename><sourcetime>12:00</sourcetime><datadesc>Forward text</datadesc></dataitem><dataitem datatype=\"2\"><sourcename>Sam</sourcename><fullmd5>0123456789abcdef0123456789abcdef</fullmd5></dataitem></datalist></recordinfo>]]></recorditem></appmsg></msg>"))[0];
+        Assert.Equal("forward", forward.Kind); Assert.Equal(2, forward.Forwarded.Length);
+        Assert.Equal("Forward text", forward.Forwarded[0].Parts[0].Text); Assert.Equal("image", forward.Forwarded[1].Parts[0].Kind);
+        Assert.Contains("0123456789abcdef0123456789abcdef", forward.MediaKeys!);
+    }
     [Theory]
     [InlineData(3,"<msg><img md5=\"0123456789abcdef0123456789abcdef\"/></msg>","image")]
     [InlineData(34,"<msg><voicemsg voicelength=\"2300\"/></msg>","audio")]
@@ -90,7 +104,7 @@ public sealed class MessagePresentationTests {
             Assert.False(result.Complete);Assert.Equal(1,result.UnsupportedMessages);
             var messages=File.ReadLines(Path.Combine(result.Directory,"messages.jsonl")).Select(l=>JsonSerializer.Deserialize<ChatMessage>(l)!).ToArray();
             Assert.Equal("reply",messages[0].Parts[0].Kind);Assert.Equal(Convert.ToBase64String(packed),messages[0].ExtraRawBase64);
-            string page=File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory,"conversations"),"*.js").Single());
+            string page=File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory,"conversations"),"*-?.js").Single());
             var reading=JsonSerializer.Deserialize<ChatMessage[]>(page[page.IndexOf('[')..(page.LastIndexOf(']')+1)])!;
             Assert.Equal(unknown,reading[1].Text);Assert.Equal("unsupported",reading[1].Parts[0].Kind);
         } finally {Directory.Delete(root,true);}

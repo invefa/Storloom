@@ -507,6 +507,94 @@ public sealed class FormTests {
             File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-"+theme+".png"),stream.ToArray());
         } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void LongLogsKeepBothScrollbarsInsideTheViewportAndSplittersStayBounded(AppTheme theme) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,ReduceMotion=true});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;
+        try {
+            window.Show();Pump();task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,new object[]{new Func<CancellationToken,Task>(_=>completion.Task)})!;
+            var panel=Descendants(window).OfType<OperationPanel>().Single();for(int i=0;i<150;i++)panel.AddLog(new string('x',1200)+i);Pump();window.UpdateLayout();
+            var viewer=Descendants(panel.Log).OfType<ScrollViewer>().Single(v=>v.Name=="PART_ContentHost");
+            var vertical=Descendants(viewer).OfType<System.Windows.Controls.Primitives.ScrollBar>().Single(b=>b.Orientation==Orientation.Vertical);
+            var horizontal=Descendants(viewer).OfType<System.Windows.Controls.Primitives.ScrollBar>().Single(b=>b.Orientation==Orientation.Horizontal);
+            foreach(double offset in new[]{viewer.ScrollableHeight,0d}) {
+                viewer.ScrollToVerticalOffset(offset);Pump();window.UpdateLayout();
+                Assert.True(vertical.IsVisible&&horizontal.IsVisible);var v=vertical.TranslatePoint(new Point(),viewer);var h=horizontal.TranslatePoint(new Point(),viewer);
+                Assert.InRange(v.Y+vertical.ActualHeight,0,h.Y+0.1);Assert.InRange(h.X+horizontal.ActualWidth,0,v.X+0.1);
+            }
+            var logRow=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;
+            logRow.Height=new GridLength(5000);Pump();window.UpdateLayout();
+            Assert.InRange(panel.TranslatePoint(new Point(0,panel.ActualHeight),window).Y,0,window.ActualHeight+0.1);
+            window.Height=650;Pump();window.UpdateLayout();Assert.InRange(logRow.ActualHeight,40,window.Body.ActualHeight-260);
+            Capture(window,"bounded-log-"+theme);
+        } finally {completion.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]
+    public void SidebarIconsRetainTheirVerticalPositionsThroughBothTransitions() => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();var navigation=Descendants(window).OfType<ListBox>().Single(l=>l.Name=="navigation");
+            var icons=Descendants(navigation).OfType<System.Windows.Shapes.Path>().ToArray();var y=icons.Select(i=>i.TranslatePoint(new Point(),window).Y).ToArray();
+            var toggle=Descendants(window).OfType<Button>().Single(b=>b.Name=="toggle_sidebar");
+            for(int direction=0;direction<2;direction++) {
+                toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                for(int frame=0;frame<20;frame++){Thread.Sleep(10);Pump();window.UpdateLayout();for(int i=0;i<icons.Length;i++)Assert.InRange(icons[i].TranslatePoint(new Point(),window).Y,y[i]-.1,y[i]+.1);}
+            }
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClosingBusyWindowRequiresConsentAndTrayKeepsTheTaskAlive(bool background) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{CloseToTray=background,ReduceMotion=true});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;CancellationToken token=default;
+        try {
+            window.Show();Pump();task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,new object[]{new Func<CancellationToken,Task>(ct=>{token=ct;ct.Register(()=>completion.TrySetCanceled(ct));return completion.Task;})})!;
+            void Answer(bool yes) { _=Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,new Action(()=>{
+                var dialog=Application.Current.Windows.Cast<Window>().Single(w=>w.Owner==window);Assert.Contains(background?L.T("ConfirmBackgroundTask"):L.T("ConfirmExitTask"),Descendants(dialog).OfType<TextBlock>().Select(t=>t.Text));dialog.DialogResult=yes;
+            }));window.Close();Pump(); }
+            Answer(false);Assert.True(window.IsVisible);Assert.False(token.IsCancellationRequested);
+            Answer(true);
+            if(background) {
+                Assert.False(window.IsVisible);Assert.False(token.IsCancellationRequested);
+                typeof(ShellWindow).GetMethod("RestoreFromTray",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Assert.True(window.IsVisible);
+                completion.TrySetResult();Wait(AsResult(task));typeof(ShellWindow).GetMethod("RequestExit",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);
+            } else {Assert.True(token.IsCancellationRequested);Wait(AsResult(task));Pump();Assert.False(window.IsVisible);}
+        } finally {
+            completion.TrySetResult();if(task!=null)Wait(AsResult(task));if(window.IsVisible)typeof(ShellWindow).GetMethod("RequestExit",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Directory.Delete(fixture,true);
+        }
+    });
+    [Fact]
+    public void ReaderJumpsAcrossPagesAndKeepsSystemAndSourceContentOutsideOrdinaryBubbles() => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,MsgSvrID);"+
+            "INSERT INTO MSG VALUES(10000,1700000000,'fixture','Alex invited Sam',100);"+
+            "INSERT INTO MSG VALUES(1,1700000001,'fixture','Original target',101);"+
+            "WITH RECURSIVE seq(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM seq WHERE x<299) INSERT INTO MSG SELECT 1,1700000001+x,'fixture','Filler text',101+x FROM seq;"+
+            "INSERT INTO MSG VALUES(49,1700000401,'fixture','<msg><appmsg><type>57</type><title>Cross-page reply</title><refermsg><svrid>101</svrid><displayname>Alex</displayname><content>Original target</content><type>1</type></refermsg></appmsg></msg>',900);"+
+            "INSERT INTO MSG VALUES(49,1700000402,'fixture','<msg><appmsg><type>19</type><recorditem>&lt;recordinfo&gt;&lt;datalist&gt;&lt;dataitem datatype=\"1\"&gt;&lt;sourcename&gt;Sam&lt;/sourcename&gt;&lt;datadesc&gt;Forwarded fixture&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/datalist&gt;&lt;/recordinfo&gt;</recorditem></appmsg></msg>',901);");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.WeChat);
+        var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        try {
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
+            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            void Until(string expression,string expected){while(DateTime.UtcNow<until&&Query(expression)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(expression));}
+            Until("document.querySelectorAll('.message.system').length","1");Assert.Equal("0",Query("document.querySelectorAll('.system .avatar').length"));
+            Assert.Equal("0",Query("document.querySelectorAll('.bubble .source').length"));Query("document.getElementById('next').click();true");
+            Until("document.querySelectorAll('.forwarded').length","1");Assert.Contains("Forwarded fixture",Query("document.querySelector('.forwarded').textContent"));
+            Query("document.querySelector('blockquote').click();true");Until("document.querySelectorAll('.referenced').length","1");
+            Assert.Contains("Original target",Query("document.querySelector('.referenced .bubble').textContent"));Assert.Contains("1 / 2",Query("document.getElementById('page').textContent"));
+            Assert.Equal("0",Query("document.querySelectorAll('pre').length"));Query("document.querySelector('.referenced details').open=true;true");
+            Until("document.querySelectorAll('.source-bubble').length","1");Assert.Equal("0",Query("document.querySelectorAll('.bubble details').length"));
+            using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
+            DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
+            File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-reference-dark.png"),stream.ToArray());
+        } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
     private static void Database(string path,string sql) {
         Assert.Equal(0,sqlite3_open_v2(path,out nint db,6,0));try{Assert.Equal(0,sqlite3_exec(db,sql,0,0,0));}finally{sqlite3_close_v2(db);}
     }

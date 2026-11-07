@@ -102,7 +102,7 @@ public sealed partial class ShellWindow {
             if (NeedsKey() && key == null) throw new InvalidOperationException(L.T("ExportKeyMissing"));
             keyInput?.Clear();
             await Run(async token => {
-                var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism).ExportVerifiedBackup(
+                var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true).ExportVerifiedBackup(
                     activeManifest!, target, account.Platform, key, progress, token));
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 chatStep = 3; SetCapturedKey(null); RenderChatStage();

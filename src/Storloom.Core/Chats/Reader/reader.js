@@ -1,7 +1,8 @@
 "use strict";
 (() => {
  const index = window.archiveIndex, labels = index.labels, $ = id => document.getElementById(id);
- let current = null, page = 0, messages = [], request = 0;
+ let current = null, page = 0, messages = [], request = 0, pendingJump = null;
+ const referenceMaps = new Map(), referenceLoads = new Map();
  const label = key => labels[key] || key;
  const element = (tag, text, className) => {
   const node = document.createElement(tag);
@@ -47,7 +48,33 @@
  window.receivePage = (conversation, p, items) => {
   if (current?.id !== conversation || p !== page) return;
   messages = items; render();
+  if (pendingJump?.conversation === conversation && pendingJump.page === p) { highlight(pendingJump.id); pendingJump = null; }
  };
+ window.receiveReferences = (conversation, map) => {
+  referenceMaps.set(conversation, map); referenceLoads.get(conversation)?.(map); referenceLoads.delete(conversation);
+ };
+ function highlight(id) {
+  const target = $('msg-' + id); if (!target) return;
+  target.scrollIntoView({block:'center'}); target.classList.add('referenced');
+  setTimeout(() => target.classList.remove('referenced'), 1600);
+ }
+ async function jump(reference, block) {
+  const conversation = current.id;
+  const local = messages.find(m => m.ServerId === reference || ('seq:' + m.Sequence) === reference);
+  if (local) { $('message-search').value = ''; render(); highlight(local.Id); return; }
+  let map = referenceMaps.get(conversation);
+  if (!map) map = await new Promise(resolve => {
+   if (referenceLoads.has(conversation)) { resolve(null); return; }
+   referenceLoads.set(conversation, resolve);
+   const script = element('script'); script.src = 'conversations/' + conversation + '-refs.js';
+   script.onload = () => script.remove(); script.onerror = () => { script.remove(); referenceLoads.delete(conversation); resolve(null); };
+   document.head.append(script);
+  });
+  if (current.id !== conversation) return;
+  const target = map && Object.hasOwn(map, reference) ? map[reference] : null;
+  if (!target) { block.title = label('ReaderReferenceMissing'); block.append(element('small', label('ReaderReferenceMissing'))); return; }
+  $('message-search').value = ''; page = target.page; pendingJump = {conversation, ...target}; load();
+ }
  const safeAsset = path => /^assets\/[a-f0-9]{64}\.(png|jpg|jpeg|gif|webp|bmp|mp4|webm|mp3|wav|ogg)$/.test(path);
  function renderMedia(media, kind) {
   const node = element(media.Kind === 'video' ? 'video' : media.Kind === 'audio' ? 'audio' : 'img');
@@ -69,10 +96,10 @@
   // Large source nodes are built only when explicitly requested.
   details.addEventListener('toggle', () => {
    if (!details.open || details.dataset.loaded) return;
-   details.dataset.loaded = 'true'; details.append(element('pre', message.Text || ''));
-   if (message.SourceText) details.append(element('h4', label('ReaderDatabaseText')), element('pre', message.SourceText));
+   details.dataset.loaded = 'true'; const source = element('div', '', 'source-bubble'); details.append(source); source.append(element('pre', message.Text || ''));
+   if (message.SourceText) source.append(element('h4', label('ReaderDatabaseText')), element('pre', message.SourceText));
    for (const [name, value] of [['RawBase64',message.RawBase64],['ExtraRawBase64',message.ExtraRawBase64]]) {
-    if (value) details.append(element('h4', name), element('pre', value));
+    if (value) source.append(element('h4', name), element('pre', value));
    }
   });
   return details;
@@ -81,17 +108,23 @@
   const fragment = document.createDocumentFragment(), term = $('message-search').value.toLocaleLowerCase();
   for (const m of messages) {
    if (term && !m.Text.toLocaleLowerCase().includes(term) && !(m.SenderName || m.Sender).toLocaleLowerCase().includes(term)) continue;
-   const article = element('article', '', 'message' + (m.IsSelf ? ' self' : ''));
+   const parts = m.Parts?.length ? m.Parts : legacyParts(m), system = parts.every(p => p.Kind === 'system');
+   const article = element('article', '', 'message' + (system ? ' system' : m.IsSelf ? ' self' : '')); if (m.Id) article.id = 'msg-' + m.Id;
    const avatar = element('div', Array.from(m.SenderName || m.Sender || '?')[0], 'avatar');
    const content = element('div', '', 'content'), date = new Date(m.Timestamp * 1000);
-   const time = element('div', (m.SenderName || m.Sender) + '  ' + (Number.isNaN(date.valueOf()) ? m.Timestamp : date.toLocaleString()), 'timestamp');
-   const bubble = element('div', '', 'bubble'), parts = m.Parts?.length ? m.Parts : legacyParts(m);
+   const time = element('div', (system ? '' : (m.SenderName || m.Sender) + '  ') + (Number.isNaN(date.valueOf()) ? m.Timestamp : date.toLocaleString()), 'timestamp');
+   const bubble = element('div', '', 'bubble');
    const used = new Set();
-   for (const part of parts) {
+   function partView(part, depth = 0) {
     const kind = part.Kind || 'unsupported', block = element('div', '', 'part kind-' + kind);
     const rich = /<[^>]+>|&lt;\/?\w+/.test(part.Text || '');
-    if (kind === 'reply') block.append(element('blockquote', (part.ReferenceSender ? part.ReferenceSender + '\n' : '') +
-     (part.ReferenceText || (part.ReferenceKind && part.ReferenceKind !== 'text' ? label('ReaderKind_' + part.ReferenceKind) : label('ReaderReferenceMissing')))));
+    if (kind === 'reply') {
+     const quote = element('blockquote', (part.ReferenceSender ? part.ReferenceSender + '\n' : '') +
+      (part.ReferenceText || (part.ReferenceKind && part.ReferenceKind !== 'text' ? label('ReaderKind_' + part.ReferenceKind) : label('ReaderReferenceMissing'))));
+     if (part.ReferenceId) { quote.tabIndex = 0; quote.setAttribute('role', 'button'); quote.title = label('ReaderJumpReference');
+      quote.onclick = () => jump(part.ReferenceId, quote); quote.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(part.ReferenceId, quote); } }; }
+     block.append(quote);
+    }
     if (!['text','reply','system','markdown'].includes(kind)) {
      block.append(element('div', label('ReaderKind_' + kind), 'kind-title'));
      if (part.Title) block.append(element('strong', part.Title));
@@ -99,21 +132,29 @@
     if (kind === 'markdown') block.append(element('div', label('ReaderKind_markdown'), 'kind-title'));
     if (part.Text && !rich) block.append(element('div', part.Text, 'message-text'));
     if (part.Detail) block.append(element('div', part.Detail, 'card-detail'));
-    const candidates = (m.Media || []).filter(media => safeAsset(media.Path) && (
-     part.MediaKeys?.includes(media.Key) || part.MediaKeys?.includes(media.Name) || parts.length === 1));
+    if (kind === 'forward' && !part.Forwarded?.length) block.append(element('div', label('ReaderForwardMissing'), 'placeholder'));
+    if (depth < 4) for (const entry of part.Forwarded || []) {
+     const item = element('div', '', 'forwarded'); item.append(element('div', [entry.Sender,entry.Time].filter(Boolean).join(' · '), 'timestamp'));
+     for (const child of entry.Parts || []) item.append(partView(child, depth + 1)); block.append(item);
+    }
+    const matched = (m.Media || []).filter(media => safeAsset(media.Path) && (
+     part.MediaKeys?.includes(media.Key) || part.MediaKeys?.includes(media.Name) || (parts.length === 1 && depth === 0 && kind !== 'forward')));
+    const candidates = matched.some(media => media.Quality !== 'thumbnail') ? matched.filter(media => media.Quality !== 'thumbnail') : matched;
     for (const media of candidates) {
      if (used.has(media.Path)) continue;
      used.add(media.Path); block.append(renderMedia(media, kind));
+     if (media.Quality === 'thumbnail') block.append(element('small', label('ReaderThumbnail')));
     }
     if (['image','video','audio','sticker','file'].includes(kind) && !candidates.length) block.append(element('div',
      label(part.MediaState === 'unsupported-format' ? 'ReaderUnsupportedFormat' : 'ReaderFileMissing'), 'placeholder'));
     if (kind === 'unsupported' || kind === 'unparsed' || rich) block.append(element('div', label('ReaderSourceHint'), 'card-detail'));
-    bubble.append(block);
+    return block;
    }
+   for (const part of parts) bubble.append(partView(part));
    for (const media of m.Media || []) {
     if (safeAsset(media.Path) && !used.has(media.Path)) { used.add(media.Path); bubble.append(renderMedia(media, media.Kind)); }
    }
-   bubble.append(sourceDisclosure(m)); content.append(time, bubble); article.append(avatar, content); fragment.append(article);
+   content.append(time, bubble, sourceDisclosure(m)); if (!system) article.append(avatar); article.append(content); fragment.append(article);
   }
   $('messages').replaceChildren(fragment); $('messages').scrollTop = 0;
   $('messages').classList.remove('enter'); void $('messages').offsetWidth; $('messages').classList.add('enter');

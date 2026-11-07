@@ -354,5 +354,14 @@
   "AboutComponents": "Built with .NET, WPF UI and WebView2. Third-party licenses are included in the application folder.",
   "FitColumn": "Size column to fit",
   "FitAllColumns": "Size all columns to fit",
-  "ResetColumns": "Restore default widths"
+  "ResetColumns": "Restore default widths",
+  "CloseBehavior": "Close button",
+  "ConfirmExitTask": "A task is still running. Cancel it and exit after cancellation completes? Incomplete output will remain for inspection.",
+  "HideToTray": "Hide to notification area",
+  "CloseToTray": "Hide to the notification area when closing",
+  "ConfirmBackgroundTask": "A task is still running. Hide Storloom and let it continue in the background? Use the notification icon to return.",
+  "ShowWindow": "Show Storloom",
+  "ReaderJumpReference": "Jump to quoted message",
+  "ReaderThumbnail": "Thumbnail only; the full image is unavailable.",
+  "ReaderForwardMissing": "This backup contains a forwarding card but no readable embedded messages. The original payload is available below."
 }

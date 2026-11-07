@@ -39,15 +39,8 @@ public sealed partial class ShellWindow : ThemeWindow {
         string backups = Path.Combine(dataRoot, "chat-backups.json");
         if (File.Exists(backups)) foreach (var pair in JsonFiles.Read<Dictionary<string, string>>(backups)) verifiedBackups[pair.Key] = pair.Value;
         L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
-        Closing += (_, e) => {
-            if (operation != null) { operation.Cancel(); e.Cancel = true; status.Text = L.T("Busy"); }
-            else {
-                SetCapturedKey(null);
-                preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed || sidebarAnimating ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
-                    LogHeight = operationView.Expanded && logRow.ActualHeight > 80 ? logRow.ActualHeight : preferences.LogHeight };
-                JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
-            }
-        };
+        Closing += HandleClosing; Closed += (_, _) => tray?.Dispose();
+        if (preferences.CloseToTray) EnsureTray();
         InputBindings.Add(new KeyBinding(new ActionCommand(() => operationView.ToggleFollowing()), new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new ActionCommand(() => ShowHelp()), new KeyGesture(Key.F1)));
     }
@@ -61,7 +54,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         Item(file, "ImportRules", ImportRules); Item(file, "ReloadRules", () => { ReloadEngine(); RenderRules(); });
         file.Items.Add(new Separator()); Item(file, "SavePlan", SaveCleanupPlan); Item(file, "LoadPlan", LoadCleanupPlan);
         Item(file, "OpenChatBackup", OpenChatBackup); Item(file, "OpenReaderArchive", OpenReaderArchive);
-        file.Items.Add(new Separator()); Item(file, "OpenData", () => OpenFolder(dataRoot)); Item(file, "Exit", Close);
+        file.Items.Add(new Separator()); Item(file, "OpenData", () => OpenFolder(dataRoot)); Item(file, "HideToTray", HideToTray); Item(file, "Exit", RequestExit);
         var tools = new MenuItem { Header = L.T("ToolsMenu") }; Item(tools, "Preferences", () => ShowPreferences());
         var help = new MenuItem { Header = L.T("HelpMenu") }; Item(help, "QuickStart", () => ShowHelp());
         Item(help, "OpenAiGuide", () => ShowHelp(document: File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docs", L.Language == "zh-CN" ? "ai-rules.zh-CN.md" : "ai-rules.md"))));
@@ -78,7 +71,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             ("cleanup", "NavCleanup", "M 2,5 L 14,5 14,14 2,14 Z M 1,2 L 15,2 15,5 1,5 Z M 6,8 L 10,8"),
             ("chats", "NavChats", "M 1,1 L 15,1 15,11 8,11 4,15 4,11 1,11 Z M 4,5 L 12,5 M 4,8 L 9,8") }) {
             var label = View.Text(L.T(key)); label.Name = "nav_label"; label.Margin = new Thickness(0); label.TextWrapping = TextWrapping.NoWrap; label.TextTrimming = TextTrimming.CharacterEllipsis;
-            var contents = new DockPanel(); var icon = View.Icon(geometry); icon.Margin = new Thickness(0, 0, 8, 0); DockPanel.SetDock(icon, Dock.Left); contents.Children.Add(icon); contents.Children.Add(label);
+            var contents = new DockPanel { Height = 20, VerticalAlignment = VerticalAlignment.Center }; var icon = View.Icon(geometry); icon.Margin = new Thickness(0, 0, 8, 0); DockPanel.SetDock(icon, Dock.Left); contents.Children.Add(icon); contents.Children.Add(label);
             navigation.Items.Add(new ListBoxItem { Content = contents, Tag = id, ToolTip = L.T(key) });
         }
         navigation.SelectionChanged += (_, _) => { if (navigation.SelectedItem is ListBoxItem selected) Navigate((string)selected.Tag); };
@@ -97,6 +90,14 @@ public sealed partial class ShellWindow : ThemeWindow {
         logSplitter.DragStarted += (_, _) => { logRow.BeginAnimation(RowDefinition.HeightProperty, null); };
         logSplitter.DragCompleted += (_, _) => { preferences = preferences with { LogHeight = logRow.ActualHeight }; };
         View.Add(root, logSplitter, 2); logRow = root.RowDefinitions[3];
+        root.RowDefinitions[1].MinHeight = 260;
+        void ClampLog() {
+            logRow.MaxHeight = Math.Max(40, Body.ActualHeight - 260 - root.RowDefinitions[0].ActualHeight - root.RowDefinitions[2].ActualHeight - root.RowDefinitions[4].ActualHeight);
+            if (logRow.Height.IsAbsolute && logRow.Height.Value > logRow.MaxHeight) {
+                logRow.BeginAnimation(RowDefinition.HeightProperty, null); logRow.Height = new GridLength(logRow.MaxHeight);
+            }
+        }
+        root.LayoutUpdated += (_, _) => ClampLog();
         operationView = new OperationPanel { Visibility = Visibility.Collapsed }; View.Add(root, operationView, 3);
         operationView.ExpansionChanged += expanded => {
             double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 40;
@@ -208,6 +209,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             foreach (var control in disabled) control.IsEnabled = true;
             if (operationButton != null) operationButton.Content = previousContent;
             cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
+        if (exitAfterOperation) _ = Dispatcher.BeginInvoke(new Action(Close));
     }
     private static IEnumerable<Control> Controls(DependencyObject root) {
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) {
@@ -225,6 +227,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (dialog.ShowDialog() != true) return;
         preferences = dialog.Result; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
         SetCapturedKey(null); L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
+        if (preferences.CloseToTray) EnsureTray(); tray?.Refresh();
     }
     private void ShowHelp(int? topic = null, string? document = null) => new HelpWindow(topic ?? (currentPage == "chats" ? 2 : currentPage == "overview" ? 5 : 0), document) { Owner = this }.ShowDialog();
     private void ImportRules() {

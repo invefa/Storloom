@@ -28,6 +28,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
         var workers = Options(["1", "2", "4"], preferences.ChatParallelism == 1 ? 0 : preferences.ChatParallelism == 4 ? 2 : 1); Field("ChatWorkers", workers);
         Field("", View.Text(L.T("ChatWorkersHelp"), color: "Muted"));
         var motion = new CheckBox { Content = L.T("ReduceMotion"), IsChecked = preferences.ReduceMotion }; Field("MotionLabel", motion);
+        var closeToTray = new CheckBox { Content = L.T("CloseToTray"), IsChecked = preferences.CloseToTray }; Field("CloseBehavior", closeToTray);
         var custom = View.Input(preferences.CustomThemeFile ?? "");
         var customRow = new DockPanel(); var choose = View.Button("Browse", () => {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Theme JSON|*.json" };
@@ -76,7 +77,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                 if (!string.IsNullOrWhiteSpace(custom.Text)) _ = Theme.ReadCustom(custom.Text);
                 Result = preferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = (AppTheme)themes.SelectedIndex,
                     BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatParallelism = int.Parse((string)workers.SelectedItem),
-                    ReduceMotion = motion.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
+                    ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
                 foreach (var choice in choices.Where(c => pending.ContainsKey(c.Info.Id))) JsonFiles.Write(Path.Combine(customSets, choice.Info.File), pending[choice.Info.Id]);
                 JsonFiles.Write(Path.Combine(customSets, "sets.json"), new RuleSetIndex(1, choices.Where(c => c.Info.IsCustom).Select(c => c.Info).ToList()));
                 DialogResult = true;
@@ -150,7 +151,8 @@ internal sealed class HelpWindow : ThemeWindow {
 }
 
 internal sealed class AboutWindow : ThemeWindow {
-    public AboutWindow() : base(L.T("About"), 650, 460) {
+    public AboutWindow() : base(L.T("About"), 530, 350) {
+        MinWidth = 490; MinHeight = 330; ResizeMode = ResizeMode.NoResize; Caption.ShowMaximize = false; Caption.ShowMinimize = false;
         var layout = View.Grid(View.Auto, View.Fill, View.Auto); layout.Margin = new Thickness(24); Body.Children.Add(layout);
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 22) };
         var icon = new Image { Source = ProductInfo.LoadIcon(128), Width = 64, Height = 64, Margin = new Thickness(0, 0, 18, 0) };

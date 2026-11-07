@@ -137,6 +137,6 @@ internal static class Notice {
         var cancel = View.Button(confirm ? "GoBack" : "Close", () => window.DialogResult = false); cancel.IsCancel = true;
         var actions = View.Row(cancel); actions.HorizontalAlignment = HorizontalAlignment.Right;
         if (confirm) actions.Children.Add(View.Button("ConfirmExecute", () => window.DialogResult = true, true));
-        View.Add(grid, actions, 1); window.Body.Children.Add(grid); return window.ShowDialog() == true;
+        View.Add(grid, actions, 1); window.Body.Children.Add(grid); window.Loaded += (_, _) => cancel.Focus(); return window.ShowDialog() == true;
     }
 }
