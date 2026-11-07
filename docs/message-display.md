@@ -17,7 +17,7 @@ Legacy WeChat `CompressContent` can contain LZ4 blocks; the decoder is bounded t
 
 Supported V1/V2 image containers now decode offline when a validated key is available. WxAM/HEVC images, resource-index-only references, SILK voice, unknown schemas and unsupported structured fields still need future adapters. A card/placeholder does not mean that every field has been parsed. `unsupportedMessages` and `unresolvedMedia` prevent a fully readable result from being falsely claimed. Raw backup verification and source preservation remain unchanged.
 
-Existing reading copies are not rewritten automatically. Re-export a verified raw backup for new parsing; source clients and originals are not required when the backup and necessary key are available.
+Existing reading copies are not rewritten automatically. The desktop preview supplies its current interface and missing translated UI labels without modifying archive files. Re-export a verified raw backup for new parsing or an updated standalone HTML reader; source clients and originals are not required when the backup and necessary key are available.
 
 ## Research references
 

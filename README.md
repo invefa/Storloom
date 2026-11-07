@@ -81,3 +81,5 @@ New reading exports derive typed message parts for WeChat and NTQQ, retain mixed
 The close button can hide the app to its notification icon when enabled in Preferences. Tasks continue while hidden; use the icon to restore the window or exit. Closing during a task asks for confirmation, and a confirmed exit waits for cancellation to finish.
 
 The reading toolbar offers Default, WeChat and QQ color schemes, each with light and dark variants. Scheme choice is remembered separately from brightness. Chat bubbles, quoted blocks and original-content bubbles use compact padding.
+
+The desktop preview supplies the current reader interface for existing exports without changing their files. Re-export is needed for new parsing or to refresh standalone HTML.

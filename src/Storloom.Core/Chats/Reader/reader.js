@@ -1,6 +1,7 @@
 "use strict";
 (() => {
- const index = window.archiveIndex, labels = index.labels, $ = id => document.getElementById(id);
+ const index = window.archiveIndex, labels = {...window.readerCatalogs?.[index.language], ...index.labels}, $ = id => document.getElementById(id);
+ const archiveBase = window.archiveContentBase || '';
  let current = null, page = 0, messages = [], request = 0, pendingJump = null;
  const referenceMaps = new Map(), referenceLoads = new Map();
  const label = key => labels[key] || key;
@@ -51,7 +52,7 @@
   $('previous').disabled = page === 0; $('next').disabled = page + 1 >= current.pages;
   text('page', (page + 1) + ' / ' + current.pages);
   messages = []; $('messages').replaceChildren();
-  const script = element('script'); script.src = 'conversations/' + current.id + '-' + page + '.js';
+  const script = element('script'); script.src = archiveBase + 'conversations/' + current.id + '-' + page + '.js';
   script.onload = () => script.remove();
   script.onerror = () => { script.remove(); if (request === id) text('notice', labels.ReaderMissingMedia); };
   document.head.append(script);
@@ -77,7 +78,7 @@
   if (!map) map = await new Promise(resolve => {
    if (referenceLoads.has(conversation)) { resolve(null); return; }
    referenceLoads.set(conversation, resolve);
-   const script = element('script'); script.src = 'conversations/' + conversation + '-refs.js';
+   const script = element('script'); script.src = archiveBase + 'conversations/' + conversation + '-refs.js';
    script.onload = () => script.remove(); script.onerror = () => { script.remove(); referenceLoads.delete(conversation); resolve(null); };
    document.head.append(script);
   });
@@ -89,7 +90,7 @@
  const safeAsset = path => /^assets\/[a-f0-9]{64}\.(png|jpg|jpeg|gif|webp|bmp|mp4|webm|mp3|wav|ogg)$/.test(path);
  function renderMedia(media, kind) {
   const node = element(media.Kind === 'video' ? 'video' : media.Kind === 'audio' ? 'audio' : 'img');
-  node.src = media.Path;
+  node.src = archiveBase + media.Path;
   if (node.tagName === 'IMG') { node.alt = media.Name; node.loading = 'lazy'; }
   else { node.controls = true; node.preload = 'none'; }
   node.onerror = () => node.replaceWith(element('div', label('ReaderKind_' + kind) + ' · ' + label('ReaderCannotPlay'), 'placeholder'));
