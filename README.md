@@ -1,6 +1,6 @@
 # Storloom
 
-A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local QQ/WeChat archives. C# and WinForms, English and Simplified Chinese.
+A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local QQ/WeChat archives. C# and WPF, English and Simplified Chinese.
 
 [简体中文](README.zh-CN.md) · [Getting started](docs/quickstart.md) · [Rule reference](docs/rules.md) · [AI rule guide](docs/ai-rules.md) · [Chat compatibility](docs/chat-exporters.md)
 
@@ -12,7 +12,7 @@ Extract the Windows x64 package into a writable folder and run **Storloom.exe**.
 - **Storage analysis:** scan a mounted local drive/folder, drill into directory totals, inspect the largest 100 files, and read diagnostics. Sizes are logical lengths, not a promise of physical reclaimable bytes; hard links, compression, and sparse files can differ.
 - **Chat archives:** follow the account -> verified raw backup -> reading-copy steps. Raw backup needs no key and includes media. Supported databases export to JSONL and offline HTML with a completeness report. Previous verified backups are remembered privately.
 
-Language, backup/archive destinations, and enabled rule sets live in **Tools > Preferences**. **Help > Getting started** (F1) explains each workflow. About shows version, developer, and the repository. Lists use native double buffering and bulk updates; progress notifications are throttled.
+Language, backup/archive destinations, and enabled rule sets live in **Tools > Preferences**. **Help > Getting started** (F1) explains each workflow. About shows version, developer, and the repository. The native WPF UI uses virtualized tables, a shared theme including the title bar, and throttled progress updates.
 
 ## Rules and native cleanup
 
@@ -43,7 +43,7 @@ Install .NET 10 SDK on Windows. The baseline rolls forward within .NET 10 featur
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.4.0
+./scripts/Publish.ps1 -Version 0.5.0
 ```
 
 The package script copies only public binaries, rules, documentation, and notices into a fresh directory, audits local identity paths, and emits ZIP/SHA-256. It never copies `data/` or test fixtures. CI builds/tests on Windows; the packaging workflow creates artifacts without publishing a GitHub Release. The icon source is SVG; `scripts/Build-Icon.ps1` regenerates the multi-size Windows ICO.
@@ -54,8 +54,14 @@ MIT. See [third-party notices](THIRD-PARTY-NOTICES.md) for the adapted WeChat ca
 
 ## Appearance, progress, and reading archives
 
-Preferences offer Light and One Dark Pro themes and 1, 2, or 4 chat database workers. Prefer 1 on a hard drive and try bounded parallelism on an SSD. Operations show phase progress, throughput, estimated remaining time when a denominator is known, and a collapsible local log. The native list viewport is restored after resizing; buffered containers and owner drawing avoid repeated full-page invalidation.
+Preferences offer Light and One Dark Pro themes and 1, 2, or 4 chat database workers. Prefer 1 on a hard drive and try bounded parallelism on an SSD. Operations show phase progress, throughput, estimated remaining time when a denominator is known, and a collapsible local log. The WPF frontend uses virtualized tables. Drag the log divider to resize it; manual scrolling or selecting text pauses following. Toggle Follow latest or press Ctrl+Shift+L to resume/pause. Page and panel transitions are brief; Preferences can reduce motion.
 
 Account sizes include databases, images, video, and attachments. Reading archives provide named conversations, chronological 300-message pages, search within the current page, and recognized local media. The embedded viewer needs Microsoft Edge WebView2 Runtime; the same messages.html works offline in a browser with its adjacent assets. Names fall back to IDs when contact metadata is unavailable. New WeChat encrypted images, resource-index-only attachments, SILK voice, and unsupported contact schemas remain explicitly unavailable; the raw backup remains authoritative.
 
 Native cleanup rules can measure tool-discovered directories or explicit directory roots. Results show each deletion's processed logical bytes and each native command's before/after difference. Unknown or partial measurements are not reported as zero. See the rule reference for configuration.
+
+## Desktop themes and message cards
+
+The main frontend uses WPF and WPF UI 4.3.0; WebView2 is only initialized for the offline conversation reader. The light theme uses grayscale, and One Dark Pro covers native controls, menus, dialogs, and the custom title bar. Preferences support a validated JSON color override file, reduced motion, and persisted sidebar/log dimensions. See [themes](docs/themes.md).
+
+New reading exports derive typed message parts for WeChat and NTQQ, retain mixed-segment order, and collapse all original payloads behind View original content. Quotes, payments, media, files, cards, locations, forwarding and system records have display cards or explicit placeholders. Unsupported message counts and missing/unsupported media are reported separately. This does not promise recovery of unavailable assets or compatibility with every client schema. See [message coverage and research](docs/message-display.md). Existing exports keep their existing reader files; re-export a verified raw backup to use the updated parser.

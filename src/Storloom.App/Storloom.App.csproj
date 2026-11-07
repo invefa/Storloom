@@ -2,12 +2,12 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <OutputType>WinExe</OutputType>
-    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <AssemblyName>Storloom</AssemblyName>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Assets/storloom.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <ProjectReference Include="../Storloom.Core/Storloom.Core.csproj" />
     <Content Include="../../rules/*.json" Link="rules/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

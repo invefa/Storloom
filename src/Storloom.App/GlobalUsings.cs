@@ -1,0 +1,5 @@
+global using System.IO;
+global using System.Windows;
+global using System.Windows.Controls;
+global using System.Windows.Media;
+global using Storloom.Core.Localization;

@@ -13,12 +13,16 @@ public sealed record ChatMessage(string Platform, string Conversation, string Se
     public string? SenderName { get; init; }
     public bool IsSelf { get; init; }
     public ChatMedia[] Media { get; init; } = [];
+    public MessagePart[] Parts { get; init; } = [];
+    public string? ExtraRawBase64 { get; init; }
+    public string? SourceText { get; init; }
 }
 public sealed record ChatExportResult(string Directory, long Messages, int Databases,
     List<ScanIssue> Issues, bool Complete) {
     public int Contacts { get; init; }
     public int MediaFiles { get; init; }
     public int UnresolvedMedia { get; init; }
+    public int UnsupportedMessages { get; init; }
     public double ElapsedSeconds { get; init; }
     public int Parallelism { get; init; }
     public Dictionary<string, double> PhaseSeconds { get; init; } = [];
@@ -162,11 +166,12 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
             // This invocation owns this exact fresh work directory, including decrypted temporary files.
             if (PathPolicy.Under(work, destination) && Directory.Exists(work)) Directory.Delete(work, true);
         }
-        bool complete = issues.IsEmpty && completed == databases.Length && messages > 0 && (archive?.UnresolvedMedia ?? 0) == 0;
+        bool complete = issues.IsEmpty && completed == databases.Length && messages > 0 && (archive?.UnresolvedMedia ?? 0) == 0 && (archive?.UnsupportedMessages ?? 0) == 0;
         if (!complete && File.Exists(Path.Combine(destination, "messages.jsonl")))
             messages = File.ReadLines(Path.Combine(destination, "messages.jsonl")).LongCount();
         var result = new ChatExportResult(destination, messages, completed, issues.ToList(), complete) {
             Contacts = contacts.Count, MediaFiles = archive?.MediaFiles ?? 0, UnresolvedMedia = archive?.UnresolvedMedia ?? 0,
+            UnsupportedMessages = archive?.UnsupportedMessages ?? 0,
             ElapsedSeconds = clock.Elapsed.TotalSeconds + verificationSeconds, Parallelism = parallelism,
             VerifiedBackupBytes = verified?.Values.Sum(e => e.Bytes) ?? 0,
             PhaseSeconds = new() { ["backupVerification"] = verificationSeconds, ["databaseProcessing"] = databaseSeconds,
@@ -267,15 +272,23 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
                 if (!required.All(columns.Contains)) throw new InvalidDataException("Unsupported WeChat message schema.");
                 string sql = "SELECT " + string.Join(',', required.Select(SqliteReader.Identifier)) +
                     "," + (!modern && columns.Contains("IsSender") ? SqliteReader.Identifier("IsSender") : "0") +
+                    "," + (!modern && columns.Contains("CompressContent") ? SqliteReader.Identifier("CompressContent") : "NULL") +
                     " FROM " + SqliteReader.Identifier(table) + " ORDER BY " + SqliteReader.Identifier(required[1]);
                 foreach (var row in reader.Query(sql, cancellation)) {
                     long sender = modern ? Convert.ToInt64(row[2] ?? 0) : 0;
                     byte[]? raw = row[3] as byte[];
                     string text = DecodeBody(row[3]);
+                    string sourceText = text;
+                    byte[]? extra = row[5] as byte[];
+                    if (extra is { Length: > 0 }) {
+                        string? expanded = DecodeLegacyContent(extra); if (!string.IsNullOrWhiteSpace(expanded)) text = expanded;
+                    }
                     yield return new("WeChat", modern ? conversations.GetValueOrDefault(table, table) : row[2]?.ToString() ?? table,
                         modern ? names.GetValueOrDefault(sender, sender.ToString()) : Convert.ToInt64(row[4] ?? 0) != 0 ? "self" : row[2]?.ToString() ?? "",
                         Convert.ToInt64(row[1] ?? 0), Convert.ToInt64(row[0] ?? 0), text, raw == null ? null : Convert.ToBase64String(raw)) {
-                            IsSelf = !modern && Convert.ToInt64(row[4] ?? 0) != 0 };
+                            IsSelf = !modern && Convert.ToInt64(row[4] ?? 0) != 0,
+                            SourceText = sourceText == text ? null : sourceText,
+                            ExtraRawBase64 = extra == null ? null : Convert.ToBase64String(extra) };
                 }
             }
         } else {
@@ -286,12 +299,14 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
                 string[] required = [peer, "40033", "40050", "40800"];
                 if (!required.All(columns.Contains)) throw new InvalidDataException("Unsupported NTQQ message schema.");
                 string sql = "SELECT " + string.Join(',', required.Select(SqliteReader.Identifier)) +
+                    "," + (columns.Contains("40011") ? "\"40011\"" : "0") +
                     " FROM " + SqliteReader.Identifier(table) + " ORDER BY \"40050\"";
                 foreach (var row in reader.Query(sql, cancellation)) {
                     byte[]? raw = row[3] as byte[];
                     string body = raw == null ? row[3]?.ToString() ?? "" : DecodeProto(raw);
                     yield return new("QQ", (group ? "group:" : "direct:") + row[0], row[1]?.ToString() ?? "",
-                        Convert.ToInt64(row[2] ?? 0), 0, body, raw == null ? null : Convert.ToBase64String(raw));
+                        Convert.ToInt64(row[2] ?? 0), Convert.ToInt64(row[4] ?? 0), body, raw == null ? null : Convert.ToBase64String(raw)) {
+                            Parts = raw == null ? [] : QQMessageParser.Parse(raw, Convert.ToInt64(row[4] ?? 0)) };
                 }
             }
         }
@@ -308,6 +323,21 @@ public sealed class ChatExporter(int maximumParallelism = 2) {
             bytes = decompressor.Unwrap(bytes, 64 * 1024 * 1024).ToArray();
         }
         return Encoding.UTF8.GetString(bytes);
+    }
+
+    public static string? DecodeLegacyContent(byte[] bytes) {
+        const int limit = 16 * 1024 * 1024;
+        if (bytes.Length > limit) return null;
+        try {
+            if (bytes.AsSpan().StartsWith("<"u8)) return new UTF8Encoding(false, true).GetString(bytes);
+            for (int size = Math.Min(limit, Math.Max(4096, bytes.Length * 4)); size <= limit; size = Math.Min(limit, size * 2)) {
+                byte[] output = new byte[size];
+                int length = K4os.Compression.LZ4.LZ4Codec.Decode(bytes, 0, bytes.Length, output, 0, size);
+                if (length > 0) return new UTF8Encoding(false, true).GetString(output, 0, length);
+                if (size == limit) break;
+            }
+        } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { }
+        return null;
     }
 
     public static string DecodeProto(byte[] bytes) {

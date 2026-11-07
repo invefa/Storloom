@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '0.4.0',
+    [string] $Version = '0.5.0',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -47,6 +47,16 @@ foreach ($notice in @('LICENSE.txt', 'NOTICE.txt')) {
     if (!(Test-Path -LiteralPath $licenseFile)) { throw 'WebView2 SDK license missing.' }
     Copy-Item -LiteralPath $licenseFile -Destination $webViewLicenseTarget
 }
+# WPF UI and its embedded third-party notices, from the pinned restored package.
+$wpfVersion = ($appProject.Project.ItemGroup.PackageReference | Where-Object Include -eq 'WPF-UI').Version
+if (!$wpfVersion) { throw 'Cannot resolve the WPF UI version.' }
+$wpfLicenseTarget = Join-Path $package 'licenses/WPF-UI'
+New-Item -ItemType Directory -Path $wpfLicenseTarget -Force | Out-Null
+foreach ($notice in @('LICENSE.md', 'ThirdPartyNotices.txt')) {
+    $licenseFile = Join-Path $nugetRoot "wpf-ui/$wpfVersion/$notice"
+    if (!(Test-Path -LiteralPath $licenseFile)) { throw 'WPF UI license missing.' }
+    Copy-Item -LiteralPath $licenseFile -Destination $wpfLicenseTarget
+}
 # Explicit public inputs only. Never copy data/, source workspaces, or prior artifacts.
 foreach ($file in @('README.md', 'README.zh-CN.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $package
@@ -56,7 +66,8 @@ foreach ($folder in @('rules', 'docs')) {
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     $files = if ($folder -eq 'rules') { @('builtin.json', 'browsers.json', 'development.json', 'desktop-apps.json',
         'communication-cn.json', 'media-cn.json', 'native-tools.json', 'sets.json', 'rules.schema.json') } else {
-        @('rules.md', 'ai-rules.md', 'chat-exporters.md', 'quickstart.md', 'quickstart.zh-CN.md')
+        @('rules.md', 'rules.zh-CN.md', 'ai-rules.md', 'ai-rules.zh-CN.md', 'chat-exporters.md', 'chat-exporters.zh-CN.md',
+            'message-display.md', 'message-display.zh-CN.md', 'themes.md', 'themes.zh-CN.md', 'quickstart.md', 'quickstart.zh-CN.md')
     }
     foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $repo "$folder/$file") -Destination $target -Force }
 }

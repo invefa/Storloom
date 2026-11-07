@@ -1,0 +1,101 @@
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using Storloom.Core;
+using Storloom.Core.Chats;
+using Xunit;
+
+namespace Storloom.Tests;
+
+public sealed class MessagePresentationTests {
+    [Theory]
+    [InlineData(3,"<msg><img md5=\"0123456789abcdef0123456789abcdef\"/></msg>","image")]
+    [InlineData(34,"<msg><voicemsg voicelength=\"2300\"/></msg>","audio")]
+    [InlineData(43,"<msg><videomsg playlength=\"6\"/></msg>","video")]
+    [InlineData(47,"<msg><emoji md5=\"0123456789abcdef0123456789abcdef\"/></msg>","sticker")]
+    [InlineData(48,"<msg><location label=\"Fixture location\" poiname=\"Fixture place\"/></msg>","location")]
+    [InlineData(42,"<msg nickname=\"Fixture contact\" username=\"fixture\"/>","contact")]
+    [InlineData(50,"Call fixture","call")]
+    [InlineData(10002,"<sysmsg><replacemsg>Message recalled</replacemsg></sysmsg>","system")]
+    [InlineData(49,"<msg><appmsg><type>5</type><title>Fixture link</title><url>https://example.invalid</url></appmsg></msg>","link")]
+    [InlineData(49,"<msg><appmsg><type>6</type><title>fixture.pdf</title></appmsg></msg>","file")]
+    [InlineData(49,"<msg><appmsg><type>19</type><title>Forwarded chat</title></appmsg></msg>","forward")]
+    [InlineData(49,"<msg><appmsg><type>33</type><title>Fixture app</title></appmsg></msg>","miniapp")]
+    [InlineData(49,"<msg><appmsg><type>51</type><title>Fixture video</title></appmsg></msg>","channel")]
+    [InlineData(49,"<msg><appmsg><type>2000</type><wcpayinfo><feedesc>12.34</feedesc></wcpayinfo></appmsg></msg>","transfer")]
+    [InlineData(49,"<msg><appmsg><type>2001</type><sendertitle>Fixture gift</sendertitle></appmsg></msg>","redpacket")]
+    [InlineData(49,"<msg><appmsg><type>92</type><title>Fixture song</title></appmsg></msg>","music")]
+    [InlineData(49,"<msg><appmsg><type>99999</type></appmsg></msg>","unsupported")]
+    [InlineData(49,"<msg><broken>","unparsed")]
+    public void WeChatTypesHaveExplicitDisplayKinds(long type,string body,string kind) {
+        var original=new ChatMessage("WeChat","fixture","sender",1700000000,type,body);
+        var part=Assert.Single(MessagePresentation.Parse(original));Assert.Equal(kind,part.Kind);Assert.Equal(body,original.Text);
+    }
+    [Fact]
+    public void RepliesRetainReadableContextWithoutExpandingEmbeddedMarkup() {
+        var message=new ChatMessage("WeChat","","",0,49,"<msg><appmsg><type>57</type><title>My reply</title><refermsg><displayname>Fixture friend</displayname><content>Quoted text</content></refermsg></appmsg></msg>");
+        var part=Assert.Single(MessagePresentation.Parse(message));Assert.Equal("reply",part.Kind);Assert.Equal("My reply",part.Text);
+        Assert.Equal("Fixture friend",part.ReferenceSender);Assert.Equal("Quoted text",part.ReferenceText);
+        part=Assert.Single(MessagePresentation.Parse(message with{Text=message.Text.Replace("Quoted text","&lt;img src='https://example.invalid'&gt;")}));
+        Assert.Equal("",part.ReferenceText);
+    }
+    [Fact]
+    public void DtdAndUnknownJsonCannotExecuteOrLeakMarkupIntoTheDisplay() {
+        var message=new ChatMessage("WeChat","","",0,49,"<!DOCTYPE msg [<!ENTITY x SYSTEM 'file:///not-a-real-fixture'>]><msg>&x;</msg>");
+        Assert.Equal("unparsed",Assert.Single(MessagePresentation.Parse(message)).Kind);
+        var unknown=Assert.Single(MessagePresentation.Parse(message with{Text="{\"secret_markup\":\"<script>unsafe()</script>\"}"}));
+        Assert.Equal("unsupported",unknown.Kind);Assert.Empty(unknown.Text);
+        var card=Assert.Single(MessagePresentation.Parse(message with{Platform="QQ",Text="{\"app\":\"com.tencent.miniapp\",\"prompt\":\"Fixture app\"}"}));
+        Assert.Equal("miniapp",card.Kind);Assert.Equal("Fixture app",card.Title);
+    }
+    private static byte[] V(ulong value) {
+        var result=new List<byte>();do{byte next=(byte)(value&127);value>>=7;result.Add((byte)(next|(value>0?128:0)));}while(value>0);return result.ToArray();
+    }
+    private static byte[] I(int field,ulong value)=>[..V((ulong)(field<<3)),..V(value)];
+    private static byte[] B(int field,byte[] value)=>[..V((ulong)(field<<3|2)),..V((ulong)value.Length),..value];
+    private static byte[] S(int field,string value)=>B(field,Encoding.UTF8.GetBytes(value));
+    [Fact]
+    public void QQSegmentsKeepMixedTextImagesRepliesAndStickersInOrder() {
+        byte[] payload=[..B(40800,[..I(45002,1),..S(45101,"Fixture text")]),
+            ..B(40800,[..I(45002,2),..S(45402,"fixture.png")]),
+            ..B(40800,[..I(45002,7),..S(47421,"Quoted sender"),..B(47423,[..I(45002,1),..S(45101,"Quoted text")])]),
+            ..B(40800,[..I(45002,6),..S(47602,"/smile")])];
+        var parts=QQMessageParser.Parse(payload,2);Assert.Equal(new[]{"text","image","reply","sticker"},parts.Select(p=>p.Kind));
+        Assert.Equal("Fixture text",parts[0].Text);Assert.Contains("fixture.png",parts[1].MediaKeys!);
+        Assert.Equal("Quoted text",parts[2].ReferenceText);Assert.Equal("/smile",parts[3].Title);
+        Assert.Equal("unparsed",Assert.Single(QQMessageParser.Parse([0xff,0xff],2)).Kind);
+    }
+    [Theory]
+    [InlineData(3,"file")][InlineData(4,"audio")][InlineData(5,"video")][InlineData(8,"system")]
+    [InlineData(9,"redpacket")][InlineData(10,"link")][InlineData(11,"sticker")][InlineData(14,"markdown")]
+    [InlineData(16,"forward")][InlineData(17,"buttons")][InlineData(21,"call")]
+    public void QQSpecialSegmentsHaveTypedPlaceholders(int type,string expected) {
+        Assert.Equal(expected,Assert.Single(QQMessageParser.Parse(B(40800,I(45002,(ulong)type)),0)).Kind);
+    }
+    [Fact]
+    public void CompressedLegacyMessageAndUnknownSourceSurviveExportWithoutTruncation() {
+        string root=Path.Combine(AppContext.BaseDirectory,"fixtures",Guid.NewGuid().ToString("N")),source=Path.Combine(root,"account");Directory.CreateDirectory(source);
+        try {
+            string body="<msg><appmsg><type>57</type><title>Compressed reply</title><refermsg><content>Fixture quote</content></refermsg></appmsg></msg>";
+            byte[] bytes=Encoding.UTF8.GetBytes(body),packed=new byte[K4os.Compression.LZ4.LZ4Codec.MaximumOutputSize(bytes.Length)];
+            int length=K4os.Compression.LZ4.LZ4Codec.Encode(bytes,0,bytes.Length,packed,0,packed.Length);packed=packed[..length];
+            Assert.Equal(body,ChatExporter.DecodeLegacyContent(packed));Assert.Null(ChatExporter.DecodeLegacyContent([0xff,0xff]));
+            string unknown="<msg><appmsg><type>999999</type><data>"+new string('x',25000)+"</data></appmsg></msg>";
+            Assert.Equal(0,sqlite3_open_v2(Path.Combine(source,"message_0.db"),out nint db,6,0));
+            try{Assert.Equal(0,sqlite3_exec(db,"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,CompressContent);"+
+                "INSERT INTO MSG VALUES(49,1700000000,'fixture','preview',X'"+Convert.ToHexString(packed)+"');"+
+                "INSERT INTO MSG VALUES(49,1700000001,'fixture','"+unknown+"',NULL);",0,0,0));}finally{sqlite3_close_v2(db);}
+            var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"raw")),Path.Combine(root,"journals"));
+            var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.WeChat);
+            Assert.False(result.Complete);Assert.Equal(1,result.UnsupportedMessages);
+            var messages=File.ReadLines(Path.Combine(result.Directory,"messages.jsonl")).Select(l=>JsonSerializer.Deserialize<ChatMessage>(l)!).ToArray();
+            Assert.Equal("reply",messages[0].Parts[0].Kind);Assert.Equal(Convert.ToBase64String(packed),messages[0].ExtraRawBase64);
+            string page=File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory,"conversations"),"*.js").Single());
+            var reading=JsonSerializer.Deserialize<ChatMessage[]>(page[page.IndexOf('[')..(page.LastIndexOf(']')+1)])!;
+            Assert.Equal(unknown,reading[1].Text);Assert.Equal("unsupported",reading[1].Parts[0].Kind);
+        } finally {Directory.Delete(root,true);}
+    }
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)]string path,out nint db,int flags,nint vfs);
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_exec(nint db,[MarshalAs(UnmanagedType.LPUTF8Str)]string sql,nint callback,nint state,nint error);
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_close_v2(nint db);
+}

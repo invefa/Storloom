@@ -43,3 +43,9 @@ Use Open reading archive after export, or File > Open reading archive to select 
 Contact names prefer remarks, nicknames, aliases, then IDs when supported metadata is available. Recognized local images, legacy XOR image containers, and browser-supported local media can be shown. New encrypted images requiring a separate key, unsupported resource indexes, SILK voice, and unsupported contact tables remain visibly unavailable. Reading copies do not replace raw backups.
 
 To upgrade an old reading export, reopen its verified raw backup sidecar and export into a fresh directory. The original account need not be copied again. Prefer 1 database worker on a hard drive; try 2 or 4 on an SSD. Export reports include phaseSeconds for full backup verification, database work, and reader indexing.
+
+## Reading and appearance
+
+Reading copies use conversation navigation, typed cards, missing-media placeholders and collapsed original content. Re-export a verified raw backup to apply the new parser to an old reading copy. See [message coverage](message-display.md).
+
+Drag the log divider to resize. Manual scrolling or selection pauses following; the switch or Ctrl+Shift+L toggles it. Preferences offer monochrome Light, One Dark Pro, reduced motion and optional custom JSON colors. See [themes](themes.md).

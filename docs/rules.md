@@ -1,4 +1,4 @@
-# Rule reference / 规则参考
+# Rule reference
 
 Catalogs are local JSON data with `version: 1` and a non-empty `rules` array. Unknown properties, invalid enum values, duplicate IDs, invalid globs, negative sizes, and unknown path tokens are rejected. [JSON Schema](../rules/rules.schema.json) assists editors; the core engine performs runtime validation.
 
@@ -14,7 +14,7 @@ Catalogs are local JSON data with `version: 1` and a non-empty `rules` array. Un
 | `include`, `exclude` | Relative file globs; includes default to `["**"]`, excludes to `[]` |
 | `processes` | Executable names without `.exe`; must be closed before execution |
 | `enabled`, `recursive` | Both default to true; disabled rules can still be explicitly selected in CLI |
-| `risk` | `Review` (default, initially unchecked) or `Low` |
+| `risk` | `Review` (default) or `Low`; GUI items start unchecked in both cases |
 | `minimumAgeHours` | Default 168; both creation and last-write must be older; 0 through 876000 |
 | `minimumBytes`, `maximumBytes` | Inclusive length bounds; default minimum 0, no maximum |
 
@@ -32,7 +32,7 @@ Example: copy old logs from one application into a **new** backup directory:
     "id": "archive-example-logs",
     "name": "Archive Example logs",
     "description": "Copy logs older than 30 days; keep originals.",
-    "names": { "zh-CN": "归档 Example 旧日志" },
+    "names": { "en": "Archive Example logs" },
     "action": "Copy",
     "roots": ["%LocalAppData%\\ExampleApp\\Logs"],
     "destinationRoot": "%BackupRoot%\\ExampleApp\\Logs-archive",
@@ -67,7 +67,6 @@ The drive letters above are placeholders. `allowedDrives`/`protectedRoots` restr
 
 Deletion is permanent file-by-file deletion, not a recursive directory wipe. System directories, installed program directories, desktop/documents/downloads, credentials, repository internals, and broad roots are protected. Cache cleanup never assumes the entire application folder is disposable. File age, identity, metadata, link count, process status, and path boundaries are checked again before deletion. Permission failures are reported without taking ownership.
 
-中文：规则只描述数据匹配，不执行脚本。导入后先扫描，检查“动作、根目录、目标目录、候选文件、跳过原因”。`Move` 仅对命中的文件执行“复制、整体核验、再次检查、删除源文件”；完整聊天备份请使用聊天页的原始目录备份。`Low` 只影响界面默认勾选，不代表任何文件都可无条件删除。
 
 ## Native tool recipes
 

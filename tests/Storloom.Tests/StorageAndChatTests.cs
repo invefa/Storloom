@@ -148,12 +148,13 @@ public sealed class StorageAndChatTests : IDisposable {
             Path.Combine(root, "backup")), Dir("journals"));
         var result = new ChatExporter().ExportVerifiedBackup(backup.Manifest,
             Path.Combine(root, "export"), ChatPlatform.QQ);
-        Assert.Equal(2, result.Messages); Assert.True(result.Complete);
+        Assert.Equal(2, result.Messages); Assert.False(result.Complete); Assert.Equal(2, result.UnsupportedMessages);
         string html = File.ReadAllText(Path.Combine(result.Directory, "messages.html"));
         Assert.DoesNotContain("<script>alert", html);
         string page = File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory, "conversations"), "*.js").Single());
         Assert.DoesNotContain("<script>", page); Assert.Contains("\\u003Cscript\\u003E", page);
-        Assert.Contains("document.createTextNode(m.Text)", File.ReadAllText(Path.Combine(result.Directory, "reader.js")));
+        string reader = File.ReadAllText(Path.Combine(result.Directory, "reader.js"));
+        Assert.Contains("node.textContent = text", reader); Assert.DoesNotContain("innerHTML", reader);
         Assert.Equal(2, File.ReadLines(Path.Combine(result.Directory, "messages.jsonl")).Count());
         Assert.True(File.Exists(database));
     }

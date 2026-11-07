@@ -102,3 +102,57 @@ Self-contained distributions include Microsoft .NET runtime binaries. The exact 
 ## Microsoft Edge WebView2 SDK
 
 The Windows application includes the Microsoft.Web.WebView2 managed SDK and loader for the optional embedded archive reader. The exact restored SDK's LICENSE.txt and NOTICE.txt are included under licenses/Microsoft.Web.WebView2 in release packages. The Microsoft Edge WebView2 Runtime is installed separately and is not bundled. Source and terms: https://www.nuget.org/packages/Microsoft.Web.WebView2 and https://learn.microsoft.com/microsoft-edge/webview2/.
+
+## WPF UI 4.3.0
+
+Source: https://github.com/lepoco/wpfui
+Used by the native desktop frontend. Release packages include the exact restored LICENSE.md and embedded-component ThirdPartyNotices.txt under licenses/WPF-UI/.
+
+MIT License
+
+Copyright (c) 2021-2025 Leszek Pomianowski and WPF UI Contributors. https://lepo.co/
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## K4os.Compression.LZ4 1.3.8
+
+Source: https://github.com/MiloszKrajewski/K4os.Compression.LZ4/tree/1.3.8
+Used to read legacy WeChat LZ4 message bodies.
+
+MIT License
+
+Copyright (c) 2017 Milosz Krajewski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
