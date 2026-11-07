@@ -36,3 +36,5 @@ Quoted replies can jump to their original message within the same conversation, 
 
 - [WeChat media formats and offline image-key derivation](https://github.com/qiaodogbear/ChatTrace/blob/f9fcdb42e8fb99a527c0bcd7d6ff7ea4bc891563/src/chattrace/service/image_key.py).
 - [NTQQ group reply links](https://github.com/QQBackup/nt_msg_db_util/blob/master/db_docs/group_msg_table/summary.md) and [cached forwarding fields](https://github.com/QQBackup/nt_msg_db_util/blob/master/msgdb/proto/group_40900.proto).
+
+The reader offers Default, WeChat and QQ-inspired palettes with independent light/dark switching. The toolbar remembers the selected palette in local browser storage when available. No transcript is stored by that preference. The default light scheme remains grayscale. Message bubbles use 6 px vertical and 10 px horizontal padding; source bubbles and quote blocks are also compact.

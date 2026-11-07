@@ -363,5 +363,9 @@
   "ShowWindow": "显示 Storloom",
   "ReaderJumpReference": "跳转到被引用的消息",
   "ReaderThumbnail": "仅显示缩略图，原图不可用。",
-  "ReaderForwardMissing": "此备份只有转发卡片，未包含可读取的内嵌消息。可在下方查看原始内容。"
+  "ReaderForwardMissing": "此备份只有转发卡片，未包含可读取的内嵌消息。可在下方查看原始内容。",
+  "ReaderPaletteWeChat": "微信",
+  "ReaderPalette": "配色方案",
+  "ReaderPaletteDefault": "默认",
+  "ReaderPaletteQQ": "QQ"
 }

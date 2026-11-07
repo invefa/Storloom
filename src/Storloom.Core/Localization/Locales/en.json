@@ -363,5 +363,9 @@
   "ShowWindow": "Show Storloom",
   "ReaderJumpReference": "Jump to quoted message",
   "ReaderThumbnail": "Thumbnail only; the full image is unavailable.",
-  "ReaderForwardMissing": "This backup contains a forwarding card but no readable embedded messages. The original payload is available below."
+  "ReaderForwardMissing": "This backup contains a forwarding card but no readable embedded messages. The original payload is available below.",
+  "ReaderPaletteWeChat": "WeChat",
+  "ReaderPalette": "Color scheme",
+  "ReaderPaletteDefault": "Default",
+  "ReaderPaletteQQ": "QQ"
 }

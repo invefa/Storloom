@@ -38,3 +38,5 @@
 
 - [微信媒体格式与离线图片密钥派生](https://github.com/qiaodogbear/ChatTrace/blob/f9fcdb42e8fb99a527c0bcd7d6ff7ea4bc891563/src/chattrace/service/image_key.py)。
 - [NTQQ群引用关联](https://github.com/QQBackup/nt_msg_db_util/blob/master/db_docs/group_msg_table/summary.md)与[转发缓存字段](https://github.com/QQBackup/nt_msg_db_util/blob/master/msgdb/proto/group_40900.proto)。
+
+阅读器提供默认、微信风格与QQ风格配色，配色和明暗可分别选择。浏览器允许时会在本地记住配色选择，此设置不保存聊天内容。默认浅色仍使用白灰黑。消息气泡上下内边距为6像素，左右为10像素；原始内容气泡和引用块也同步收紧。

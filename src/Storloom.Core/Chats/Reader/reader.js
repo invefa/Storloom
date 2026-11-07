@@ -14,7 +14,18 @@
  document.documentElement.lang = index.language;
  document.title = labels.ChatArchive; text('archive-title', labels.ChatArchive);
  $('contacts-search').placeholder = labels.ReaderSearch; $('message-search').placeholder = labels.ReaderPageSearch;
- $('theme').title = labels.ReaderTheme; text('theme', labels.ReaderTheme);
+ $('theme').title = labels.ReaderTheme; $('theme').setAttribute('aria-label', labels.ReaderTheme); text('theme', '◐');
+ $('palette').title = label('ReaderPalette'); $('palette').setAttribute('aria-label', label('ReaderPalette'));
+ for (const [value, name] of [['default','ReaderPaletteDefault'],['wechat','ReaderPaletteWeChat'],['qq','ReaderPaletteQQ']]) {
+  const option = element('option', label(name)); option.value = value; $('palette').append(option);
+ }
+ function applyPalette(value) {
+  const valid = ['default','wechat','qq'].includes(value) ? value : 'default';
+  document.body.classList.toggle('palette-wechat', valid === 'wechat'); document.body.classList.toggle('palette-qq', valid === 'qq');
+  $('palette').value = valid;
+ }
+ try { applyPalette(localStorage.getItem('storloom.reader.palette')); } catch { applyPalette('default'); }
+ $('palette').onchange = () => { applyPalette($('palette').value); try { localStorage.setItem('storloom.reader.palette', $('palette').value); } catch {} };
  text('previous', labels.ReaderPrevious); text('next', labels.ReaderNext);
  text('chat-title', labels.ReaderSelect);
  text('notice', labels.ReaderNotice + (index.unresolvedMedia ? ' ' + label('ReaderUnresolved') + ' ' + index.unresolvedMedia : '') +

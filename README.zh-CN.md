@@ -55,7 +55,7 @@ Windows上安装.NET 10 SDK。版本在.NET 10范围内滚动选择。也可使�
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.5.1
+./scripts/Publish.ps1 -Version 0.6.1
 ```
 
 脚本按白名单打包程序、规则、文档和许可证，检查本机路径，生成ZIP和SHA-256，不复制私有数据或测试夹具。CI在Windows执行构建和测试，打包工作流只生成产物，不自动创建GitHub Release。图标源为SVG，`scripts/Build-Icon.ps1`可生成Windows多尺寸ICO。
@@ -73,3 +73,5 @@ MIT许可证。第三方组件与运行时许可见[第三方声明](THIRD-PARTY
 新版导出按微信与NTQQ的不同结构生成消息卡片，保留混合消息顺序，原始内容默认折叠。引用、转账、媒体、文件、卡片、位置、合并转发及系统消息有对应展示或明确占位。报告分别统计未知消息与不可用媒体，不代表所有客户端格式或媒体均可恢复。详见[消息展示范围](docs/message-display.zh-CN.md)。旧阅读版不会自动替换文件，可从已核验的原始备份重新导出以使用新版解析。
 
 首选项可将关闭按钮设为隐藏到托盘。隐藏期间任务继续执行，通过托盘图标可返回窗口或退出。任务运行时关闭会请求确认；确认退出后，会等待任务取消完成再结束程序。
+
+阅读器顶部可选择默认、微信或QQ配色，每套都支持浅色与深色，配色选择会单独记住。消息、引用和原始内容气泡采用更紧凑的内边距。

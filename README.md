@@ -55,7 +55,7 @@ Install .NET 10 SDK on Windows. The baseline rolls forward within .NET 10 featur
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.5.1
+./scripts/Publish.ps1 -Version 0.6.1
 ```
 
 The package script copies only public binaries, rules, documentation, and notices into a fresh directory, audits local identity paths, and emits ZIP/SHA-256. It never copies `data/` or test fixtures. CI builds/tests on Windows; the packaging workflow creates artifacts without publishing a GitHub Release. The icon source is SVG; `scripts/Build-Icon.ps1` regenerates the multi-size Windows ICO.
@@ -79,3 +79,5 @@ The main frontend uses WPF and WPF UI 4.3.0; WebView2 is only initialized for th
 New reading exports derive typed message parts for WeChat and NTQQ, retain mixed-segment order, and collapse all original payloads behind View original content. Quotes, payments, media, files, cards, locations, forwarding and system records have display cards or explicit placeholders. Unsupported message counts and missing/unsupported media are reported separately. This does not promise recovery of unavailable assets or compatibility with every client schema. See [message coverage and research](docs/message-display.md). Existing exports keep their existing reader files; re-export a verified raw backup to use the updated parser.
 
 The close button can hide the app to its notification icon when enabled in Preferences. Tasks continue while hidden; use the icon to restore the window or exit. Closing during a task asks for confirmation, and a confirmed exit waits for cancellation to finish.
+
+The reading toolbar offers Default, WeChat and QQ color schemes, each with light and dark variants. Scheme choice is remembered separately from brightness. Chat bubbles, quoted blocks and original-content bubbles use compact padding.

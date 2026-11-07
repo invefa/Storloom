@@ -595,6 +595,38 @@ public sealed class FormTests {
             File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-reference-dark.png"),stream.ToArray());
         } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
+    [Theory]
+    [InlineData("en")]
+    [InlineData("zh-CN")]
+    public void ReaderPalettesSupportBothBrightnessModesAndRememberTheScheme(string locale) => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=AppTheme.Light,ReduceMotion=true});
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,IsSender);"+
+            "INSERT INTO MSG VALUES(1,1700000000,'Alex','A compact conversation preview.',0),(1,1700000001,'Alex','This is a reply from me.',1),(10000,1700000002,'Alex','Alex invited Sam',0);");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.WeChat);
+        var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        try {
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
+            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="3"){Pump();Thread.Sleep(10);}
+            Assert.Equal("3",Query("document.querySelectorAll('.message').length"));
+            Assert.Equal("\"6px 10px\"",Query("getComputedStyle(document.querySelector('.bubble')).padding"));
+            foreach(var entry in new[]{("wechat","rgb(237, 237, 237)","rgb(31, 31, 31)"),("qq","rgb(243, 247, 252)","rgb(23, 35, 52)")}) {
+                Query("document.getElementById('palette').value='"+entry.Item1+"';document.getElementById('palette').dispatchEvent(new Event('change'));true");
+                foreach(bool dark in new[]{false,true}) {
+                    Query("document.body.classList.toggle('dark',"+(dark?"true":"false")+");true");
+                    Assert.Equal(System.Text.Json.JsonSerializer.Serialize(dark?entry.Item3:entry.Item2),Query("getComputedStyle(document.body).backgroundColor"));
+                    Assert.Equal("true",Query("document.querySelector('aside header').scrollWidth<=document.querySelector('aside header').clientWidth"));
+                    Wait(AsResult(Task.Delay(150)));using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
+                    DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
+                    File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-"+entry.Item1+"-"+(dark?"dark":"light")+"-"+locale+".png"),stream.ToArray());
+                }
+            }
+            Assert.Equal("\"qq\"",Query("localStorage.getItem('storloom.reader.palette')"));Query("location.reload();true");
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="3"){Pump();Thread.Sleep(10);}
+            Assert.Equal("\"qq\"",Query("document.getElementById('palette').value"));
+        } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
     private static void Database(string path,string sql) {
         Assert.Equal(0,sqlite3_open_v2(path,out nint db,6,0));try{Assert.Equal(0,sqlite3_exec(db,sql,0,0,0));}finally{sqlite3_close_v2(db);}
     }
