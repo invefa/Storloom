@@ -27,6 +27,9 @@ public sealed partial class ShellWindow : ThemeWindow {
     private GridSplitter sidebarDivider = null!;
     private Button sidebarToggle = null!;
     private Button? operationButton;
+    private DockPanel statusFooter = null!;
+    private bool sidebarAnimating;
+    private int sidebarTransition;
     private string currentPage = "cleanup";
     public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
         MinWidth = 1040; MinHeight = 640; WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -40,7 +43,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             if (operation != null) { operation.Cancel(); e.Cancel = true; status.Text = L.T("Busy"); }
             else {
                 SetCapturedKey(null);
-                preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
+                preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed || sidebarAnimating ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
                     LogHeight = operationView.Expanded && logRow.ActualHeight > 80 ? logRow.ActualHeight : preferences.LogHeight };
                 JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
             }
@@ -79,7 +82,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             navigation.Items.Add(new ListBoxItem { Content = contents, Tag = id, ToolTip = L.T(key) });
         }
         navigation.SelectionChanged += (_, _) => { if (navigation.SelectedItem is ListBoxItem selected) Navigate((string)selected.Tag); };
-        var sidebar = View.Grid(View.Auto, View.Fill); sidebar.SetResourceReference(Panel.BackgroundProperty, "Sidebar");
+        var sidebar = View.Grid(View.Auto, View.Fill); sidebar.ClipToBounds = true; sidebar.SetResourceReference(Panel.BackgroundProperty, "Sidebar");
         var collapseSidebar = sidebarToggle = View.IconButton("M 1,3 L 15,3 M 1,8 L 15,8 M 1,13 L 15,13", "ToggleSidebar", ToggleSidebar);
         collapseSidebar.Name = "toggle_sidebar"; collapseSidebar.HorizontalAlignment = HorizontalAlignment.Left; collapseSidebar.Margin = new Thickness(8, 4, 0, 2);
         View.Add(sidebar, collapseSidebar, 0); View.Add(sidebar, navigation, 1);
@@ -101,7 +104,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             AnimateLog(target); logSplitter.IsEnabled = expanded;
         };
         logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 40; };
-        var footer = new DockPanel { Margin = new Thickness(18, 5, 12, 5) };
+        var footer = statusFooter = new DockPanel { Margin = new Thickness(18, 5, 12, 5) };
         cancel = Button("Cancel", () => operation?.Cancel()); cancel.Visibility = Visibility.Collapsed;
         DockPanel.SetDock(cancel, Dock.Right); footer.Children.Add(cancel);
         status = View.Text(L.T("CatalogSummary", engine.Catalog.Rules.Count), color: "Muted"); status.Margin = new Thickness(0);
@@ -120,18 +123,33 @@ public sealed partial class ShellWindow : ThemeWindow {
         splitter.Template = template; return splitter;
     }
     private void ToggleSidebar() {
-        preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
-            SidebarCollapsed = !preferences.SidebarCollapsed }; ApplySidebar();
+        preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed || sidebarAnimating ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
+            SidebarCollapsed = !preferences.SidebarCollapsed }; ApplySidebar(true);
     }
-    private void ApplySidebar() {
+    private void ApplySidebar(bool animate = false) {
         bool compact = preferences.SidebarCollapsed;
-        sidebarColumn.MinWidth = compact ? 44 : 128; sidebarColumn.MaxWidth = compact ? 44 : 260;
-        sidebarColumn.Width = new GridLength(compact ? 44 : Math.Clamp(preferences.SidebarWidth, 128, 260)); sidebarDivider.IsEnabled = !compact;
-        sidebarToggle.HorizontalAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
-        sidebarToggle.Margin = new Thickness(compact ? 0 : 8, 4, 0, 2);
+        double previous = sidebarColumn.ActualWidth, target = compact ? 44 : Math.Clamp(preferences.SidebarWidth, 128, 260);
+        int transition = ++sidebarTransition; sidebarColumn.BeginAnimation(ColumnDefinition.WidthProperty, null);
+        sidebarAnimating = animate && !Theme.ReduceMotion && SystemParameters.ClientAreaAnimation;
+        sidebarColumn.MinWidth = sidebarAnimating ? 44 : compact ? 44 : 128;
+        sidebarColumn.MaxWidth = sidebarAnimating ? 260 : compact ? 44 : 260;
+        sidebarColumn.Width = new GridLength(target); sidebarDivider.IsEnabled = !compact && !sidebarAnimating;
+        UpdateSidebarContents(compact, sidebarAnimating);
+        if (!sidebarAnimating) return;
+        var animation = new GridLengthTransition(previous, target) { Duration = TimeSpan.FromMilliseconds(150), FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop };
+        animation.Completed += (_, _) => {
+            if (transition != sidebarTransition) return;
+            sidebarAnimating = false; sidebarColumn.MinWidth = compact ? 44 : 128; sidebarColumn.MaxWidth = compact ? 44 : 260;
+            sidebarDivider.IsEnabled = !compact; UpdateSidebarContents(compact, false);
+        };
+        sidebarColumn.BeginAnimation(ColumnDefinition.WidthProperty, animation);
+    }
+    private void UpdateSidebarContents(bool compact, bool moving) {
+        sidebarToggle.HorizontalAlignment = compact && !moving ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        sidebarToggle.Margin = new Thickness(compact && !moving ? 0 : 8, 4, 0, 2);
         foreach (ListBoxItem item in navigation.Items) {
-            item.HorizontalContentAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
-            var contents = (DockPanel)item.Content; var label = contents.Children.OfType<TextBlock>().Single(); label.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            item.HorizontalContentAlignment = compact && !moving ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+            var contents = (DockPanel)item.Content; var label = contents.Children.OfType<TextBlock>().Single(); label.Visibility = compact || moving ? Visibility.Collapsed : Visibility.Visible;
             contents.Children.OfType<System.Windows.Shapes.Path>().Single().Margin = new Thickness(0, 0, compact ? 0 : 8, 0);
         }
     }
@@ -180,14 +198,16 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 40);
-        operationView.Start(); cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed; status.Text = L.T("OperationStarting"); bool complete = false;
+        operationView.Start(); cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
+        status.Visibility = Visibility.Collapsed; statusFooter.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
+        status.Text = L.T("OperationStarting"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested; }
         catch (OperationCanceledException) { status.Text = L.T("Cancelled"); }
         catch (Exception ex) { Error(ex); }
         finally { operation = null; navigation.IsEnabled = menu.IsEnabled = true;
             foreach (var control in disabled) control.IsEnabled = true;
             if (operationButton != null) operationButton.Content = previousContent;
-            cancel.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
+            cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
     }
     private static IEnumerable<Control> Controls(DependencyObject root) {
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) {

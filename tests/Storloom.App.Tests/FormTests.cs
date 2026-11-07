@@ -145,6 +145,76 @@ public sealed class FormTests {
     [Theory]
     [InlineData(AppTheme.Light)]
     [InlineData(AppTheme.OneDark)]
+    public void NativeHorizontalWheelTargetsTheHoveredPaneAndPausesLogFollowing(AppTheme theme) => OnUi(() => {
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});var window=new ThemeWindow("Horizontal wheel fixture",1000,600){ShowInTaskbar=false};
+        var layout=new Grid();layout.ColumnDefinitions.Add(new ColumnDefinition());layout.ColumnDefinitions.Add(new ColumnDefinition());window.Body.Children.Add(layout);
+        var table=new DataGrid{IsReadOnly=true,AutoGenerateColumns=false};table.Columns.Add(new DataGridTextColumn{Header="Fixture path",Binding=new System.Windows.Data.Binding("Name"),Width=1600});
+        table.ItemsSource=Enumerable.Range(0,100).Select(i=>new{Name="Isolated row "+i}).ToArray();layout.Children.Add(table);
+        var operation=new OperationPanel();Grid.SetColumn(operation,1);layout.Children.Add(operation);
+        try {
+            window.Show();Pump();operation.Start();operation.AddLog(new string('x',500));Pump();window.UpdateLayout();
+            var scroll=Descendants(table).OfType<ScrollViewer>().Single(s=>s.Name=="DG_ScrollViewer");var handle=new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            void Wheel(FrameworkElement target,int delta) {
+                var point=target.PointToScreen(new Point(60,80));long coordinates=(ushort)(short)point.X|((long)(ushort)(short)point.Y<<16);
+                SendMessageW(handle,0x020e,(nint)((long)(ushort)(short)delta<<16),(nint)coordinates);Pump();window.UpdateLayout();
+            }
+            Assert.True(scroll.ScrollableWidth>0);Wheel(table,120);Assert.True(scroll.HorizontalOffset>0);double right=scroll.HorizontalOffset;
+            Wheel(table,-60);Assert.InRange(scroll.HorizontalOffset,0,right-0.1);Assert.Equal(0,scroll.VerticalOffset);double retained=scroll.HorizontalOffset;
+            Assert.True(operation.Follow);Wheel(operation.Log,120);Assert.True(operation.Log.HorizontalOffset>0);Assert.False(operation.Follow);Assert.Equal(retained,scroll.HorizontalOffset);
+            Wheel(table,-1200);Assert.InRange(scroll.HorizontalOffset,0,0.1);Capture(window,"horizontal-wheel-"+theme);
+        } finally {window.Close();}
+    });
+    [DllImport("user32.dll")]private static extern nint SendMessageW(nint hwnd,uint message,nint wParam,nint lParam);
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void BusyNavigationKeepsItsPaletteAndStatusHasOneVisibleOwner(AppTheme theme) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,ReduceMotion=true,Language="en"});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;
+        try {
+            window.Show();Pump();var type=typeof(ShellWindow);var action=Descendants(window).OfType<Button>().Single(b=>b.Name=="scan_cleanup");
+            type.GetField("operationButton",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,action);
+            task=(Task)type.GetMethod("Run",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,new object[]{new Func<CancellationToken,Task>(_=>completion.Task)})!;
+            Pump();window.UpdateLayout();var navigation=Descendants(window).OfType<ListBox>().Single(l=>l.Name=="navigation");Assert.False(navigation.IsEnabled);
+            var sample=navigation.TranslatePoint(new Point(navigation.ActualWidth/2,navigation.ActualHeight-20),window);
+            var bitmap=new RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(window);
+            byte[] pixel=new byte[4];bitmap.CopyPixels(new Int32Rect((int)sample.X,(int)sample.Y,1,1),pixel,4,0);var sidebar=((SolidColorBrush)Theme.Brush("Sidebar")).Color;
+            Assert.Equal(sidebar.B,pixel[0]);Assert.Equal(sidebar.G,pixel[1]);Assert.Equal(sidebar.R,pixel[2]);
+            Assert.Single(Descendants(window).OfType<TextBlock>().Where(t=>t.IsVisible&&t.Text==L.T("OperationStarting")));Capture(window,"busy-palette-"+theme);
+            completion.SetResult();Wait(AsResult(task));Pump();
+            Assert.Single(Descendants(window).OfType<TextBlock>().Where(t=>t.IsVisible&&t.Text==L.T("OperationStarting")));Assert.True(navigation.IsEnabled);
+            var panel=Descendants(window).OfType<OperationPanel>().Single();panel.ToggleExpanded();Pump();
+            Assert.Single(Descendants(window).OfType<TextBlock>().Where(t=>t.IsVisible&&t.Text==L.T("OperationStarting")));Capture(window,"single-status-"+theme);
+        } finally {completion.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]
+    public void SidebarTransitionCanReverseAndTransparentFeedbackDoesNotFlashWhite() => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=false});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();var toggle=Descendants(window).OfType<Button>().Single(b=>b.Name=="toggle_sidebar");
+            var frame=(Border)toggle.Template.FindName("frame",toggle);var background=((SolidColorBrush)Theme.Brush("Sidebar")).Color;
+            toggle.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent});
+            for(int i=0;i<12;i++) {
+                Pump();Thread.Sleep(10);var color=((SolidColorBrush)frame.Background).Color;
+                double Composite(byte value,byte under)=>value*color.A/255d+under*(255-color.A)/255d;
+                Assert.InRange(Composite(color.R,background.R),background.R-1,background.R+35);
+                Assert.InRange(Composite(color.G,background.G),background.G-1,background.G+35);
+                Assert.InRange(Composite(color.B,background.B),background.B-1,background.B+35);
+            }
+            toggle.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonUpEvent});
+            var divider=Descendants(window).OfType<GridSplitter>().Single(s=>s.Name=="sidebar_splitter");var column=((Grid)divider.Parent).ColumnDefinitions[0];double expanded=column.ActualWidth;
+            toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();
+            if(SystemParameters.ClientAreaAnimation) {Assert.True(column.HasAnimatedProperties);Thread.Sleep(35);Pump();window.UpdateLayout();Assert.InRange(column.ActualWidth,44,expanded);}
+            toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            for(int i=0;i<25;i++){Thread.Sleep(10);Pump();}window.UpdateLayout();
+            Assert.InRange(column.ActualWidth,expanded-1,expanded+1);Assert.True(divider.IsEnabled);
+            Assert.All(Descendants(window).OfType<TextBlock>().Where(t=>t.Name=="nav_label"),t=>Assert.True(t.IsVisible));Capture(window,"sidebar-animation-restored");
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
     public void HeaderSizingDoubleClickTooltipsAndMenuSeparatorsWorkTogether(AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true,SidebarCollapsed=true});
         var window=new ShellWindow(fixture){ShowInTaskbar=false};

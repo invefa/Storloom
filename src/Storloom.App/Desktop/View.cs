@@ -112,6 +112,7 @@ public class ThemeWindow : FluentWindow {
         View.Add(root, titleBar, 0); View.Add(root, Body, 1); Content = root;
         Loaded += (_, _) => Theme.Enter(Body);
         SourceInitialized += (_, _) => UpdateFrame(); Activated += (_, _) => UpdateFrame(); Deactivated += (_, _) => UpdateFrame();
+        HorizontalWheel.Attach(this);
     }
     protected override void SetWindowChrome() => System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome {
         CaptionHeight = 0, GlassFrameThickness = new Thickness(0), ResizeBorderThickness = ResizeMode == ResizeMode.NoResize ? new Thickness(0) : new Thickness(4), UseAeroCaptionButtons = false });

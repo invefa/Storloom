@@ -18,8 +18,11 @@ public static class ControlFeedback {
         control.PreviewMouseLeftButtonUp += (_, _) => { control.SetValue(PressedProperty, false); Paint(control, true); };
         control.PreviewKeyDown += (_, e) => { if (e.Key is Key.Space or Key.Enter) { control.SetValue(PressedProperty, true); Paint(control, true); } };
         control.PreviewKeyUp += (_, e) => { if (e.Key is Key.Space or Key.Enter) { control.SetValue(PressedProperty, false); Paint(control, true); } };
-        control.IsEnabledChanged += (_, _) => Paint(control, false);
-        control.IsKeyboardFocusWithinChanged += (_, _) => { control.SetValue(PressedProperty, false); Paint(control, false); };
+        control.IsEnabledChanged += (_, _) => { if (!control.IsEnabled) control.SetValue(PressedProperty, false); Paint(control, false); };
+        control.IsKeyboardFocusWithinChanged += (_, _) => {
+            if (control is TextBox || !control.IsKeyboardFocusWithin) control.SetValue(PressedProperty, false);
+            Paint(control, control is not TextBox);
+        };
         if (control is ToggleButton toggle) { toggle.Checked += (_, _) => Paint(control, true); toggle.Unchecked += (_, _) => Paint(control, true); }
         if (control is ListBoxItem item) { item.Selected += (_, _) => Paint(control, true); item.Unselected += (_, _) => Paint(control, true); }
     }
@@ -55,9 +58,14 @@ public static class ControlFeedback {
                 (byte)(color.G + (ink.G - color.G) * amount), (byte)(color.B + (ink.B - color.B) * amount));
         }
         Color previous = (frame.Background as SolidColorBrush)?.Color ?? color;
-        var brush = new SolidColorBrush(color); frame.Background = brush;
+        // Transparent white interpolates through bright RGB values before it becomes opaque.
+        // Fade the target hue in/out, and attach the brush only after its clock is initialized.
+        if (previous.A == 0) previous = System.Windows.Media.Color.FromArgb(0, color.R, color.G, color.B);
+        if (color.A == 0) color = System.Windows.Media.Color.FromArgb(0, previous.R, previous.G, previous.B);
+        var brush = new SolidColorBrush(color);
         if (animate && !Theme.ReduceMotion && SystemParameters.ClientAreaAnimation)
             brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(previous, color, TimeSpan.FromMilliseconds((bool)control.GetValue(PressedProperty) ? 65 : 100)));
+        frame.Background = brush;
     }
     private static Color ParentColor(DependencyObject control) {
         for (var parent = VisualTreeHelper.GetParent(control); parent != null; parent = VisualTreeHelper.GetParent(parent)) {
