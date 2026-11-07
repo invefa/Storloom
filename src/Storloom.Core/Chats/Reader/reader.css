@@ -19,3 +19,27 @@ aside header{gap:8px;padding:14px}.appearance{display:flex;align-items:center;ga
 body.palette-wechat{--canvas:#ededed;--surface:#fff;--sidebar:#e5e5e5;--ink:#1f1f1f;--muted:#707070;--line:#c9c9c9;--accent:#079b50;--self:#95ec69;--selected:#d5d5d5}body.palette-wechat.dark{--canvas:#1f1f1f;--surface:#2c2c2c;--sidebar:#181818;--ink:#e5e5e5;--muted:#a1a1a1;--line:#505050;--accent:#38c979;--self:#2c6d44;--selected:#363636}
 body.palette-qq{--canvas:#f3f7fc;--surface:#fff;--sidebar:#e7eff8;--ink:#24334c;--muted:#66758b;--line:#c8d6e7;--accent:#1687e5;--self:#d9edff;--selected:#c6e3ff}body.palette-qq.dark{--canvas:#172334;--surface:#213147;--sidebar:#111c2b;--ink:#dbe7f7;--muted:#9baec7;--line:#405774;--accent:#59adff;--self:#234b73;--selected:#2b405a}
 @media(max-width:720px){aside header{flex-wrap:wrap}.appearance{margin-left:auto}}
+
+/* Keep the message, reference, and source widths independent of each other. */
+.message{display:grid;grid-template-columns:34px minmax(0,1fr)}.message .avatar{grid-column:1;grid-row:1}.message .content{grid-column:2;grid-row:1;display:flex;flex-direction:column;align-items:flex-start;max-width:100%;min-width:0}
+.message.self{grid-template-columns:minmax(0,1fr) 34px}.message.self .avatar{grid-column:2}.message.self .content{grid-column:1;align-items:flex-end}
+.bubble{width:fit-content;max-width:min(80%,800px);min-width:0}.bubble img,.bubble video{max-width:min(100%,560px)}
+.source{width:fit-content;max-width:min(100%,800px)}.source[open]{width:min(100%,800px)}.source-bubble{min-width:0}.reference-zone{max-width:min(80%,800px)}.reference-zone:empty{display:none}
+.message.system{display:flex}.message.system .content{align-items:center;max-width:85%}.system .bubble{max-width:100%}
+nav button{padding:6px 10px;margin:2px 0}nav strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}nav small{font-size:11px;line-height:1.4}
+.quote-sender,.quote-text{display:block}.quote-sender{font-weight:600}.quote-slot:empty{display:none}.quote{border-radius:3px}.quote[role=button]:hover{color:var(--ink)}
+.forward-more{display:block;margin-top:6px;padding:3px 0;border:0;background:transparent;color:var(--accent);font-size:12px}.forward-more:hover{text-decoration:underline;background:transparent}
+body.palette-wechat{--canvas:#f9f9f9;--surface:#fff;--sidebar:#ededed;--ink:#171717;--muted:#929299;--line:#dedede;--accent:#099657;--self:#a0f39d;--self-ink:#17251b;--selected:#dfdfdf;--quote-line:#b6b6bb}
+body.palette-wechat.dark{--canvas:#1e1e1e;--surface:#303030;--sidebar:#181818;--ink:#e6e6e6;--muted:#8a8a8d;--line:#4a4a4a;--accent:#2bcc8b;--self:#2bcc8b;--self-ink:#102b22;--selected:#333;--quote-line:#545457}
+body.palette-qq{--canvas:#f4f4f4;--surface:#fff;--sidebar:#ededed;--ink:#171717;--muted:#929292;--line:#dedede;--accent:#1687e5;--self:#ccecff;--self-ink:#151b20;--selected:#dfdfdf;--quote-line:#b5ddef}
+body.palette-qq.dark{--canvas:#202020;--surface:#383838;--sidebar:#191919;--ink:#eee;--muted:#929292;--line:#4a4a4a;--accent:#8abce1;--self:#383838;--self-ink:#eee;--selected:#333;--quote-line:#515151}
+.palette-wechat .bubble,.palette-qq .bubble{border:0}.palette-wechat .message.self .bubble,.palette-qq .message.self .bubble{color:var(--self-ink)}
+.palette-qq .avatar{border-radius:50%}.palette-qq .bubble{border-radius:14px}.palette-qq blockquote{background:transparent;border-left:2px solid var(--quote-line);padding:3px 10px;color:inherit;margin-bottom:8px}
+.palette-wechat .avatar{border-radius:5px}.palette-wechat .bubble{position:relative;border-radius:5px}
+.palette-wechat .message:not(.system)>.content>.bubble::before{content:'';position:absolute;top:12px;left:-5px;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-right:5px solid var(--surface)}
+.palette-wechat .message.self>.content>.bubble::before{left:auto;right:-5px;border-right:0;border-left:5px solid var(--self)}
+.palette-wechat .reference-zone .quote{border:0;border-left:2px solid var(--quote-line);border-radius:0;background:transparent;color:var(--muted);padding:0 7px;margin:5px 0 0;font-size:12px}
+.palette-wechat .self .reference-zone .quote{border-left:0;border-right:2px solid var(--quote-line)}.palette-wechat .reference-zone .quote-sender,.palette-wechat .reference-zone .quote-text{display:inline;font-weight:400}
+@media(max-width:720px){.bubble,.reference-zone{max-width:95%}}
+
+nav strong{line-height:20px}nav small{display:block;line-height:16px}

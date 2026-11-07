@@ -17,9 +17,17 @@ public sealed record ForwardedMessage(string Sender, string Time, MessagePart[] 
 
 /// <summary>Derives a display model without replacing or executing the original payload.</summary>
 public static class MessagePresentation {
+    public static ChatMessage ResolveSenderPrefix(ChatMessage message) {
+        if (message.Platform != "WeChat") return message;
+        var match = System.Text.RegularExpressions.Regex.Match(message.Text, "^(?<sender>wxid_[A-Za-z0-9_-]+|[A-Za-z0-9_.-]+@openim):\\r?\\n");
+        if (!match.Success) return message;
+        string sender = match.Groups["sender"].Value;
+        if (!message.Conversation.EndsWith("@chatroom", StringComparison.OrdinalIgnoreCase) && sender != message.Sender) return message;
+        return message with { Sender = sender, SenderName = sender == message.Sender ? message.SenderName : null, DisplayText = message.Text[match.Length..] };
+    }
     public static MessagePart[] Parse(ChatMessage message) {
         if (message.Parts.Length > 0) return message.Parts;
-        string body = message.Text.Trim();
+        string body = (ResolveSenderPrefix(message).DisplayText ?? message.Text).Trim();
         if (body.StartsWith("[attachment] ", StringComparison.Ordinal)) {
             string name = body[13..].Trim(); string extension = Path.GetExtension(name).ToLowerInvariant();
             string kind = extension is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" ? "image" :

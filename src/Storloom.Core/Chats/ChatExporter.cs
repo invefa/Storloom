@@ -16,6 +16,7 @@ public sealed record ChatMessage(string Platform, string Conversation, string Se
     public MessagePart[] Parts { get; init; } = [];
     public string? ExtraRawBase64 { get; init; }
     public string? SourceText { get; init; }
+    public string? DisplayText { get; init; }
     public string? Id { get; init; }
     public string? ServerId { get; init; }
     public string? Sequence { get; init; }

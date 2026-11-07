@@ -8,6 +8,17 @@ using Xunit;
 namespace Storloom.Tests;
 
 public sealed class MessagePresentationTests {
+    [Theory]
+    [InlineData("wxid_fixture_member", "wxid_fixture_member:\nGoing to make tea")]
+    [InlineData("123456789@openim", "123456789@openim:\r\nGoing to make tea")]
+    public void WeChatGroupSenderPrefixesBecomeMetadataWithoutChangingTheOriginal(string sender,string payload) {
+        var original=new ChatMessage("WeChat","fixture@chatroom","fixture@chatroom",0,1,payload);
+        var normalized=MessagePresentation.ResolveSenderPrefix(original);
+        Assert.Equal(sender,normalized.Sender);Assert.Equal("Going to make tea",normalized.DisplayText);Assert.Equal(payload,normalized.Text);
+        Assert.Equal("Going to make tea",MessagePresentation.Parse(normalized)[0].Text);
+        Assert.Equal(payload,MessagePresentation.ResolveSenderPrefix(original with{Platform="QQ"}).Text);
+        Assert.Null(MessagePresentation.ResolveSenderPrefix(original with{Conversation="wxid_other",Sender="wxid_other"}).DisplayText);
+    }
     [Fact]
     public void EmbeddedForwardsReferencesAndSystemTemplatesPreserveTheirMeaning() {
         var reply = MessagePresentation.Parse(new("WeChat", "fixture", "friend", 0, 49,

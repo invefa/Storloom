@@ -524,6 +524,15 @@ public sealed class FormTests {
                 Assert.True(vertical.IsVisible&&horizontal.IsVisible);var v=vertical.TranslatePoint(new Point(),viewer);var h=horizontal.TranslatePoint(new Point(),viewer);
                 Assert.InRange(v.Y+vertical.ActualHeight,0,h.Y+0.1);Assert.InRange(h.X+horizontal.ActualWidth,0,v.X+0.1);
             }
+            panel.PauseFollowing();panel.Log.Text=string.Join('\n',Enumerable.Range(0,4000).Select(i=>"Fixture line "+i+new string('x',60)))+"\n"+new string('x',6000);Pump();window.UpdateLayout();
+            var vt=Descendants(vertical).OfType<System.Windows.Controls.Primitives.Track>().Single();var ht=Descendants(horizontal).OfType<System.Windows.Controls.Primitives.Track>().Single();
+            foreach(double fraction in new[]{0d,.5,1d}) {
+                viewer.ScrollToVerticalOffset(viewer.ScrollableHeight*fraction);viewer.ScrollToHorizontalOffset(viewer.ScrollableWidth*fraction);Pump();window.UpdateLayout();
+                var v=vt.Thumb.TranslatePoint(new Point(),vt);var h=ht.Thumb.TranslatePoint(new Point(),ht);
+                Assert.InRange(v.Y,-.1,vt.ActualHeight);Assert.InRange(v.Y+vt.Thumb.ActualHeight,0,vt.ActualHeight+.1);
+                Assert.InRange(h.X,-.1,ht.ActualWidth);Assert.InRange(h.X+ht.Thumb.ActualWidth,0,ht.ActualWidth+.1);
+                Assert.True(vt.Thumb.ActualHeight>=23.9);Assert.True(ht.Thumb.ActualWidth>=23.9);
+            }
             var logRow=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;
             logRow.Height=new GridLength(5000);Pump();window.UpdateLayout();
             Assert.InRange(panel.TranslatePoint(new Point(0,panel.ActualHeight),window).Y,0,window.ActualHeight+0.1);
@@ -623,7 +632,7 @@ public sealed class FormTests {
             Assert.Equal("8",Query("document.querySelector('.bubble img')?.naturalWidth"));
             Assert.Equal(locale=="en"?"WeChat":"微信",System.Text.Json.JsonSerializer.Deserialize<string>(Query("document.querySelector('option[value=wechat]').textContent")));
             Assert.Equal("\"6px 10px\"",Query("getComputedStyle(document.querySelector('.bubble')).padding"));
-            foreach(var entry in new[]{("wechat","rgb(237, 237, 237)","rgb(31, 31, 31)"),("qq","rgb(243, 247, 252)","rgb(23, 35, 52)")}) {
+            foreach(var entry in new[]{("wechat","rgb(249, 249, 249)","rgb(30, 30, 30)"),("qq","rgb(244, 244, 244)","rgb(32, 32, 32)")}) {
                 Query("document.getElementById('palette').value='"+entry.Item1+"';document.getElementById('palette').dispatchEvent(new Event('change'));true");
                 foreach(bool dark in new[]{false,true}) {
                     Query("document.body.classList.toggle('dark',"+(dark?"true":"false")+");true");
@@ -640,6 +649,104 @@ public sealed class FormTests {
             Assert.Contains("Older archive fixture",File.ReadAllText(Path.Combine(export.Directory,"messages.html")));
             Assert.Contains("Older asset must remain untouched",File.ReadAllText(Path.Combine(export.Directory,"reader.js")));
         } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Theory]
+    [InlineData("en",AppTheme.Light)]
+    [InlineData("zh-CN",AppTheme.OneDark)]
+    public void NoticesSizeToContentAndDoNotShowResizeButtons(string locale,AppTheme theme) => OnUi(() => {
+        L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});var owner=new ThemeWindow("Notice fixture",1000,720){ShowInTaskbar=false};
+        try {
+            owner.Show();Pump();double shortHeight=0;
+            foreach(bool longText in new[]{false,true}) {
+                _=Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,new Action(()=>{
+                    var dialog=Application.Current.Windows.Cast<Window>().Single(w=>w.Owner==owner);dialog.UpdateLayout();
+                    Assert.InRange(dialog.ActualWidth,340,520);Assert.InRange(dialog.ActualHeight,130,owner.ActualHeight*.9+.1);
+                    var caption=Descendants(dialog).OfType<Wpf.Ui.Controls.TitleBar>().Single();Assert.False(caption.ShowMaximize);Assert.False(caption.ShowMinimize);
+                    if(!longText){shortHeight=dialog.ActualHeight;Assert.True(shortHeight<280);}else Assert.True(dialog.ActualHeight>shortHeight);
+                    Capture((FrameworkElement)dialog,"compact-notice-"+locale+"-"+longText);dialog.DialogResult=false;
+                }));
+                string message=longText?string.Join("\n",Enumerable.Repeat(L.T("ConfirmBackgroundTask"),12)):L.T("ConfirmBackgroundTask");
+                typeof(ShellWindow).Assembly.GetType("Storloom.App.Notice")!.GetMethod("Show")!.Invoke(null,new object[]{owner,L.T("Confirm"),message,true});
+            }
+        } finally {owner.Close();}
+    });
+    [Theory]
+    [InlineData("en")]
+    [InlineData("zh-CN")]
+    public void ReaderKeepsBubbleWidthsIndependentAndUsesNativeQuoteLayoutsAndBoundedForwards(string locale) => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});
+        const string hash="0123456789abcdef0123456789abcdef";
+        string forwarded="<msg><appmsg><type>19</type><title>Forwarded chat</title><recorditem><![CDATA[<recordinfo><datalist>"+
+            string.Join("",Enumerable.Range(1,8).Select(i=>i==7?$"<dataitem datatype=\"2\"><sourcename>Sam</sourcename><fullmd5>{hash}</fullmd5></dataitem>":$"<dataitem datatype=\"1\"><sourcename>Sam</sourcename><datadesc>Forward {i}</datadesc></dataitem>"))+"</datalist></recordinfo>]]></recorditem></appmsg></msg>";
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,IsSender);"+
+            "INSERT INTO MSG VALUES(1,1700000000,'fixture@chatroom','wxid_fixture_member:"+"\nGoing to make tea',0),(1,1700000001,'fixture@chatroom','1',1),"+
+            "(49,1700000002,'fixture@chatroom','<msg><appmsg><type>57</type><title>123</title><refermsg><displayname>Sam</displayname><content>2</content><type>1</type></refermsg></appmsg></msg>',1),"+
+            $"(49,1700000003,'fixture@chatroom','{forwarded}',0),(3,1700000004,'fixture@chatroom','<msg><img md5=\"{hash}\"/></msg>',0);");
+        Database(Path.Combine(source,"contact.db"),"CREATE TABLE contact(username,nick_name,remark);INSERT INTO contact VALUES('wxid_fixture_member','Sam','Sam');");
+        var png=new PngBitmapEncoder();var drawing=new DrawingVisual();using(var context=drawing.RenderOpen()){context.DrawRectangle(Brushes.LightSlateGray,null,new Rect(0,0,1200,600));context.DrawRectangle(Brushes.SteelBlue,null,new Rect(0,0,600,600));}
+        var bitmap=new RenderTargetBitmap(1200,600,96,96,PixelFormats.Pbgra32);bitmap.Render(drawing);png.Frames.Add(BitmapFrame.Create(bitmap));using(var file=File.Create(Path.Combine(source,hash+".png")))png.Save(file);
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.WeChat);
+        var page=Directory.GetFiles(Path.Combine(export.Directory,"conversations"),"*-0.js").Single();string script=File.ReadAllText(page);
+        var items=System.Text.Json.JsonSerializer.Deserialize<ChatMessage[]>(script[script.IndexOf('[')..(script.LastIndexOf(']')+1)])!;
+        Assert.Equal("Sam",items[0].SenderName);Assert.Equal("Going to make tea",items[0].Parts[0].Text);
+        items[0]=items[0] with{DisplayText=null,Parts=[new("text",items[0].Text)]};items[1]=items[1] with{RawBase64=new string('A',12000)};
+        File.WriteAllText(page,"window.receivePage("+System.Text.Json.JsonSerializer.Serialize(Path.GetFileNameWithoutExtension(page)[..^2])+",0,"+System.Text.Json.JsonSerializer.Serialize(items)+");");
+        var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        try {
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}var core=window.Browser.CoreWebView2!;
+            string Query(string js)=>Wait(core.ExecuteScriptAsync(js));
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="5"){Pump();Thread.Sleep(10);}Assert.Equal("5",Query("document.querySelectorAll('.message').length"));
+            Assert.DoesNotContain("wxid_",Query("document.querySelector('.message-text').textContent"));
+            Query("window.short=document.querySelectorAll('.message')[1];window.shortBubble=short.querySelector('.bubble');window.originalWidth=shortBubble.getBoundingClientRect().width;window.originalX=shortBubble.getBoundingClientRect().x;true");
+            Assert.True(Query("originalWidth<60")=="true","Short bubble width: "+Query("originalWidth"));Query("short.querySelector('details').open=true;true");Pump();
+            Assert.True(Query("Math.abs(shortBubble.getBoundingClientRect().width-originalWidth)<0.1&&Math.abs(shortBubble.getBoundingClientRect().x-originalX)<0.1")=="true","Expanded source moved the message: "+Query("[originalWidth,shortBubble.getBoundingClientRect().width,originalX,shortBubble.getBoundingClientRect().x]"));
+            Assert.True(Query("document.querySelector('nav button').getBoundingClientRect().height<56")=="true","Conversation row height: "+Query("document.querySelector('nav button').getBoundingClientRect().height"));
+            Assert.Equal("5",Query("document.querySelectorAll('.forwarded').length"));Assert.Equal("0",Query("document.querySelectorAll('.kind-forward img').length"));
+            Query("document.querySelector('.forward-more').click();true");Assert.Equal("8",Query("document.querySelectorAll('.forwarded').length"));Assert.Equal("1",Query("document.querySelectorAll('.kind-forward img').length"));
+            Query("document.querySelector('.forward-more').click();true");Assert.Equal("5",Query("Array.from(document.querySelectorAll('.forwarded')).filter(e=>e.getClientRects().length).length"));
+            Query("short.querySelector('details').open=false;true");
+            foreach(string palette in new[]{"wechat","qq"})foreach(bool dark in new[]{false,true}) {
+                Query("document.getElementById('palette').value='"+palette+"';document.getElementById('palette').dispatchEvent(new Event('change'));document.body.classList.toggle('dark',"+(dark?"true":"false")+");true");
+                Assert.Equal("\"0px\"",Query("getComputedStyle(shortBubble).borderTopWidth"));
+                Assert.Equal(palette=="qq"?"\"50%\"":"\"5px\"",Query("getComputedStyle(document.querySelector('.avatar')).borderTopLeftRadius"));
+                Assert.Equal(palette=="wechat"?"1":"0",Query("document.querySelectorAll('.reference-zone>blockquote').length"));Assert.Equal(palette=="qq"?"1":"0",Query("document.querySelectorAll('.bubble blockquote').length"));
+                Wait(AsResult(Task.Delay(100)));using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
+                DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
+                File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-layout-"+palette+"-"+dark+"-"+locale+".png"),stream.ToArray());
+            }
+            Query("document.querySelectorAll('.message')[4].scrollIntoView();true");
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message')[4].querySelector('img').naturalWidth")!="1200"){Pump();Thread.Sleep(10);}
+            Assert.True(Query("(()=>{let b=document.querySelectorAll('.message')[4].querySelector('.bubble'),i=b.querySelector('img');return b.getBoundingClientRect().width-i.getBoundingClientRect().width<=24})()")=="true","Image bubble has unused width: "+Query("(()=>{let b=document.querySelectorAll('.message')[4].querySelector('.bubble'),i=b.querySelector('img');return [b.getBoundingClientRect().width,i.getBoundingClientRect().width]})()"));
+        } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Theory]
+    [InlineData("en",AppTheme.Light)]
+    [InlineData("zh-CN",AppTheme.OneDark)]
+    public void BackupAndFinishedPagesLabelTheirPathsOnTheLeftWithConsistentSpacing(string locale,AppTheme theme) => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);
+        Database(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,'Fixture message');");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.QQ);
+        JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=locale,Theme=theme,ReduceMotion=true,BackupRoot=Path.Combine(fixture,"backup-destination")});
+        var window=new ShellWindow(data){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();var type=typeof(ShellWindow);void Set(string key,object value)=>type.GetField(key,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,value);
+            Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),new FileInfo(Path.Combine(source,"nt_msg.db")).Length));
+            Set("activeManifest",backup.Manifest);Set("readingDirectory",export.Directory);Set("exportReport",Path.Combine(export.Directory,"export-report.json"));
+            window.Navigate("chats");
+            foreach(int step in new[]{1,3}) {
+                Set("chatStep",step);type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();window.UpdateLayout();
+                var labels=Descendants(window).OfType<Label>().Where(l=>l.IsVisible).ToArray();Assert.Equal(2,labels.Length);
+                Assert.Equal(step==1?new[]{L.T("AccountFolderLabel"),L.T("BackupTo")}:new[]{L.T("RawBackupLabel"),L.T("ReadingCopyLabel")},labels.Select(l=>l.Content));
+                foreach(var label in labels) {
+                    var target=(FrameworkElement)label.Target;var lp=label.TranslatePoint(new Point(),window);var cp=target.TranslatePoint(new Point(),window);
+                    Assert.True(lp.X+label.ActualWidth<=cp.X);Assert.InRange(Math.Abs(lp.Y+label.ActualHeight/2-cp.Y-target.ActualHeight/2),0,1);
+                }
+                Assert.InRange(labels[1].TranslatePoint(new Point(),window).Y-labels[0].TranslatePoint(new Point(),window).Y,42,50);
+                Capture(window,"chat-fields-"+step+"-"+locale);
+            }
+        } finally {window.Close();Directory.Delete(fixture,true);}
     });
     private static void Database(string path,string sql) {
         Assert.Equal(0,sqlite3_open_v2(path,out nint db,6,0));try{Assert.Equal(0,sqlite3_exec(db,sql,0,0,0));}finally{sqlite3_close_v2(db);}

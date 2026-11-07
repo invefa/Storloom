@@ -38,3 +38,9 @@ Quoted replies can jump to their original message within the same conversation, 
 - [NTQQ group reply links](https://github.com/QQBackup/nt_msg_db_util/blob/master/db_docs/group_msg_table/summary.md) and [cached forwarding fields](https://github.com/QQBackup/nt_msg_db_util/blob/master/msgdb/proto/group_40900.proto).
 
 The reader offers Default, WeChat and QQ-inspired palettes with independent light/dark switching. The toolbar remembers the selected palette in local browser storage when available. No transcript is stored by that preference. The default light scheme remains grayscale. Message bubbles use 6 px vertical and 10 px horizontal padding; source bubbles and quote blocks are also compact.
+
+QQ palettes use borderless bubbles and circular avatars. WeChat palettes use compact tailed bubbles with quoted previews below the message; QQ keeps the quoted preview inside its bubble. Quotes still support navigation when target metadata is available. Message and image widths follow their content, independently of expanded source disclosures. Conversation rows are compact and show full names on hover.
+
+Forwarding cards initially render five parsed entries. An expand/collapse control exposes the remaining parsed entries lazily, including their local media. Parsing safety limits still apply, and original payloads remain available in the source disclosure.
+
+Recognized WeChat group sender prefixes are treated as sender metadata rather than message text. New exports preserve the original Text and store a separate DisplayText where needed, resolving the sender through available contact metadata. Existing reading copies also hide recognized prefixes in the desktop preview without rewriting their files.

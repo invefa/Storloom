@@ -367,5 +367,11 @@
   "ReaderPaletteWeChat": "微信",
   "ReaderPalette": "配色方案",
   "ReaderPaletteDefault": "默认",
-  "ReaderPaletteQQ": "QQ"
+  "ReaderPaletteQQ": "QQ",
+  "ReaderForwardCollapse": "收起转发消息",
+  "ReadingCopyLabel": "阅读版",
+  "NoticeAccept": "确定",
+  "AccountFolderLabel": "账号目录",
+  "RawBackupLabel": "原始备份",
+  "ReaderForwardExpand": "展开其余 {0} 条消息"
 }

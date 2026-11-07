@@ -57,6 +57,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     }
     public void Add(ChatMessage original) {
         cancellation.ThrowIfCancellationRequested();
+        original = MessagePresentation.ResolveSenderPrefix(original);
         string peer = original.Conversation.StartsWith("direct:") ? original.Conversation[7..] :
             original.Conversation.StartsWith("group:") ? original.Conversation[6..] : original.Conversation;
         string name = contacts.GetValueOrDefault(peer, peer);

@@ -131,12 +131,24 @@ public class ThemeWindow : FluentWindow {
 
 internal static class Notice {
     public static bool Show(Window owner, string title, string message, bool confirm = false) {
-        var window = new ThemeWindow(title, 680, 460) { Owner = owner, ShowInTaskbar = false };
-        var grid = View.Grid(View.Fill, View.Auto); grid.Margin = new Thickness(24);
-        View.Add(grid, new ScrollViewer { Content = View.Text(message), VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 0);
-        var cancel = View.Button(confirm ? "GoBack" : "Close", () => window.DialogResult = false); cancel.IsCancel = true;
+        double maxHeight = Math.Min(SystemParameters.WorkArea.Height * .85, owner.ActualHeight > 0 ? owner.ActualHeight * .9 : 600);
+        var window = new ThemeWindow(title, 460, 180) { Owner = owner, ShowInTaskbar = false,
+            MinWidth = 340, MinHeight = 0, MaxHeight = maxHeight, ResizeMode = ResizeMode.NoResize, SizeToContent = SizeToContent.Height };
+        window.Caption.ShowMaximize = window.Caption.ShowMinimize = false;
+        var grid = View.Grid(View.Auto, View.Auto);
+        var content = new Grid { Margin = new Thickness(20) }; content.ColumnDefinitions.Add(new ColumnDefinition { Width = View.Auto }); content.ColumnDefinitions.Add(new ColumnDefinition());
+        var symbol = new TextBlock { Text = confirm ? "?" : "i", FontSize = 22, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        symbol.SetResourceReference(TextBlock.ForegroundProperty, "OnAccent");
+        var icon = new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(16), Child = symbol, Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Top };
+        icon.SetResourceReference(Border.BackgroundProperty, "Accent"); content.Children.Add(icon);
+        var text = View.Text(message); text.Margin = new Thickness(0); text.VerticalAlignment = VerticalAlignment.Top;
+        var scroll = new ScrollViewer { Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = Math.Max(60, maxHeight - 140) };
+        View.Add(content, scroll, 0, 1); View.Add(grid, content, 0);
+        var cancel = View.Button(confirm ? "Cancel" : "NoticeAccept", () => window.DialogResult = !confirm); cancel.IsCancel = true; cancel.IsDefault = !confirm;
         var actions = View.Row(cancel); actions.HorizontalAlignment = HorizontalAlignment.Right;
         if (confirm) actions.Children.Add(View.Button("ConfirmExecute", () => window.DialogResult = true, true));
-        View.Add(grid, actions, 1); window.Body.Children.Add(grid); window.Loaded += (_, _) => cancel.Focus(); return window.ShowDialog() == true;
+        ((Button)actions.Children[^1]).Margin = new Thickness(0);
+        var footer = new Border { Child = actions, Padding = new Thickness(16, 12, 16, 12) }; footer.SetResourceReference(Border.BackgroundProperty, "Surface");
+        View.Add(grid, footer, 1); window.Body.Children.Add(grid); window.Loaded += (_, _) => cancel.Focus(); return window.ShowDialog() == true;
     }
 }

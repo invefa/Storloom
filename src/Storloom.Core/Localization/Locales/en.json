@@ -367,5 +367,11 @@
   "ReaderPaletteWeChat": "WeChat",
   "ReaderPalette": "Color scheme",
   "ReaderPaletteDefault": "Default",
-  "ReaderPaletteQQ": "QQ"
+  "ReaderPaletteQQ": "QQ",
+  "ReaderForwardCollapse": "Collapse forwarded messages",
+  "ReadingCopyLabel": "Reading copy",
+  "NoticeAccept": "OK",
+  "AccountFolderLabel": "Account folder",
+  "RawBackupLabel": "Raw backup",
+  "ReaderForwardExpand": "Show remaining {0} messages"
 }

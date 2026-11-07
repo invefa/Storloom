@@ -12,6 +12,9 @@ public static class Theme {
     public static void Apply(AppPreferences preferences) {
         Current = preferences.Theme; ReduceMotion = preferences.ReduceMotion;
         var resources = Application.Current.Resources;
+        // Track uses half these metrics as its minimum thumb length. Match the 24-DIP templates.
+        resources[SystemParameters.VerticalScrollBarButtonHeightKey] = 48d;
+        resources[SystemParameters.HorizontalScrollBarButtonWidthKey] = 48d;
         if (!resources.MergedDictionaries.OfType<ControlsDictionary>().Any()) {
             resources.MergedDictionaries.Add(new ThemesDictionary { Theme = ApplicationTheme.Light });
             resources.MergedDictionaries.Add(new ControlsDictionary());
