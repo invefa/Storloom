@@ -16,6 +16,7 @@ public static class Theme {
             resources.MergedDictionaries.Add(new ThemesDictionary { Theme = ApplicationTheme.Light });
             resources.MergedDictionaries.Add(new ControlsDictionary());
             resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Storloom;component/Desktop/Styles.xaml", UriKind.Relative) });
+            resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Storloom;component/Desktop/CompactControls.xaml", UriKind.Relative) });
         }
         ApplicationThemeManager.Apply(Current == AppTheme.OneDark ? ApplicationTheme.Dark : ApplicationTheme.Light,
             Wpf.Ui.Controls.WindowBackdropType.None, false);
@@ -51,6 +52,7 @@ public static class Theme {
         resources[SystemColors.ControlTextBrushKey] = resources["Ink"];
         resources[SystemColors.HighlightBrushKey] = resources["Selection"];
         resources[SystemColors.HighlightTextBrushKey] = resources["Ink"];
+        foreach (var window in Application.Current.Windows.OfType<ThemeWindow>()) { window.UpdateFrame(); ControlFeedback.Refresh(window); }
     }
     public static Dictionary<string, Color> ReadCustom(string path) {
         var input = JsonFiles.Read<Dictionary<string, string>>(path);
@@ -65,8 +67,8 @@ public static class Theme {
     }
     public static void Enter(FrameworkElement element) {
         element.BeginAnimation(UIElement.OpacityProperty, null);
-        if (ReduceMotion || !SystemParameters.ClientAreaAnimation) { element.Opacity = 1; return; }
-        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.25, 1, TimeSpan.FromMilliseconds(140)));
+        // Never composite text through a translucent page: ClearType loses its stable background.
+        element.Opacity = 1;
     }
     public static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
 }

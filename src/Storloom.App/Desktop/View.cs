@@ -12,7 +12,7 @@ internal static class View {
         var text = new TextBlock { Text = value, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         text.SetResourceReference(TextBlock.ForegroundProperty, color); return text;
     }
-    public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, VerticalAlignment = VerticalAlignment.Center };
+    public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 32, VerticalAlignment = VerticalAlignment.Center };
     public static StackPanel Stack(params UIElement[] elements) {
         var stack = new StackPanel(); foreach (var element in elements) stack.Children.Add(element); return stack;
     }
@@ -28,17 +28,10 @@ internal static class View {
     }
     public static Button Button(string key, Action action, bool primary = false) {
         var button = new Button { Content = L.T(key) };
-        button.MouseEnter += (_, _) => AnimateOpacity(button, .82);
-        button.MouseLeave += (_, _) => AnimateOpacity(button, 1);
         if (primary) button.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         button.Click += (_, _) => action(); return button;
     }
-    private static void AnimateOpacity(UIElement element, double opacity) {
-        element.BeginAnimation(UIElement.OpacityProperty, null);
-        if (!Theme.ReduceMotion && SystemParameters.ClientAreaAnimation)
-            element.BeginAnimation(UIElement.OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(opacity, TimeSpan.FromMilliseconds(100)));
-    }
-    public static Border Card(UIElement content, int padding = 18) {
+    public static Border Card(UIElement content, int padding = 14) {
         var border = new Border { Child = content, Padding = new Thickness(padding), CornerRadius = new CornerRadius(5), BorderThickness = new Thickness(1) };
         border.SetResourceReference(Border.BackgroundProperty, "Surface"); border.SetResourceReference(Border.BorderBrushProperty, "Line"); return border;
     }
@@ -76,20 +69,39 @@ internal static class View {
 
 public class ThemeWindow : FluentWindow {
     public Grid Body { get; } = new();
+    public TitleBar Caption { get; }
     public ThemeWindow(string title, double width = 800, double height = 600) {
         Title = title; Width = width; Height = height; MinWidth = 620; MinHeight = 420;
         FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"); FontSize = 13;
+        UseLayoutRounding = true; SnapsToDevicePixels = true;
+        System.Windows.Media.TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+        System.Windows.Media.TextOptions.SetTextRenderingMode(this, TextRenderingMode.ClearType);
         WindowStartupLocation = WindowStartupLocation.CenterOwner; ExtendsContentIntoTitleBar = true;
         WindowBackdropType = WindowBackdropType.None; Icon = ProductInfo.LoadIcon();
         SetResourceReference(BackgroundProperty, "Canvas"); SetResourceReference(ForegroundProperty, "Ink");
-        var root = View.Grid(new GridLength(40), View.Fill);
+        var root = View.Grid(new GridLength(36), View.Fill);
         root.SetResourceReference(Panel.BackgroundProperty, "Canvas"); Body.SetResourceReference(Panel.BackgroundProperty, "Canvas");
-        var titleBar = new TitleBar { Title = title, Height = 40, ShowMaximize = true, ShowMinimize = true };
+        var titleBar = Caption = new TitleBar { Title = title, Height = 36, ShowMaximize = true, ShowMinimize = true };
         titleBar.SetResourceReference(BackgroundProperty, "Surface"); titleBar.SetResourceReference(ForegroundProperty, "Ink");
+        titleBar.SetResourceReference(TitleBar.ButtonsForegroundProperty, "Ink"); titleBar.SetResourceReference(TitleBar.ButtonsBackgroundProperty, "Hover");
         titleBar.Icon = new ImageIcon { Source = Icon };
         View.Add(root, titleBar, 0); View.Add(root, Body, 1); Content = root;
         Loaded += (_, _) => Theme.Enter(Body);
+        SourceInitialized += (_, _) => UpdateFrame(); Activated += (_, _) => UpdateFrame(); Deactivated += (_, _) => UpdateFrame();
     }
+    protected override void SetWindowChrome() => System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome {
+        CaptionHeight = 0, GlassFrameThickness = new Thickness(0), ResizeBorderThickness = ResizeMode == ResizeMode.NoResize ? new Thickness(0) : new Thickness(4), UseAeroCaptionButtons = false });
+    public void UpdateFrame() {
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle; if (handle == 0) return;
+        var source = System.Windows.Interop.HwndSource.FromHwnd(handle);
+        if (source == null || Application.Current.TryFindResource("CanvasColor") is not Color color) return;
+        source.CompositionTarget.BackgroundColor = color;
+        int dark = Theme.Current == AppTheme.OneDark ? 1 : 0, border = color.R | color.G << 8 | color.B << 16;
+        _ = DwmSetWindowAttribute(source.Handle, 20, ref dark, sizeof(int));
+        _ = DwmSetWindowAttribute(source.Handle, 34, ref border, sizeof(int));
+    }
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 }
 
 internal static class Notice {

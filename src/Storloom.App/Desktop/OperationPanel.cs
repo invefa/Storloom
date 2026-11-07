@@ -9,7 +9,7 @@ public sealed class OperationPanel : Grid {
     public TextBox Log { get; } = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap,
         FontFamily = new FontFamily("Consolas"), FontSize = 12, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 0, BorderThickness = new Thickness(0), Padding = new Thickness(0, 8, 0, 0), VerticalContentAlignment = VerticalAlignment.Top };
-    public CheckBox FollowToggle { get; } = new() { Content = L.T("FollowLog"), IsChecked = true, ToolTip = "Ctrl+Shift+L" };
+    public CheckBox FollowToggle { get; } = new() { Content = L.T("FollowLog"), IsChecked = true, ToolTip = "Ctrl+Shift+L", VerticalAlignment = VerticalAlignment.Center };
     public bool Follow => FollowToggle.IsChecked == true;
     public bool Expanded { get; private set; } = true;
     public event Action<bool>? ExpansionChanged;
@@ -23,13 +23,14 @@ public sealed class OperationPanel : Grid {
     private double phaseStart;
     private bool followPending;
     public OperationPanel() {
-        Margin = new Thickness(20, 8, 20, 10);
+        Margin = new Thickness(16, 6, 16, 8);
         RowDefinitions.Add(new RowDefinition { Height = View.Auto }); RowDefinitions.Add(new RowDefinition { Height = View.Auto });
         RowDefinitions.Add(new RowDefinition { Height = View.Fill });
         var row = new DockPanel(); collapse = View.Button("HideOperationLog", ToggleExpanded);
         collapse.MinWidth = 110; collapse.Margin = new Thickness(12, 0, 0, 0);
         foreach (var control in new UIElement[] { collapse, FollowToggle, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
         state.TextTrimming = TextTrimming.CharacterEllipsis; state.TextWrapping = TextWrapping.NoWrap;
+        state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
         row.Children.Add(state); View.Add(this, row, 0); View.Add(this, progress, 1); View.Add(this, Log, 2);
         progress.SetResourceReference(Control.ForegroundProperty, "Accent"); progress.SetResourceReference(Control.BackgroundProperty, "Line");
         FollowToggle.Checked += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { if (Follow) Log.ScrollToEnd(); }));

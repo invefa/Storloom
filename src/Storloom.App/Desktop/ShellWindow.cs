@@ -23,9 +23,10 @@ public sealed partial class ShellWindow : ThemeWindow {
     private RowDefinition logRow = null!;
     private ColumnDefinition sidebarColumn = null!;
     private OperationPanel operationView = null!;
+    private GridSplitter logDivider = null!;
     private string currentPage = "cleanup";
-    public ShellWindow(string? dataDirectory = null) : base("Storloom", 1320, 860) {
-        MinWidth = 1080; MinHeight = 720; WindowStartupLocation = WindowStartupLocation.CenterScreen;
+    public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
+        MinWidth = 1040; MinHeight = 640; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         dataRoot = Path.GetFullPath(dataDirectory ?? Path.Combine(AppContext.BaseDirectory, "data"));
         string prefs = Path.Combine(dataRoot, "preferences.json");
         if (File.Exists(prefs)) preferences = JsonFiles.Read<AppPreferences>(prefs);
@@ -47,7 +48,8 @@ public sealed partial class ShellWindow : ThemeWindow {
     private void BuildUi() {
         Body.Children.Clear(); pages.Clear();
         var root = View.Grid(View.Auto, View.Fill, View.Auto, new GridLength(0), View.Auto);
-        menu = new Menu { Padding = new Thickness(12, 0, 0, 0) };
+        menu = new Menu { Padding = new Thickness(0), Margin = new Thickness(16, 0, 0, 0) };
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(menu, true);
         var file = new MenuItem { Header = L.T("FileMenu") };
         void Item(MenuItem parent, string key, Action action) { var item = new MenuItem { Header = L.T(key) }; item.Click += (_, _) => Guard(action); parent.Items.Add(item); }
         Item(file, "ImportRules", ImportRules); Item(file, "ReloadRules", () => { ReloadEngine(); RenderRules(); });
@@ -58,17 +60,19 @@ public sealed partial class ShellWindow : ThemeWindow {
         var help = new MenuItem { Header = L.T("HelpMenu") }; Item(help, "QuickStart", () => ShowHelp());
         Item(help, "OpenAiGuide", () => ShowHelp(document: File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docs", L.Language == "zh-CN" ? "ai-rules.zh-CN.md" : "ai-rules.md"))));
         Item(help, "About", () => new AboutWindow { Owner = this }.ShowDialog());
-        menu.Items.Add(file); menu.Items.Add(tools); menu.Items.Add(help); View.Add(root, menu, 0);
+        menu.Items.Add(file); menu.Items.Add(tools); menu.Items.Add(help);
+        var title = View.Text("Storloom", 12); title.Margin = new Thickness(0);
+        Caption.Header = View.Row(title, menu);
         var center = new Grid(); sidebarColumn = new ColumnDefinition { Width = new GridLength(Math.Clamp(preferences.SidebarWidth, 150, 260)), MinWidth = 150, MaxWidth = 260 };
-        center.ColumnDefinitions.Add(sidebarColumn); center.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
+        center.ColumnDefinitions.Add(sidebarColumn); center.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         center.ColumnDefinitions.Add(new ColumnDefinition { Width = View.Fill });
         navigation = new ListBox { Name = "navigation", HorizontalContentAlignment = HorizontalAlignment.Stretch };
         foreach (var (id, key) in new[] { ("overview", "NavOverview"), ("cleanup", "NavCleanup"), ("chats", "NavChats") })
             navigation.Items.Add(new ListBoxItem { Content = L.T(key), Tag = id });
         navigation.SelectionChanged += (_, _) => { if (navigation.SelectedItem is ListBoxItem selected) Navigate((string)selected.Tag); };
-        View.Add(center, navigation, 0); View.Add(center, new GridSplitter { Width = 1, ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndNext }, 0, 1);
-        pageHost = new Grid { Margin = new Thickness(24, 20, 24, 18) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
-        var logSplitter = new GridSplitter { Height = 5, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Collapsed };
+        View.Add(center, navigation, 0); View.Add(center, SidebarSplitter(), 0, 1);
+        pageHost = new Grid { Margin = new Thickness(18, 14, 18, 12) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
+        var logSplitter = logDivider = new GridSplitter { Height = 5, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Collapsed };
         logSplitter.DragStarted += (_, _) => { logRow.BeginAnimation(RowDefinition.HeightProperty, null); };
         logSplitter.DragCompleted += (_, _) => { preferences = preferences with { LogHeight = logRow.ActualHeight }; };
         View.Add(root, logSplitter, 2); logRow = root.RowDefinitions[3];
@@ -87,6 +91,15 @@ public sealed partial class ShellWindow : ThemeWindow {
         Body.Children.Add(root); BuildOverview(); BuildRules(); BuildChats();
         navigation.SelectedIndex = currentPage == "overview" ? 0 : currentPage == "chats" ? 2 : 1;
     }
+    private static GridSplitter SidebarSplitter() {
+        var splitter = new GridSplitter { Name = "sidebar_splitter", Width = 10, Background = Brushes.Transparent, Cursor = Cursors.SizeWE,
+            ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndNext };
+        var template = new ControlTemplate(typeof(GridSplitter));
+        var hitArea = new FrameworkElementFactory(typeof(Grid)); hitArea.SetValue(Panel.BackgroundProperty, Brushes.Transparent);
+        var line = new FrameworkElementFactory(typeof(Border)); line.SetValue(FrameworkElement.WidthProperty, 1d);
+        line.SetResourceReference(Border.BackgroundProperty, "Line"); hitArea.AppendChild(line); template.VisualTree = hitArea;
+        splitter.Template = template; return splitter;
+    }
     private void AnimateLog(double target) {
         double previous = logRow.ActualHeight; logRow.BeginAnimation(RowDefinition.HeightProperty, null); logRow.Height = new GridLength(target);
         if (!Theme.ReduceMotion && SystemParameters.ClientAreaAnimation) logRow.BeginAnimation(RowDefinition.HeightProperty,
@@ -101,8 +114,8 @@ public sealed partial class ShellWindow : ThemeWindow {
     }
     private Grid Page(string id, string title, string lead, params GridLength[] rows) {
         var grid = View.Grid([View.Auto, .. rows]);
-        var header = View.Stack(View.Text(L.T(title), 24), View.Text(L.T(lead), color: "Muted"));
-        header.Margin = new Thickness(0, 0, 0, 12); View.Add(grid, header, 0); pages[id] = grid; pageHost.Children.Add(grid); return grid;
+        var header = View.Stack(View.Text(L.T(title), 21), View.Text(L.T(lead), color: "Muted"));
+        header.Margin = new Thickness(0, 0, 0, 8); View.Add(grid, header, 0); pages[id] = grid; pageHost.Children.Add(grid); return grid;
     }
     private Button Button(string key, Action action, bool primary = false) => View.Button(key, () => Guard(action), primary);
     private Button AsyncButton(string key, Func<Task> action, bool primary = false) {
@@ -122,7 +135,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operation != null) return;
         using var source = new CancellationTokenSource(); operation = source;
         pageHost.IsEnabled = navigation.IsEnabled = menu.IsEnabled = false;
-        operationView.Visibility = Visibility.Visible; ((GridSplitter)((Grid)Body.Children[0]).Children[2]).Visibility = Visibility.Visible;
+        operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 64);
         operationView.Start(); cancel.Visibility = Visibility.Visible; status.Text = L.T("OperationStarting"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested; }

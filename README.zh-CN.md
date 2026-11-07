@@ -43,7 +43,7 @@ Windows上安装.NET 10 SDK。版本在.NET 10范围内滚动选择。也可使�
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.5.0
+./scripts/Publish.ps1 -Version 0.5.1
 ```
 
 脚本按白名单打包程序、规则、文档和许可证，检查本机路径，生成ZIP和SHA-256，不复制私有数据或测试夹具。CI在Windows执行构建和测试，打包工作流只生成产物，不自动创建GitHub Release。图标源为SVG，`scripts/Build-Icon.ps1`可生成Windows多尺寸ICO。
@@ -56,6 +56,6 @@ MIT许可证。第三方组件与运行时许可见[第三方声明](THIRD-PARTY
 
 主界面改用WPF与WPF UI 4.3.0。浅色使用白灰黑，One Dark Pro覆盖控件、菜单、对话框和自定义标题栏。WebView2仅在打开离线聊天阅读器时启动。首选项支持JSON颜色配置和减少动效，侧栏与日志尺寸会保存在本地。详见[主题配置](docs/themes.zh-CN.md)。
 
-日志分隔线可拖动调整高度。手动滚动或选择日志文字后停止自动跟随，点击跟随开关或按Ctrl+Shift+L恢复或暂停。页面、面板与进度使用短暂过渡。
+日志分隔线可拖动调整高度。手动滚动或选择日志文字后停止自动跟随，点击跟随开关或按Ctrl+Shift+L恢复或暂停。悬停、按下、日志面板与进度使用短暂过渡。
 
 新版导出按微信与NTQQ的不同结构生成消息卡片，保留混合消息顺序，原始内容默认折叠。引用、转账、媒体、文件、卡片、位置、合并转发及系统消息有对应展示或明确占位。报告分别统计未知消息与不可用媒体，不代表所有客户端格式或媒体均可恢复。详见[消息展示范围](docs/message-display.zh-CN.md)。旧阅读版不会自动替换文件，可从已核验的原始备份重新导出以使用新版解析。

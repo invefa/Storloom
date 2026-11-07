@@ -19,7 +19,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
             View.Add(fields, element, row++, 1); }
         ComboBox Options(string[] values, int index) { var combo = new ComboBox(); foreach (string value in values) combo.Items.Add(value); combo.SelectedIndex = index; return combo; }
         var language = Options(["English", "简体中文"], preferences.Language == "en" ? 0 : 1); Field("LanguageLabel", language);
-        var themes = Options([L.T("ThemeLight"), "One Dark Pro"], (int)preferences.Theme); Field("ThemeLabel", themes);
+        var themes = Options([L.T("ThemeLight"), L.T("ThemeDark")], (int)preferences.Theme); Field("ThemeLabel", themes);
         TextBox FolderField(string key, string initial) {
             var input = View.Input(initial); var panel = new DockPanel(); var browse = View.Button("Browse", () => { string path = View.Folder(this, input.Text); if (path != "") input.Text = path; });
             DockPanel.SetDock(browse, Dock.Right); panel.Children.Add(browse); panel.Children.Add(input); Field(key, panel); return input;
@@ -72,7 +72,7 @@ internal sealed class ReviewWindow : ThemeWindow {
         var grid = View.Grid(View.Auto, View.Fill, new GridLength(160), View.Auto, View.Auto); grid.Margin = new Thickness(24); Body.Children.Add(grid);
         View.Add(grid, View.Text(L.T("ReviewLead")), 0);
         var list = View.Table(("Rule", "Name", 0), ("Action", "Action", 150), ("Bytes", "Amount", 120)); list.ItemsSource = items; View.Add(grid, list, 1);
-        var details = View.Input(readOnly: true); details.AcceptsReturn = true; details.TextWrapping = TextWrapping.Wrap; details.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        var details = View.Input(readOnly: true); details.Height = double.NaN; details.AcceptsReturn = true; details.TextWrapping = TextWrapping.Wrap; details.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         details.VerticalAlignment = VerticalAlignment.Stretch; details.VerticalContentAlignment = VerticalAlignment.Top; details.Margin = new Thickness(0, 12, 0, 12); View.Add(grid, details, 2);
         list.SelectionChanged += (_, _) => { if (list.SelectedItem is ReviewItem item) details.Text = item.Destination + "\n" + item.Details; };
         if (items.Count > 0) list.SelectedIndex = 0; View.Add(grid, View.Text(warning), 3);

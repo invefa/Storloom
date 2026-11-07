@@ -44,7 +44,7 @@ public sealed class FormTests {
     private static string Fixture() {
         string path=Path.Combine(AppContext.BaseDirectory,"fixtures",Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path;
     }
-    private static void Capture(Window window,string name) {
+    private static void Capture(FrameworkElement window,string name) {
         Pump(); window.UpdateLayout();
         var image=new RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32); image.Render(window);
         var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(image));
@@ -107,7 +107,7 @@ public sealed class FormTests {
         string fixture=Fixture();L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
         var assembly=typeof(ShellWindow).Assembly;
         try {
-            foreach(var entry in new[]{("PreferencesWindow",new object?[]{new AppPreferences(),Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false}),
+            foreach(var entry in new[]{("PreferencesWindow",new object?[]{new AppPreferences{Language=locale,Theme=theme},Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false}),
                 ("HelpWindow",new object?[]{2,null}),("AboutWindow",Array.Empty<object?>())}) {
                 var window=(Window)Activator.CreateInstance(assembly.GetType("Storloom.App."+entry.Item1)!,entry.Item2)!;
                 try {window.ShowInTaskbar=false;window.Show();Pump();Capture(window,locale+"-"+theme+"-"+entry.Item1);
@@ -141,6 +141,50 @@ public sealed class FormTests {
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
     private static async Task<bool> AsResult(Task task){await task;return true;}
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void CompactChromePopupsAndResizeTargetsRemainConsistent(AppTheme theme) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=false});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();window.UpdateLayout();
+            var nodes=Descendants(window).ToArray();var caption=nodes.OfType<Wpf.Ui.Controls.TitleBar>().Single();
+            Assert.Equal(((SolidColorBrush)Theme.Brush("Ink")).Color,((SolidColorBrush)caption.ButtonsForeground).Color);
+            var menu=nodes.OfType<Menu>().Single();
+            Assert.InRange(menu.TranslatePoint(new Point(0,0),caption).Y,0,caption.ActualHeight-menu.ActualHeight);
+            var item=(MenuItem)menu.Items[0];item.IsSubmenuOpen=true;Pump();
+            var popup=(System.Windows.Controls.Primitives.Popup)item.Template.FindName("PART_Popup",item);
+            Assert.Equal(System.Windows.Controls.Primitives.PopupAnimation.None,popup.PopupAnimation);
+            Assert.Equal(((SolidColorBrush)Theme.Brush("Surface")).Color,((SolidColorBrush)((Border)popup.Child).Background).Color);
+            Capture((FrameworkElement)popup.Child,"menu-"+theme);
+            item.IsSubmenuOpen=false;window.Navigate("overview");Pump();
+            nodes=Descendants(window).ToArray();var input=nodes.OfType<TextBox>().Single(t=>t.Text==Path.GetPathRoot(Environment.SystemDirectory));
+            var browse=nodes.OfType<Button>().First(b=>Equals(b.Content,L.T("Browse"))&&b.IsVisible);
+            Assert.Equal(32,input.ActualHeight);Assert.Equal(input.ActualHeight,browse.ActualHeight);
+            Assert.InRange(Math.Abs(input.TranslatePoint(new Point(0,input.ActualHeight/2),window).Y-browse.TranslatePoint(new Point(0,browse.ActualHeight/2),window).Y),0,.5);
+            var tab=nodes.OfType<TabControl>().First(t=>t.IsVisible);var selected=(TabItem)tab.SelectedItem;
+            var header=(Border)selected.Template.FindName("head",selected);
+            Assert.Equal(((SolidColorBrush)tab.Background).Color,((SolidColorBrush)header.Background).Color);
+            Assert.Equal(new Thickness(0),tab.BorderThickness);Assert.Equal(3,header.CornerRadius.TopLeft);
+            var splitter=nodes.OfType<GridSplitter>().Single(s=>s.Name=="sidebar_splitter");Assert.InRange(splitter.ActualWidth,9,11);
+            var columns=((Grid)splitter.Parent).ColumnDefinitions;double original=columns[0].ActualWidth;
+            splitter.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,PresentationSource.FromVisual(window),Environment.TickCount,Key.Right){RoutedEvent=Keyboard.KeyDownEvent});
+            Pump();window.UpdateLayout();Assert.True(columns[0].ActualWidth>original);
+            window.Navigate("cleanup");Pump();
+            foreach(var scrollbar in Descendants(window).OfType<System.Windows.Controls.Primitives.ScrollBar>().Where(s=>s.IsVisible)) {
+                Assert.Equal(((SolidColorBrush)Theme.Brush("Surface")).Color,((SolidColorBrush)scrollbar.Background).Color);
+                Assert.True(scrollbar.ActualWidth==12||scrollbar.ActualHeight==12);
+            }
+            var button=Descendants(window).OfType<Button>().Single(b=>b.Name=="scan_cleanup");
+            button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent});
+            var frame=(Border)button.Template.FindName("frame",button);
+            if(SystemParameters.ClientAreaAnimation)Assert.True(((SolidColorBrush)frame.Background).HasAnimatedProperties);
+            Assert.False(button.HasAnimatedProperties);Assert.Equal(1,button.Opacity);
+            button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonUpEvent});
+            Capture(window,"compact-"+theme);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
     [Theory]
     [InlineData(AppTheme.Light)]
     [InlineData(AppTheme.OneDark)]
@@ -186,7 +230,7 @@ public sealed class FormTests {
             JsonFiles.Write(path,new Dictionary<string,string>{{"Unknown","#123456"}});Assert.Throws<InvalidDataException>(()=>Theme.ReadCustom(path));
             JsonFiles.Write(path,new Dictionary<string,string>{{"Accent","not-a-color"}});Assert.Throws<InvalidDataException>(()=>Theme.ReadCustom(path));
             Theme.Apply(new AppPreferences{ReduceMotion=false});Theme.Enter(element);
-            if(SystemParameters.ClientAreaAnimation)Assert.True(element.HasAnimatedProperties);
+            Assert.False(element.HasAnimatedProperties);Assert.Equal(1,element.Opacity);
         } finally {Theme.Apply(new AppPreferences{ReduceMotion=true});Directory.Delete(fixture,true);}
     });
     [Theory]

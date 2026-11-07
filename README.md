@@ -43,7 +43,7 @@ Install .NET 10 SDK on Windows. The baseline rolls forward within .NET 10 featur
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.5.0
+./scripts/Publish.ps1 -Version 0.5.1
 ```
 
 The package script copies only public binaries, rules, documentation, and notices into a fresh directory, audits local identity paths, and emits ZIP/SHA-256. It never copies `data/` or test fixtures. CI builds/tests on Windows; the packaging workflow creates artifacts without publishing a GitHub Release. The icon source is SVG; `scripts/Build-Icon.ps1` regenerates the multi-size Windows ICO.
@@ -54,7 +54,7 @@ MIT. See [third-party notices](THIRD-PARTY-NOTICES.md) for the adapted WeChat ca
 
 ## Appearance, progress, and reading archives
 
-Preferences offer Light and One Dark Pro themes and 1, 2, or 4 chat database workers. Prefer 1 on a hard drive and try bounded parallelism on an SSD. Operations show phase progress, throughput, estimated remaining time when a denominator is known, and a collapsible local log. The WPF frontend uses virtualized tables. Drag the log divider to resize it; manual scrolling or selecting text pauses following. Toggle Follow latest or press Ctrl+Shift+L to resume/pause. Page and panel transitions are brief; Preferences can reduce motion.
+Preferences offer Light and One Dark Pro themes and 1, 2, or 4 chat database workers. Prefer 1 on a hard drive and try bounded parallelism on an SSD. Operations show phase progress, throughput, estimated remaining time when a denominator is known, and a collapsible local log. The WPF frontend uses virtualized tables. Drag the log divider to resize it; manual scrolling or selecting text pauses following. Toggle Follow latest or press Ctrl+Shift+L to resume/pause. Color and panel transitions are brief; Preferences can reduce motion.
 
 Account sizes include databases, images, video, and attachments. Reading archives provide named conversations, chronological 300-message pages, search within the current page, and recognized local media. The embedded viewer needs Microsoft Edge WebView2 Runtime; the same messages.html works offline in a browser with its adjacent assets. Names fall back to IDs when contact metadata is unavailable. New WeChat encrypted images, resource-index-only attachments, SILK voice, and unsupported contact schemas remain explicitly unavailable; the raw backup remains authoritative.
 

@@ -258,7 +258,7 @@
   "OpenChatBackup": "Open chat backup...",
   "HelpStorageBody": "Choose a drive or folder and click Analyze folder. Double-click a directory to drill down; Parent moves back within the scanned tree. Largest files shows the top 100 entries. Diagnostics lists skipped links and access errors.\n\nAnalysis does not delete files. Sizes are logical file lengths and can double-count hard links; sparse or compressed files can occupy less physical space. Use Cleanup and archive to review a rule-based operation.",
   "ThemeLabel": "Color theme",
-  "ThemeLight": "Light - monochrome",
+  "ThemeLight": "Light",
   "ChatWorkers": "Chat parsing workers",
   "OperationStarting": "Starting operation",
   "ElapsedOnly": "Elapsed {0}",
@@ -334,5 +334,6 @@
   "ReaderUnsupportedFormat": "Local resource found; its format or encryption is not supported",
   "ReaderFileMissing": "Local resource not found in this backup",
   "ReaderKind_wallet": "Payment / wallet message",
-  "ReaderDatabaseText": "Original database text"
+  "ReaderDatabaseText": "Original database text",
+  "ThemeDark": "Dark (OneDark)"
 }
