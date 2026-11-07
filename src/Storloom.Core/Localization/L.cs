@@ -29,6 +29,10 @@ public static class L {
         string value = catalogs[Language].GetValueOrDefault(key, catalogs["en"].GetValueOrDefault(key, key));
         return arguments.Length == 0 ? value : string.Format(CultureInfo.GetCultureInfo(Language), value, arguments);
     }
+    public static string English(string key, params object[] arguments) {
+        string value = catalogs["en"].GetValueOrDefault(key, key);
+        return arguments.Length == 0 ? value : string.Format(CultureInfo.GetCultureInfo("en"), value, arguments);
+    }
 
     public static string RuleName(CleanupRule rule) => rule.Names.GetValueOrDefault(Language,
         catalogs[Language].GetValueOrDefault($"rule.{rule.Id}.name", rule.Name));

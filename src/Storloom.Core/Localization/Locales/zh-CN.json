@@ -335,5 +335,21 @@
   "ReaderFileMissing": "此备份中未找到对应的本地资源",
   "ReaderKind_wallet": "支付与钱包消息",
   "ReaderDatabaseText": "数据库原始文本",
-  "ThemeDark": "深色(OneDark)"
+  "ThemeDark": "深色(OneDark)",
+  "ToggleSidebar": "收起或展开侧栏",
+  "DiscoveryHelp": "搜索 QQ 和微信的常见数据目录, 也可手动选择转移后的账号目录",
+  "DiscoveryEmpty": "未在搜索目录中找到账号. 如果聊天数据已转移, 请点击选择账号目录, 选择包含数据库和媒体的完整账号文件夹",
+  "DiscoveryFound": "找到 {0} 个账号, 选中一个后继续",
+  "RuleSetName": "规则集",
+  "RuleSetSource": "来源",
+  "RuleSetFile": "规则文件",
+  "ImportRuleSet": "导入规则集...",
+  "RemoveRuleSet": "移除所选",
+  "RemoveRuleSetHelp": "请选择已导入的规则集进行移除. 随程序提供的规则集可以取消勾选来停用",
+  "RuleSetImported": "用户导入",
+  "RuleSetPackaged": "随程序提供",
+  "AboutDescription": "分析存储空间, 清理缓存并校验归档",
+  "ReleaseHistory": "版本历史",
+  "ReportIssue": "反馈问题",
+  "AboutComponents": "基于 .NET, WPF UI 和 WebView2 构建. 第三方许可证随附在程序目录中"
 }

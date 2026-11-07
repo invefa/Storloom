@@ -43,6 +43,23 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Fact]
+    public void DiscoveryResolvesTheSelectedMappedRootButDoesNotTraverseNestedLinks() {
+        string physical=Dir("physical"), account=Dir("physical/account"), outside=Dir("outside");
+        FileIn(account,"db_storage/message/message_0.db");FileIn(outside,"nt_msg.db");
+        string mapped=Path.Combine(root,"mapped"), nested=Path.Combine(account,"nested-link");
+        void Link(string link,string target) {
+            using var process=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("powershell.exe") {
+                UseShellExecute=false,CreateNoWindow=true,ArgumentList={"-NoProfile","-Command",$"New-Item -ItemType Junction -Path '{link.Replace("'","''")}' -Target '{target.Replace("'","''")}' | Out-Null"}})!;
+            Assert.True(process.WaitForExit(10000));Assert.Equal(0,process.ExitCode);
+        }
+        Link(mapped,physical);Link(nested,outside);
+        try {
+            var location=Assert.Single(ChatDiscovery.Discover([Path.Combine(mapped,"account")]));
+            Assert.Equal(PathPolicy.Normalize(account),location.Directory);Assert.Equal(ChatPlatform.WeChat,location.Platform);Assert.Equal(1,location.AccountFiles);
+            Assert.False(location.SizeComplete);
+        } finally {Directory.Delete(nested);Directory.Delete(mapped);}
+    }
+    [Fact]
     public void UnsupportedMessageSchemaIsReportedIncomplete() {
         string source = Dir("account");
         CreateDatabase(Path.Combine(source, "nt_msg.db"), "CREATE TABLE c2c_msg_table(unknown TEXT);");

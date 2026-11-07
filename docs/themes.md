@@ -18,7 +18,8 @@ A theme file overrides any subset of these colors with six-digit `#RRGGBB` strin
   "OnAccent": "#ffffff",
   "Selection": "#dddddd",
   "Hover": "#e8e8e8",
-  "Danger": "#4b4b4b"
+  "Danger": "#4b4b4b",
+  "TextSelection": "#aaaaaa"
 }
 ```
 
@@ -26,4 +27,4 @@ Keep foreground/background combinations readable. Unknown keys and invalid color
 
 The menus share the title bar. Buttons, inputs, and drop-downs use a compact 32-DIP height. Drag the sidebar divider (10-DIP hit area around a 1-DIP line) or the log's upper divider to resize. Sizes are saved in private preferences. Manual log scrolling, navigation keys, or text selection pause following. The Follow latest checkbox or Ctrl+Shift+L toggles following; enabling it returns to the newest line. Appending logs does not take keyboard focus. The live tail is trimmed only while following; structured operation journals remain available separately in local data.
 
-Navigation changes immediately and menus open without popup animation. Hover/press feedback animates backgrounds only (65–100 ms), leaving text opaque and untransformed. Progress and log-panel transitions take approximately 120–150 ms. Reduce motion removes application transitions; the reader also honors the operating system's reduced-motion preference.
+Navigation changes immediately and menus open without popup animation. Multiline and read-only text fields have no hover/press animation; focused editors keep a stable background. Hover/press feedback on other controls animates backgrounds only (65–100 ms), leaving text opaque and untransformed. Progress and log-panel transitions take approximately 120–150 ms. Reduce motion removes application transitions; the reader also honors the operating system's reduced-motion preference.

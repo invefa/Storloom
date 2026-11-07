@@ -13,7 +13,7 @@ public sealed partial class ShellWindow {
             var rule = engine.Catalog.Rules.Single(r => r.Id == id); var matches = files.Where(f => f.RuleId == id).ToArray();
             if (rule.Action == CleanupAction.Command) {
                 var command = snapshot.Commands.SingleOrDefault(c => c.RuleId == id) ?? throw new InvalidDataException(L.T("ToolNotAvailable"));
-                commands.Add(id); review.Add(new(L.RuleName(rule), L.T("Command"), NativeSize(id), CommandText(command), L.T("NativeScope"))); continue;
+                commands.Add(id); review.Add(new(L.RuleName(rule), L.T("Command"), NativeSize(id), CommandText(command), L.T("NativeScope")) { Bytes = snapshot.Measurements.GetValueOrDefault(id)?.Bytes }); continue;
             }
             if (matches.Length == 0) continue;
             var choice = treatments.GetValueOrDefault(id);
@@ -28,7 +28,7 @@ public sealed partial class ShellWindow {
             foreach (var plan in plans) transferNames[plan.Id] = L.RuleName(rule);
             review.Add(new(L.RuleName(rule), choice == Treatment.Rule ? L.T(rule.Action.ToString()) : L.T(choice == Treatment.Copy ? "ArchiveCopy" : "ArchiveMove"),
                 View.Size(matches.Sum(f => f.Stamp.Bytes)), string.Join(Environment.NewLine, plans.Select(p => p.Source + " -> " + p.Destination)),
-                string.Join(Environment.NewLine, matches.Select(f => f.Path).Take(30))));
+                string.Join(Environment.NewLine, matches.Select(f => f.Path).Take(30))) { Bytes = matches.Sum(f => f.Stamp.Bytes) });
         }
         if (review.Count == 0) throw new InvalidOperationException(L.T("SelectionRequired"));
         string warning = string.Join(Environment.NewLine, new[] { deletes.Count > 0 ? L.T("DeleteNotice") : "", commands.Count > 0 ? L.T("CommandNotice") : "" }.Where(s => s != ""));
@@ -39,7 +39,7 @@ public sealed partial class ShellWindow {
             var results = new List<CleanupItemResult>();
             var progress = Progress(); string journal = Path.Combine(dataRoot, "journals");
             foreach (var plan in transfers) {
-                operationView.AddLog(L.T("PhaseCopyVerify") + ": " + plan.Source);
+                operationView.AddLog(L.English("PhaseCopyVerify") + ": " + plan.Source);
                 var result = await Task.Run(() => new TransferService().Execute(plan, journal, progress, token));
                 results.Add(new(transferNames[plan.Id], L.T(plan.Mode.ToString()), null, null,
                     result.RemovedBytes, result.Issues.Count == 0 ? L.T("Complete") : L.T("Incomplete")));
@@ -62,7 +62,7 @@ public sealed partial class ShellWindow {
             }
             if (toolFailed) issues += deletes.Count;
             if (deletes.Count > 0 && !toolFailed) foreach (string id in deletes) {
-                operationView.AddLog(L.T("Delete") + ": " + L.RuleName(engine.Catalog.Rules.Single(r => r.Id == id)));
+                operationView.AddLog("Delete: " + engine.Catalog.Rules.Single(r => r.Id == id).Name);
                 var result = await Task.Run(() => engine.Apply(snapshot, [id], journal, paths, progress, token));
                 processed += result.Deleted; issues += result.Skipped;
                 results.Add(new(L.RuleName(engine.Catalog.Rules.Single(r => r.Id == id)), L.T("Delete"), null, null,
@@ -70,6 +70,7 @@ public sealed partial class ShellWindow {
             }
             JsonFiles.Write(Path.Combine(journal, $"cleanup-summary-{Guid.NewGuid():N}.json"), results);
             cleanupPlan = null; excluded.Clear(); RenderRules(); status.Text = L.T("OperationDone", processed, toolSuccess, issues);
+            operationView.AddLog($"Cleanup completed: files={processed}, nativeCommands={toolSuccess}, issues={issues}.");
             new CleanupResultsWindow(results) { Owner = this }.ShowDialog();
         });
     }

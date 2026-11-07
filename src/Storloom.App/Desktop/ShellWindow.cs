@@ -24,6 +24,8 @@ public sealed partial class ShellWindow : ThemeWindow {
     private ColumnDefinition sidebarColumn = null!;
     private OperationPanel operationView = null!;
     private GridSplitter logDivider = null!;
+    private GridSplitter sidebarDivider = null!;
+    private Button? operationButton;
     private string currentPage = "cleanup";
     public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
         MinWidth = 1040; MinHeight = 640; WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -37,7 +39,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             if (operation != null) { operation.Cancel(); e.Cancel = true; status.Text = L.T("Busy"); }
             else {
                 SetCapturedKey(null);
-                preferences = preferences with { SidebarWidth = sidebarColumn.ActualWidth,
+                preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
                     LogHeight = operationView.Expanded && logRow.ActualHeight > 80 ? logRow.ActualHeight : preferences.LogHeight };
                 JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
             }
@@ -63,26 +65,41 @@ public sealed partial class ShellWindow : ThemeWindow {
         menu.Items.Add(file); menu.Items.Add(tools); menu.Items.Add(help);
         var title = View.Text("Storloom", 12); title.Margin = new Thickness(0);
         Caption.Header = View.Row(title, menu);
-        var center = new Grid(); sidebarColumn = new ColumnDefinition { Width = new GridLength(Math.Clamp(preferences.SidebarWidth, 150, 260)), MinWidth = 150, MaxWidth = 260 };
+        var center = new Grid(); sidebarColumn = new ColumnDefinition { Width = new GridLength(Math.Clamp(preferences.SidebarWidth, 128, 260)), MinWidth = 128, MaxWidth = 260 };
         center.ColumnDefinitions.Add(sidebarColumn); center.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         center.ColumnDefinitions.Add(new ColumnDefinition { Width = View.Fill });
-        navigation = new ListBox { Name = "navigation", HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        foreach (var (id, key) in new[] { ("overview", "NavOverview"), ("cleanup", "NavCleanup"), ("chats", "NavChats") })
-            navigation.Items.Add(new ListBoxItem { Content = L.T(key), Tag = id });
+        navigation = new ListBox { Name = "navigation", HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(4, 0, 4, 4) };
+        foreach (var (id, key, geometry) in new[] {
+            ("overview", "NavOverview", "M 1,14 L 1,9 4,9 4,14 Z M 7,14 L 7,5 10,5 10,14 Z M 13,14 L 13,1 16,1 16,14 Z"),
+            ("cleanup", "NavCleanup", "M 2,5 L 14,5 14,14 2,14 Z M 1,2 L 15,2 15,5 1,5 Z M 6,8 L 10,8"),
+            ("chats", "NavChats", "M 1,1 L 15,1 15,11 8,11 4,15 4,11 1,11 Z M 4,5 L 12,5 M 4,8 L 9,8") }) {
+            var label = View.Text(L.T(key)); label.Name = "nav_label"; label.Margin = new Thickness(0); label.TextWrapping = TextWrapping.NoWrap; label.TextTrimming = TextTrimming.CharacterEllipsis;
+            var contents = new DockPanel(); var icon = View.Icon(geometry); icon.Margin = new Thickness(0, 0, 8, 0); DockPanel.SetDock(icon, Dock.Left); contents.Children.Add(icon); contents.Children.Add(label);
+            navigation.Items.Add(new ListBoxItem { Content = contents, Tag = id, ToolTip = L.T(key) });
+        }
         navigation.SelectionChanged += (_, _) => { if (navigation.SelectedItem is ListBoxItem selected) Navigate((string)selected.Tag); };
-        View.Add(center, navigation, 0); View.Add(center, SidebarSplitter(), 0, 1);
-        pageHost = new Grid { Margin = new Thickness(18, 14, 18, 12) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
+        var sidebar = View.Grid(View.Auto, View.Fill); sidebar.SetResourceReference(Panel.BackgroundProperty, "Sidebar");
+        var collapseSidebar = View.IconButton("M 1,3 L 15,3 M 1,8 L 15,8 M 1,13 L 15,13", "ToggleSidebar", ToggleSidebar);
+        collapseSidebar.Name = "toggle_sidebar"; collapseSidebar.HorizontalAlignment = HorizontalAlignment.Left; collapseSidebar.Margin = new Thickness(8, 4, 0, 2);
+        View.Add(sidebar, collapseSidebar, 0); View.Add(sidebar, navigation, 1);
+        View.Add(center, sidebar, 0); sidebarDivider = SidebarSplitter(); View.Add(center, sidebarDivider, 0, 1);
+        ApplySidebar();
+        pageHost = new Grid { Margin = new Thickness(12, 14, 18, 12) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
         var logSplitter = logDivider = new GridSplitter { Height = 5, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Collapsed };
+        var logTemplate = new ControlTemplate(typeof(GridSplitter)); var logHit = new FrameworkElementFactory(typeof(Grid));
+        logHit.SetResourceReference(Panel.BackgroundProperty, "Canvas"); var logLine = new FrameworkElementFactory(typeof(Border));
+        logLine.SetValue(FrameworkElement.HeightProperty, 1d); logLine.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        logLine.SetResourceReference(Border.BackgroundProperty, "Line"); logHit.AppendChild(logLine); logTemplate.VisualTree = logHit; logSplitter.Template = logTemplate;
         logSplitter.DragStarted += (_, _) => { logRow.BeginAnimation(RowDefinition.HeightProperty, null); };
         logSplitter.DragCompleted += (_, _) => { preferences = preferences with { LogHeight = logRow.ActualHeight }; };
         View.Add(root, logSplitter, 2); logRow = root.RowDefinitions[3];
         operationView = new OperationPanel { Visibility = Visibility.Collapsed }; View.Add(root, operationView, 3);
         operationView.ExpansionChanged += expanded => {
-            double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 64;
+            double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 40;
             if (!expanded && logRow.ActualHeight > 80) preferences = preferences with { LogHeight = logRow.ActualHeight };
             AnimateLog(target); logSplitter.IsEnabled = expanded;
         };
-        logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 64; };
+        logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 40; };
         var footer = new DockPanel { Margin = new Thickness(18, 5, 12, 5) };
         cancel = Button("Cancel", () => operation?.Cancel()); cancel.Visibility = Visibility.Collapsed;
         DockPanel.SetDock(cancel, Dock.Right); footer.Children.Add(cancel);
@@ -91,14 +108,28 @@ public sealed partial class ShellWindow : ThemeWindow {
         Body.Children.Add(root); BuildOverview(); BuildRules(); BuildChats();
         navigation.SelectedIndex = currentPage == "overview" ? 0 : currentPage == "chats" ? 2 : 1;
     }
-    private static GridSplitter SidebarSplitter() {
+    private static GridSplitter SidebarSplitter(string background = "Sidebar") {
         var splitter = new GridSplitter { Name = "sidebar_splitter", Width = 10, Background = Brushes.Transparent, Cursor = Cursors.SizeWE,
             ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndNext };
         var template = new ControlTemplate(typeof(GridSplitter));
-        var hitArea = new FrameworkElementFactory(typeof(Grid)); hitArea.SetValue(Panel.BackgroundProperty, Brushes.Transparent);
+        var hitArea = new FrameworkElementFactory(typeof(Grid)); hitArea.SetResourceReference(Panel.BackgroundProperty, background);
         var line = new FrameworkElementFactory(typeof(Border)); line.SetValue(FrameworkElement.WidthProperty, 1d);
+        line.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Right);
         line.SetResourceReference(Border.BackgroundProperty, "Line"); hitArea.AppendChild(line); template.VisualTree = hitArea;
         splitter.Template = template; return splitter;
+    }
+    private void ToggleSidebar() {
+        preferences = preferences with { SidebarWidth = preferences.SidebarCollapsed ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
+            SidebarCollapsed = !preferences.SidebarCollapsed }; ApplySidebar();
+    }
+    private void ApplySidebar() {
+        bool compact = preferences.SidebarCollapsed;
+        sidebarColumn.MinWidth = compact ? 44 : 128; sidebarColumn.MaxWidth = compact ? 44 : 260;
+        sidebarColumn.Width = new GridLength(compact ? 44 : Math.Clamp(preferences.SidebarWidth, 128, 260)); sidebarDivider.IsEnabled = !compact;
+        foreach (ListBoxItem item in navigation.Items) {
+            var contents = (DockPanel)item.Content; var label = contents.Children.OfType<TextBlock>().Single(); label.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            contents.Children.OfType<System.Windows.Shapes.Path>().Single().Margin = new Thickness(0, 0, compact ? 0 : 8, 0);
+        }
     }
     private void AnimateLog(double target) {
         double previous = logRow.ActualHeight; logRow.BeginAnimation(RowDefinition.HeightProperty, null); logRow.Height = new GridLength(target);
@@ -120,7 +151,11 @@ public sealed partial class ShellWindow : ThemeWindow {
     private Button Button(string key, Action action, bool primary = false) => View.Button(key, () => Guard(action), primary);
     private Button AsyncButton(string key, Func<Task> action, bool primary = false) {
         var button = View.Button(key, () => { }, primary);
-        button.Click += async (_, _) => { try { await action(); } catch (Exception ex) { Error(ex); } }; return button;
+        button.Click += async (_, _) => {
+            if (operation != null) { if (operationButton == button) operation.Cancel(); return; }
+            operationButton = button;
+            try { await action(); } catch (Exception ex) { Error(ex); } finally { operationButton = null; }
+        }; return button;
     }
     private void Guard(Action action) { try { action(); } catch (Exception ex) { Error(ex); } }
     private void Error(Exception ex) {
@@ -134,19 +169,31 @@ public sealed partial class ShellWindow : ThemeWindow {
     private async Task Run(Func<CancellationToken, Task> work) {
         if (operation != null) return;
         using var source = new CancellationTokenSource(); operation = source;
-        pageHost.IsEnabled = navigation.IsEnabled = menu.IsEnabled = false;
+        navigation.IsEnabled = menu.IsEnabled = false;
+        var disabled = Controls(pageHost).Where(c => c != operationButton && c.IsEnabled && c is System.Windows.Controls.Button or TextBox or ComboBox or CheckBox or PasswordBox or DataGrid).ToArray();
+        foreach (var control in disabled) control.IsEnabled = false;
+        object? previousContent = operationButton?.Content;
+        if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
-        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 64);
-        operationView.Start(); cancel.Visibility = Visibility.Visible; status.Text = L.T("OperationStarting"); bool complete = false;
+        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 40);
+        operationView.Start(); cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed; status.Text = L.T("OperationStarting"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested; }
         catch (OperationCanceledException) { status.Text = L.T("Cancelled"); }
         catch (Exception ex) { Error(ex); }
-        finally { operation = null; pageHost.IsEnabled = navigation.IsEnabled = menu.IsEnabled = true;
+        finally { operation = null; navigation.IsEnabled = menu.IsEnabled = true;
+            foreach (var control in disabled) control.IsEnabled = true;
+            if (operationButton != null) operationButton.Content = previousContent;
             cancel.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
+    }
+    private static IEnumerable<Control> Controls(DependencyObject root) {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) {
+            var child = VisualTreeHelper.GetChild(root, i); if (child is Control control) yield return control;
+            foreach (var nested in Controls(child)) yield return nested;
+        }
     }
     private void ReloadEngine() {
         string settings = Path.Combine(dataRoot, "settings.json");
-        engine = new CleanupEngine(RuleSets.Load(rulesDirectory, preferences.EnabledRuleSets, Path.Combine(dataRoot, "rules.json")),
+        engine = new CleanupEngine(RuleSets.Load(rulesDirectory, preferences.EnabledRuleSets, Path.Combine(dataRoot, "rules.json"), Path.Combine(dataRoot, "rule-sets")),
             File.Exists(settings) ? JsonFiles.Read<CleanerSettings>(settings) : new()); cleanupPlan = null; excluded.Clear();
     }
     private void ShowPreferences(bool ruleSets = false) {

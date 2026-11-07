@@ -8,7 +8,7 @@ namespace Storloom.App;
 public static class Theme {
     public static AppTheme Current { get; private set; }
     public static bool ReduceMotion { get; private set; }
-    private static readonly string[] names = ["Canvas", "Surface", "Sidebar", "Ink", "Muted", "Line", "Accent", "OnAccent", "Selection", "Hover", "Danger"];
+    private static readonly string[] names = ["Canvas", "Surface", "Sidebar", "Ink", "Muted", "Line", "Accent", "OnAccent", "Selection", "Hover", "Danger", "TextSelection"];
     public static void Apply(AppPreferences preferences) {
         Current = preferences.Theme; ReduceMotion = preferences.ReduceMotion;
         var resources = Application.Current.Resources;
@@ -21,8 +21,8 @@ public static class Theme {
         ApplicationThemeManager.Apply(Current == AppTheme.OneDark ? ApplicationTheme.Dark : ApplicationTheme.Light,
             Wpf.Ui.Controls.WindowBackdropType.None, false);
         string[] colors = Current == AppTheme.OneDark ?
-            ["#23272e", "#282c34", "#1e2227", "#abb2bf", "#9098a7", "#3b414d", "#4d78cc", "#ffffff", "#34445d", "#303640", "#e06c75"] :
-            ["#f6f6f6", "#ffffff", "#eeeeee", "#242424", "#686868", "#dddddd", "#252525", "#ffffff", "#dddddd", "#e8e8e8", "#4b4b4b"];
+            ["#23272e", "#282c34", "#1e2227", "#abb2bf", "#9098a7", "#3b414d", "#4d78cc", "#ffffff", "#34445d", "#303640", "#e06c75", "#4e658a"] :
+            ["#f6f6f6", "#ffffff", "#eeeeee", "#242424", "#686868", "#dddddd", "#252525", "#ffffff", "#dddddd", "#e8e8e8", "#4b4b4b", "#aaaaaa"];
         var palette = names.Zip(colors).ToDictionary(pair => pair.First, pair => (Color)ColorConverter.ConvertFromString(pair.Second));
         if (!string.IsNullOrWhiteSpace(preferences.CustomThemeFile)) {
             foreach (var pair in ReadCustom(preferences.CustomThemeFile)) palette[pair.Key] = pair.Value;

@@ -124,3 +124,7 @@ The executor measures again immediately before and after running the tool. The r
 Adding rule fields changes catalog hashes; rescan old cleanup plans before applying them.
 
 For pip only, `{"mode":"ToolReport"}` calls `python -m pip cache info` and parses its HTTP/wheel size totals. This native report rounds decimal sizes, so previews use a `~` prefix. Cleanup still performs exact directory measurements before and after execution; it never subtracts rounded estimates to claim released bytes. Unsupported native report formats remain unknown. Other tools currently use Tool directory discovery or explicit Directories measurements.
+
+## Imported rule sets
+
+The desktop rule-set library accepts the same version-1 catalog format. It stores imported catalogs and a private sets.json index in data/rule-sets. Selection is saved by set ID. Installed catalogs remain unchanged. All selected sets share validation and duplicate-ID checks; private rules.json overrides are applied last. Removing a library entry retains the catalog file, and disabled sets are not scanned. CLI users can pass the imported catalog directly as a rule file. Library import and removal are staged until preferences are saved.

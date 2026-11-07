@@ -19,6 +19,7 @@ public static class ControlFeedback {
         control.PreviewKeyDown += (_, e) => { if (e.Key is Key.Space or Key.Enter) { control.SetValue(PressedProperty, true); Paint(control, true); } };
         control.PreviewKeyUp += (_, e) => { if (e.Key is Key.Space or Key.Enter) { control.SetValue(PressedProperty, false); Paint(control, true); } };
         control.IsEnabledChanged += (_, _) => Paint(control, false);
+        control.IsKeyboardFocusWithinChanged += (_, _) => { control.SetValue(PressedProperty, false); Paint(control, false); };
         if (control is ToggleButton toggle) { toggle.Checked += (_, _) => Paint(control, true); toggle.Unchecked += (_, _) => Paint(control, true); }
         if (control is ListBoxItem item) { item.Selected += (_, _) => Paint(control, true); item.Unselected += (_, _) => Paint(control, true); }
     }
@@ -36,12 +37,15 @@ public static class ControlFeedback {
     }
     private static Color Color(string key) => ((SolidColorBrush)Theme.Brush(key)).Color;
     private static void Paint(Control control, bool animate) {
+        if (!GetEnabled(control)) return;
         string name = control is CheckBox ? "box" : control is ListBoxItem ? "item" : "frame";
         var frame = Frame(control, name); if (frame == null) return;
         var color = control is CheckBox check ? Color(check.IsChecked == true ? "Accent" : "Surface") :
-            control is ListBoxItem item ? Color(item.IsSelected ? "Surface" : "Sidebar") :
+            control is ListBoxItem item ? Color(item.IsSelected ? "Selection" : "Sidebar") :
             (control.Background as SolidColorBrush)?.Color ?? Color("Surface");
-        if (control.IsEnabled && (control.IsMouseOver || (bool)control.GetValue(PressedProperty))) {
+        bool passiveEditor = control is TextBox editor && (editor.AcceptsReturn || editor.IsReadOnly || editor.IsKeyboardFocusWithin);
+        if (passiveEditor) animate = false;
+        if (!passiveEditor && control.IsEnabled && (control.IsMouseOver || (bool)control.GetValue(PressedProperty))) {
             double amount = (bool)control.GetValue(PressedProperty) ? .18 : .08;
             var ink = Color("Ink");
             // Filled buttons need a visible state change while preserving foreground contrast.

@@ -33,6 +33,21 @@ public sealed class RuleAndToolTests : IDisposable {
         Assert.Throws<InvalidDataException>(() => RuleSets.Load(rules, ["unknown"]));
     }
     [Fact]
+    public void ImportedRuleSetsRemainSeparateAndRespectSelectionOverridesAndValidation() {
+        string rules=Path.Combine(Repository(),"rules"), custom=Dir("rule-sets"), local=Path.Combine(root,"rules.json");
+        JsonFiles.Write(Path.Combine(custom,"sets.json"),new RuleSetIndex(1,[new("custom-fixture","fixture.json","Fixture","",[],[],true)]));
+        JsonFiles.Write(Path.Combine(custom,"fixture.json"),new RuleCatalog{Rules=[new(){Id="imported-cache",Name="Imported cache",Roots=[Dir("cache")]}]});
+        var info=RuleSets.ReadIndex(rules,custom).Sets.Single(s=>s.Id=="custom-fixture");Assert.True(info.IsCustom);
+        Assert.Single(RuleSets.Load(rules,["custom-fixture"],customDirectory:custom).Rules);
+        Assert.DoesNotContain(RuleSets.Load(rules,["system"],customDirectory:custom).Rules,r=>r.Id=="imported-cache");
+        JsonFiles.Write(local,new RuleCatalog{Rules=[new(){Id="imported-cache",Name="Override",Roots=[Dir("other")]}]});
+        Assert.Equal("Override",Assert.Single(RuleSets.Load(rules,["custom-fixture"],local,custom).Rules).Name);
+        JsonFiles.Write(Path.Combine(custom,"fixture.json"),new RuleCatalog{Rules=[new(){Id="user-temp",Name="Duplicate"}]});
+        Assert.Throws<InvalidDataException>(()=>RuleSets.Load(rules,["system","custom-fixture"],customDirectory:custom));
+        JsonFiles.Write(Path.Combine(custom,"sets.json"),new RuleSetIndex(1,[new("custom-fixture","../escape.json","Fixture","",[],[],true)]));
+        Assert.Throws<InvalidDataException>(()=>RuleSets.ReadIndex(rules,custom));
+    }
+    [Fact]
     public void LocalOverridesReplaceOnlyMatchingIds() {
         string rules = Path.Combine(Repository(), "rules"), local = Path.Combine(root, "rules.json");
         JsonFiles.Write(local, new RuleCatalog { Rules = [new() { Id = "user-temp", Name = "Private fixture cache", Roots = [Dir("cache")] }] });

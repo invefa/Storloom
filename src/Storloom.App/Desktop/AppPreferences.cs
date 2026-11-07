@@ -11,5 +11,6 @@ public sealed record AppPreferences {
     public bool ReduceMotion { get; init; }
     public string? CustomThemeFile { get; init; }
     public double LogHeight { get; init; } = 200;
-    public double SidebarWidth { get; init; } = 160;
+    public double SidebarWidth { get; init; } = 136;
+    public bool SidebarCollapsed { get; init; }
 }

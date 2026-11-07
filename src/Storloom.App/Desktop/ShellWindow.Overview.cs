@@ -28,11 +28,12 @@ public sealed partial class ShellWindow {
             var progress = Progress(); storageScan = await Task.Run(() => new StorageScanner().Scan(root, progress, token));
             JsonFiles.Write(Path.Combine(dataRoot, "scans", $"storage-{DateTime.Now:yyyyMMdd-HHmmss}.json"), storageScan);
             RenderStorage(); status.Text = L.T("ScanSummary", storageScan.Files, storageScan.Bytes / 1073741824d, storageScan.Issues.Count);
+            operationView.AddLog($"Storage scan completed: files={storageScan.Files}, logicalBytes={storageScan.Bytes}, issues={storageScan.Issues.Count}.");
         });
     }
     private void RenderStorage() {
         if (storageScan == null) return; ShowDirectory(storageScan.Root);
-        largeList.ItemsSource = storageScan.LargeFiles.Select(e => new StorageRow(e.Path, View.Size(e.Bytes), e.Files, "")).ToArray();
+        largeList.ItemsSource = storageScan.LargeFiles.Select(e => new StorageRow(e.Path, e.Bytes, e.Files, 0)).ToArray(); View.Sort(largeList, "Bytes");
         overviewIssues.ItemsSource = storageScan.Issues;
     }
     private void ShowDirectory(string path) {
@@ -40,7 +41,9 @@ public sealed partial class ShellWindow {
         var current = storageScan.Directories.FirstOrDefault(d => d.Path.Equals(path, StringComparison.OrdinalIgnoreCase)); if (current == null) return;
         currentDirectory = path; rootInput.Text = path;
         directoryList.ItemsSource = storageScan.Directories.Where(d => Path.GetDirectoryName(d.Path)?.Equals(path, StringComparison.OrdinalIgnoreCase) == true)
-            .Select(e => new StorageRow(e.Path, View.Size(e.Bytes), e.Files, current.Bytes == 0 ? "0%" : $"{100d * e.Bytes / current.Bytes:N1}%")).ToArray();
+            .Select(e => new StorageRow(e.Path, e.Bytes, e.Files, current.Bytes == 0 ? 0 : (double)e.Bytes / current.Bytes)).ToArray(); View.Sort(directoryList, "Bytes");
     }
-    private sealed record StorageRow(string Path, string Size, long Files, string Share);
+    private sealed record StorageRow(string Path, long Bytes, long Files, double Fraction) {
+        public string Size => View.Size(Bytes); public string Share => $"{100 * Fraction:N1}%";
+    }
 }

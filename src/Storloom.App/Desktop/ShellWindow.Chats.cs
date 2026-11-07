@@ -13,6 +13,8 @@ public sealed partial class ShellWindow {
     private WrapPanel chatFooter = null!;
     private DataGrid chatList = null!;
     private TextBlock[] chatSteps = [];
+    private Border[] chatStepFrames = [];
+    private TextBlock accountNotice = null!;
     private Button chatNext = null!;
     private TextBox? backupInput;
     private PasswordBox? keyInput;
@@ -20,12 +22,13 @@ public sealed partial class ShellWindow {
     private bool readingComplete;
     private void BuildChats() {
         var layout = Page("chats", "ChatTitle", "ChatLead", View.Auto, View.Fill, View.Auto);
-        var steps = new Grid { Margin = new Thickness(0, 0, 0, 16) }; chatSteps = new TextBlock[3];
+        var steps = new Grid { Margin = new Thickness(0, 0, 0, 10) }; chatSteps = new TextBlock[3]; chatStepFrames = new Border[3];
         string[] keys = ["ChatStepAccount", "ChatStepBackup", "ChatStepExport"];
         for (int i = 0; i < 3; i++) {
             steps.ColumnDefinitions.Add(new ColumnDefinition { Width = View.Fill });
-            chatSteps[i] = View.Text(L.T(keys[i])); chatSteps[i].Padding = new Thickness(12, 10, 12, 10); chatSteps[i].Margin = new Thickness(0, 0, 8, 0);
-            View.Add(steps, chatSteps[i], 0, i);
+            chatSteps[i] = View.Text(L.T(keys[i])); chatSteps[i].Margin = new Thickness(0);
+            chatStepFrames[i] = new Border { Child = chatSteps[i], CornerRadius = new CornerRadius(3), Padding = new Thickness(10, 7, 10, 7), Margin = new Thickness(0, 0, 6, 0) };
+            View.Add(steps, chatStepFrames[i], 0, i);
         }
         View.Add(layout, steps, 1); chatContent = new Grid(); View.Add(layout, View.Card(chatContent, 22), 2);
         chatFooter = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
@@ -33,18 +36,19 @@ public sealed partial class ShellWindow {
     }
     private void RenderChatStage() {
         chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null;
-        for (int i = 0; i < chatSteps.Length; i++) { chatSteps[i].SetResourceReference(TextBlock.BackgroundProperty, i == Math.Min(chatStep, 2) ? "Selection" : "Canvas"); }
+        for (int i = 0; i < chatSteps.Length; i++) { chatStepFrames[i].SetResourceReference(Border.BackgroundProperty, i == Math.Min(chatStep, 2) ? "Selection" : "Canvas"); }
         if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
         chatFooter.Children.Add(Button("QuickStart", () => ShowHelp(2))); Theme.Enter(chatContent);
     }
     private void BuildChatAccounts() {
-        var grid = View.Grid(View.Auto, View.Auto, View.Fill); chatContent.Children.Add(grid);
+        var grid = View.Grid(View.Auto, View.Auto, View.Auto, View.Fill); chatContent.Children.Add(grid);
         View.Add(grid, View.Text(L.T("AccountHelp"), color: "Muted"), 0);
         var actions = View.Row(AsyncButton("FindAccounts", () => DiscoverChats(null), true), AsyncButton("SelectAccountFolder", async () => {
             string path = View.Folder(this); if (path != "") await DiscoverChats(path);
         })); actions.Margin = new Thickness(0, 6, 0, 14); View.Add(grid, actions, 1);
         chatList = View.Table(("Account", "Account", 0), ("Platform", "Platform", 120), ("AccountSize", "Size", 150), ("Path", "Path", 0));
-        chatList.Name = "chat_accounts"; chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray(); View.Add(grid, chatList, 2);
+        accountNotice = View.Text(L.T("DiscoveryHelp"), color: "Muted"); accountNotice.Name = "account_discovery_notice"; View.Add(grid, accountNotice, 2);
+        chatList.Name = "chat_accounts"; chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray(); View.Add(grid, chatList, 3);
         chatNext = Button("Next", () => {
             if (chatList.SelectedItem is not AccountRow row) throw new InvalidOperationException(L.T("NoAccountSelected"));
             if (activeChat?.Directory != row.Location.Directory || activeChat?.Platform != row.Location.Platform) SetCapturedKey(null);
@@ -56,9 +60,13 @@ public sealed partial class ShellWindow {
         var progress = Progress(); locations = await Task.Run(() => ChatDiscovery.Discover(root == null ? null : [root], progress, token));
         chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray();
         if (locations.Count == 1) chatList.SelectedIndex = 0; status.Text = L.T(locations.Count == 0 ? "NoAccounts" : "SelectAccount");
+        accountNotice.Text = L.T(locations.Count == 0 ? "DiscoveryEmpty" : "DiscoveryFound", locations.Count);
+        operationView.AddLog($"Account discovery completed: {locations.Count} account(s) found.");
+        if (locations.Count > 0) View.Sort(chatList, "Bytes");
     });
     private sealed record AccountRow(ChatLocation Location) {
         public string Account => Location.Account; public string Platform => Location.Platform.ToString(); public string Path => Location.Directory;
+        public long? Bytes => Location.AccountBytes;
         public string Size => Location.AccountBytes is long bytes ? Location.SizeComplete ? View.Size(bytes) : L.T("AtLeastSize", View.Size(bytes)) : L.T("SizeNotScanned");
     }
     private void BuildChatBackup() {

@@ -37,9 +37,30 @@ internal static class View {
     }
     public static DataGrid Table(params (string Key, string Property, double Width)[] columns) {
         var table = new DataGrid { IsReadOnly = true };
+        var textStyle = new Style(typeof(TextBlock)); textStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+        textStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.NoWrap)); textStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+        textStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new Binding("Text") { RelativeSource = RelativeSource.Self }));
         foreach (var (key, property, width) in columns) table.Columns.Add(new DataGridTextColumn {
-            Header = L.T(key), Binding = new Binding(property), Width = width == 0 ? new DataGridLength(1, DataGridLengthUnitType.Star) : new DataGridLength(width), MinWidth = 60 });
+            Header = L.T(key), Binding = new Binding(property), SortMemberPath = property switch { "Size" or "Amount" => "Bytes", "Share" => "Fraction", "Before" => "BeforeBytes", "After" => "AfterBytes", "Freed" => "FreedBytes", _ => property },
+            ElementStyle = textStyle,
+            Width = width == 0 ? new DataGridLength(1, DataGridLengthUnitType.Star) : new DataGridLength(width), MinWidth = 48 });
         return table;
+    }
+    public static Button IconButton(string geometry, string tooltip, Action action) {
+        var button = Button(tooltip, action); button.Content = Icon(geometry); button.ToolTip = L.T(tooltip);
+        button.Width = 28; button.Height = button.MinHeight = 28; button.MinWidth = 28; button.Padding = new Thickness(5); button.Margin = new Thickness(0);
+        System.Windows.Automation.AutomationProperties.SetName(button, L.T(tooltip)); return button;
+    }
+    public static void Sort(DataGrid table, string member, System.ComponentModel.ListSortDirection direction = System.ComponentModel.ListSortDirection.Descending) {
+        var column = table.Columns.FirstOrDefault(c => c.SortDirection != null) ?? table.Columns.First(c => c.SortMemberPath == member);
+        direction = column.SortDirection ?? direction;
+        var view = CollectionViewSource.GetDefaultView(table.ItemsSource); if (view == null || !view.CanSort) return;
+        view.SortDescriptions.Clear(); view.SortDescriptions.Add(new(column.SortMemberPath, direction)); column.SortDirection = direction;
+    }
+    public static System.Windows.Shapes.Path Icon(string geometry, double size = 16) {
+        var icon = new System.Windows.Shapes.Path { Data = Geometry.Parse(geometry), Width = size, Height = size, Stretch = Stretch.Uniform,
+            StrokeThickness = 1.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, VerticalAlignment = VerticalAlignment.Center };
+        icon.SetResourceReference(System.Windows.Shapes.Path.StrokeProperty, "Ink"); return icon;
     }
     public static void Checks(DataGrid table, string property = "Selected") {
         table.IsReadOnly = false;
@@ -53,7 +74,7 @@ internal static class View {
         check.SetValue(Control.PaddingProperty, new Thickness(0));
         var cellStyle = new Style(typeof(DataGridCell), (Style)Application.Current.FindResource(typeof(DataGridCell)));
         cellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
-        table.Columns.Insert(0, new DataGridTemplateColumn { CellTemplate = template, CellStyle = cellStyle, Width = 36, MinWidth = 36, CanUserResize = false });
+        table.Columns.Insert(0, new DataGridTemplateColumn { CellTemplate = template, CellStyle = cellStyle, Width = 28, MinWidth = 28, CanUserResize = false, CanUserSort = false });
     }
     public static string Size(long bytes) {
         string[] units = ["B", "KiB", "MiB", "GiB", "TiB"]; double number = bytes; int index = 0;

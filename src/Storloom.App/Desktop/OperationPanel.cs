@@ -14,7 +14,7 @@ public sealed class OperationPanel : Grid {
     public bool Expanded { get; private set; } = true;
     public event Action<bool>? ExpansionChanged;
     private readonly TextBlock state = View.Text(""), timing = View.Text("", color: "Muted");
-    private readonly ProgressBar progress = new() { Height = 4, Maximum = 1, Margin = new Thickness(0, 4, 0, 0) };
+    private readonly ProgressBar progress = new() { Height = 2, MinHeight = 0, Maximum = 1, Margin = new Thickness(0, 3, 0, 0) };
     private readonly Stopwatch clock = new();
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly Button collapse;
@@ -23,11 +23,11 @@ public sealed class OperationPanel : Grid {
     private double phaseStart;
     private bool followPending;
     public OperationPanel() {
-        Margin = new Thickness(16, 6, 16, 8);
+        Margin = new Thickness(16, 3, 16, 5); ControlFeedback.SetEnabled(Log, false);
         RowDefinitions.Add(new RowDefinition { Height = View.Auto }); RowDefinitions.Add(new RowDefinition { Height = View.Auto });
         RowDefinitions.Add(new RowDefinition { Height = View.Fill });
-        var row = new DockPanel(); collapse = View.Button("HideOperationLog", ToggleExpanded);
-        collapse.MinWidth = 110; collapse.Margin = new Thickness(12, 0, 0, 0);
+        var row = new DockPanel(); collapse = View.IconButton("M 1,5 L 7,11 13,5", "HideOperationLog", ToggleExpanded);
+        collapse.Name = "toggle_log"; collapse.Margin = new Thickness(8, 0, 0, 0);
         foreach (var control in new UIElement[] { collapse, FollowToggle, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
         state.TextTrimming = TextTrimming.CharacterEllipsis; state.TextWrapping = TextWrapping.NoWrap;
         state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
@@ -43,7 +43,8 @@ public sealed class OperationPanel : Grid {
     public void PauseFollowing() => FollowToggle.IsChecked = false;
     public void ToggleExpanded() {
         Expanded = !Expanded; Log.Visibility = Expanded ? Visibility.Visible : Visibility.Collapsed;
-        collapse.Content = L.T(Expanded ? "HideOperationLog" : "ShowOperationLog");
+        collapse.Content = View.Icon(Expanded ? "M 1,5 L 7,11 13,5" : "M 1,11 L 7,5 13,11");
+        collapse.ToolTip = L.T(Expanded ? "HideOperationLog" : "ShowOperationLog");
         ExpansionChanged?.Invoke(Expanded); if (Expanded) Theme.Enter(Log);
     }
     public void AddLog(string message) {
@@ -59,11 +60,11 @@ public sealed class OperationPanel : Grid {
     }
     public void Start() {
         latest = null; phase = detail = ""; phaseStart = 0; Log.Clear(); clock.Restart(); timer.Start();
-        progress.IsIndeterminate = true; state.Text = L.T("OperationStarting"); AddLog(state.Text);
+        progress.Visibility = Visibility.Visible; progress.IsIndeterminate = true; state.Text = L.T("OperationStarting"); AddLog(L.English("OperationStarting"));
     }
     public void Report(ScanProgress value) {
         latest = value;
-        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; AddLog(Phase(phase)); }
+        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; AddLog(L.English(PhaseKey(phase))); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; AddLog(detail); }
         state.Text = Phase(phase) + (value.TotalBytes is long bytes ? $" | {View.Size(value.Bytes)} / {View.Size(bytes)}" : value.TotalFiles is int files ? $" | {value.Files:N0} / {files:N0}" : "");
         long total = value.TotalBytes ?? value.TotalFiles ?? 0, done = value.TotalBytes != null ? value.Bytes : value.Files;
@@ -85,11 +86,13 @@ public sealed class OperationPanel : Grid {
     }
     public void Finish(string summary, bool complete) {
         timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
-        if (complete) progress.Value = 1; state.Text = summary; timing.Text = L.T("ElapsedOnly", clock.Elapsed.ToString(@"hh\:mm\:ss")); AddLog(summary);
+        progress.Visibility = Visibility.Collapsed;
+        if (complete) progress.Value = 1; state.Text = summary; timing.Text = L.T("ElapsedOnly", clock.Elapsed.ToString(@"hh\:mm\:ss")); AddLog(complete ? "Operation completed." : "Operation stopped. Review the reported results.");
     }
-    private static string Phase(string id) => L.T(id switch {
-        "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify",
-        "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" });
+    private static string Phase(string id) => L.T(PhaseKey(id));
+    private static string PhaseKey(string id) => id switch {
+        "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-discovery" => "FindAccounts",
+        "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
 }
 
 internal sealed class ActionCommand(Action action) : ICommand {

@@ -20,11 +20,13 @@ public static class ChatDiscovery {
             Path.Combine(documents, "WeChat Files"), Path.Combine(documents, "xwechat_files"),
             Path.Combine(profile, "xwechat_files"), Path.Combine(profile, "Documents", "xwechat_files") }) roots.Add(root);
         if (OperatingSystem.IsWindows()) {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Tencent\WeChat");
-            if (key?.GetValue("FileSavePath") is string saved && Path.IsPathFullyQualified(saved)) {
-                roots.Add(saved);
-                roots.Add(Path.Combine(saved, "WeChat Files"));
-                roots.Add(Path.Combine(saved, "xwechat_files"));
+            foreach (string client in new[] { "WeChat", "Weixin" }) {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Tencent\" + client);
+                if (key?.GetValue("FileSavePath") is string saved && Path.IsPathFullyQualified(saved)) {
+                    roots.Add(saved);
+                    roots.Add(Path.Combine(saved, "WeChat Files"));
+                    roots.Add(Path.Combine(saved, "xwechat_files"));
+                }
             }
         }
         foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == DriveType.Fixed))
@@ -33,10 +35,17 @@ public static class ChatDiscovery {
         }
         foreach (string root in additionalRoots ?? []) roots.Add(root);
         var results = new List<ChatLocation>();
-        foreach (string root in roots.Where(Directory.Exists)) {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string requestedRoot in roots.Where(Directory.Exists)) {
+            cancellation.ThrowIfCancellationRequested();
             try {
+                // Resolve only the chosen/default root. Database traversal still skips nested links.
+                string root = ResolveRoot(requestedRoot);
+                if (!visited.Add(root)) continue;
+                progress?.Report(new("chat-discovery", 0, 0, Detail: root));
                 foreach (var platform in new[] { ChatPlatform.QQ, ChatPlatform.WeChat })
                     foreach (string database in ChatExporter.FindDatabases(root, platform)) {
+                        cancellation.ThrowIfCancellationRequested();
                         if (results.Any(r => r.Database.Equals(database, StringComparison.OrdinalIgnoreCase))) continue;
                         var info = new FileInfo(database);
                         // Preserve the selected account, not just its message DB subdirectory.
@@ -68,5 +77,14 @@ public static class ChatDiscovery {
             return first with { DatabaseBytes = group.Sum(r => r.DatabaseBytes), AccountBytes = size.Bytes,
                 AccountFiles = size.Files, SizeComplete = size.Issues.Count == 0 };
         }).ToList();
+    }
+    private static string ResolveRoot(string root) {
+        string normalized = PathPolicy.Normalize(root), resolved = Path.GetPathRoot(normalized)!;
+        foreach (string part in normalized[resolved.Length..].Split('\\', StringSplitOptions.RemoveEmptyEntries)) {
+            var directory = new DirectoryInfo(Path.Combine(resolved, part));
+            resolved = (directory.Attributes & FileAttributes.ReparsePoint) == 0 ? directory.FullName :
+                PathPolicy.Normalize(directory.ResolveLinkTarget(true)?.FullName ?? throw new IOException("Cannot resolve account discovery root."));
+        }
+        PathPolicy.AssertNoLinks(resolved); return resolved;
     }
 }

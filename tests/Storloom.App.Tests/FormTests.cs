@@ -142,6 +142,94 @@ public sealed class FormTests {
     });
     private static async Task<bool> AsResult(Task task){await task;return true;}
     [Theory]
+    [InlineData("en",AppTheme.Light)]
+    [InlineData("zh-CN",AppTheme.OneDark)]
+    public void RuleSetLibraryDistinguishesImportsWithoutSavingOnClose(string locale,AppTheme theme) => OnUi(() => {
+        string fixture=Fixture(),custom=Path.Combine(fixture,"rule-sets");
+        JsonFiles.Write(Path.Combine(custom,"sets.json"),new RuleSetIndex(1,[new("custom-fixture","fixture.json","Imported fixture","",[],[],true)]));
+        JsonFiles.Write(Path.Combine(custom,"fixture.json"),new RuleCatalog{Rules=[new(){Id="fixture-cache",Name="Fixture",Roots=[Path.Combine(fixture,"cache")]}]});
+        string before=File.ReadAllText(Path.Combine(custom,"sets.json"));L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        var window=(Window)Activator.CreateInstance(typeof(ShellWindow).Assembly.GetType("Storloom.App.PreferencesWindow")!,new object?[]{new AppPreferences{Theme=theme,Language=locale},Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),true})!;
+        try {
+            window.ShowInTaskbar=false;window.Show();Pump();
+            var table=Descendants(window).OfType<DataGrid>().Single(d=>d.Name=="rule_sets");Assert.Equal(8,table.Items.Count);
+            var imported=table.Items.Cast<object>().Single(row=>(string)row.GetType().GetProperty("Name")!.GetValue(row)! =="Imported fixture");
+            Assert.Equal(L.T("RuleSetImported"),imported.GetType().GetProperty("Source")!.GetValue(imported));
+            imported.GetType().GetProperty("Selected")!.SetValue(imported,false);Capture(window,"rule-library-"+theme);
+        } finally {window.Close();}
+        Assert.Equal(before,File.ReadAllText(Path.Combine(custom,"sets.json")));Assert.False(File.Exists(Path.Combine(fixture,"preferences.json")));Directory.Delete(fixture,true);
+    });
+    [Fact]
+    public void ScanActionBecomesAnEnabledCancelButtonAndEditorsKeepStableBackgrounds() => OnUi(() => {
+        string fixture=Fixture();string source=Path.Combine(fixture,"scan");Directory.CreateDirectory(source);
+        for(int i=0;i<1000;i++)File.WriteAllText(Path.Combine(source,i+".txt"),"isolated scan fixture");
+        JsonFiles.Write(Path.Combine(fixture,"data/preferences.json"),new AppPreferences{Language="en",ReduceMotion=false});
+        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        try {
+            window.Show();window.Navigate("overview");Pump();
+            var input=(TextBox)typeof(ShellWindow).GetField("rootInput",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;input.Text=source;
+            input.Focus();Pump();input.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent});
+            var frame=(Border)input.Template.FindName("frame",input);Assert.False(((SolidColorBrush)frame.Background).HasAnimatedProperties);Assert.Equal(1,input.SelectionOpacity);
+            var scan=Descendants(window).OfType<Button>().Single(b=>b.IsVisible&&Equals(b.Content,L.T("ScanFolder")));
+            scan.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.Equal(L.T("Cancel"),scan.Content);Assert.True(scan.IsEnabled);
+            Capture(window,"inline-cancel");scan.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            DateTime until=DateTime.UtcNow.AddSeconds(15);
+            while(typeof(ShellWindow).GetField("operation",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!=null&&DateTime.UtcNow<until){Pump();Thread.Sleep(5);}
+            Assert.Null(typeof(ShellWindow).GetField("operation",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window));Assert.Equal(L.T("ScanFolder"),scan.Content);
+            Assert.Equal(1000,Directory.GetFiles(source).Length);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void ExplorerTablesSortNumbersWithoutSelectionOverflowAndSidebarCanCollapse(AppTheme theme) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();window.Navigate("overview");Pump();
+            var entries=Enumerable.Range(0,80).Select(i=>new StorageEntry(Path.Combine(fixture,"folder-"+i),i==0?1048576:i==1?950:2048+i,1,1)).ToList();
+            var scan=new StorageScan(fixture,DateTimeOffset.UtcNow,[new(fixture,entries.Sum(e=>e.Bytes),80,0),..entries],[],[],80,entries.Sum(e=>e.Bytes),false);
+            typeof(ShellWindow).GetField("storageScan",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,scan);
+            typeof(ShellWindow).GetMethod("RenderStorage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();window.UpdateLayout();
+            var table=Descendants(window).OfType<DataGrid>().First(d=>d.IsVisible);
+            long Bytes(object value)=>(long)value.GetType().GetProperty("Bytes")!.GetValue(value)!;
+            Assert.Equal(1048576,Bytes(table.Items[0]));
+            var sizeColumn=table.Columns.Single(c=>c.SortMemberPath=="Bytes");
+            var header=Descendants(table).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>().Single(h=>h.Column==sizeColumn);
+            Assert.Equal(Visibility.Visible,((System.Windows.Shapes.Path)header.Template.FindName("sort",header)).Visibility);
+            typeof(System.Windows.Controls.Primitives.DataGridColumnHeader).GetMethod("OnClick",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(header,null);Pump();
+            Assert.Equal(950,Bytes(table.Items[0]));Assert.Equal(System.ComponentModel.ListSortDirection.Ascending,sizeColumn.SortDirection);
+            var scroll=Descendants(table).OfType<ScrollViewer>().Single(s=>s.Name=="DG_ScrollViewer");
+            Assert.InRange(scroll.ScrollableWidth,0,1);
+            table.SelectedIndex=0;Pump();Assert.InRange(scroll.ScrollableWidth,0,1);
+            var first=(DataGridRow)table.ItemContainerGenerator.ContainerFromIndex(0)!;Assert.InRange(first.ActualHeight,25,27);
+            var vertical=Descendants(table).OfType<System.Windows.Controls.Primitives.ScrollBar>().Single(s=>s.Name=="PART_VerticalScrollBar");
+            Assert.InRange(vertical.TranslatePoint(new Point(0,0),table).Y,28,30);
+            table.ScrollIntoView(table.Items[^1]);Pump();Assert.True(scroll.VerticalOffset>0);
+            var toggle=Descendants(window).OfType<Button>().Single(b=>b.Name=="toggle_sidebar");
+            toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();
+            Assert.All(Descendants(window).OfType<TextBlock>().Where(t=>t.Name=="nav_label"),t=>Assert.False(t.IsVisible));
+            Capture(window,"dense-collapsed-"+theme);
+            toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();
+            Assert.All(Descendants(window).OfType<TextBlock>().Where(t=>t.Name=="nav_label"),t=>Assert.True(t.IsVisible));
+            Capture(window,"dense-populated-"+theme);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]
+    public void DiscoveryReportsNoResultsInThePageAndLogsUseEnglish() => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();window.Navigate("chats");Pump();
+            var task=(Task)typeof(ShellWindow).GetMethod("DiscoverChats",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[fixture])!;
+            Wait(AsResult(task));Pump();
+            var notice=Descendants(window).OfType<TextBlock>().Single(t=>t.Name=="account_discovery_notice");Assert.Equal(L.T("DiscoveryEmpty"),notice.Text);
+            var log=Descendants(window).OfType<OperationPanel>().Single().Log;
+            Assert.Contains("0 account(s) found",log.Text);Assert.Contains("Operation completed",log.Text);Assert.DoesNotContain(L.T("OperationStarting"),log.Text);
+            Assert.False(ControlFeedback.GetEnabled(log));Capture(window,"discovery-empty");
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory]
     [InlineData(AppTheme.Light)]
     [InlineData(AppTheme.OneDark)]
     public void CompactChromePopupsAndResizeTargetsRemainConsistent(AppTheme theme) => OnUi(() => {
