@@ -59,6 +59,10 @@ $forbidden = Get-ChildItem -LiteralPath $package -Recurse -Force | Where-Object 
 if ($forbidden) { throw 'Private state or debug files found in package; packaging stopped.' }
 # Check textual inputs and this project's binaries for machine-specific build paths.
 $identityMarkers = @($env:USERPROFILE, $repo, $env:COMPUTERNAME) | Where-Object { $_ -and $_.Length -gt 5 }
+$productInfo = Get-Content -LiteralPath (Join-Path $repo 'src/Storloom.App/ProductInfo.cs') -Raw
+$publicDeveloper = [regex]::Match($productInfo, 'public const string Developer = "([a-zA-Z0-9_-]+)";').Groups[1].Value
+$publicRepository = [regex]::Match($productInfo, 'public const string Repository = "(https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+)";').Groups[1].Value
+if (!$publicDeveloper -or !$publicRepository) { throw 'Public product attribution is missing.' }
 $ownFiles = Get-ChildItem -LiteralPath $package -File -Recurse | Where-Object {
     $_.Name -like 'Storloom*' -or $_.Extension -in @('.md', '.json')
 }
@@ -67,7 +71,14 @@ foreach ($file in $ownFiles) {
     foreach ($encoding in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
         $text = $encoding.GetString($bytes)
         foreach ($marker in $identityMarkers) {
-            if ($text.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $inspect = $text
+            # The About page intentionally publishes these two complete metadata strings.
+            # A matching computer name does not exempt any full profile/workspace path.
+            if ($file.Name -eq 'Storloom.dll' -and $encoding.CodePage -eq 1200 -and
+                $marker.Equals($publicDeveloper, [StringComparison]::OrdinalIgnoreCase)) {
+                $inspect = $inspect.Replace(': ' + $publicDeveloper, '').Replace($publicRepository, '')
+            }
+            if ($inspect.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
                 throw "Machine-specific content found in $($file.Name); packaging stopped."
             }
         }
