@@ -44,11 +44,13 @@ internal static class View {
             Header = L.T(key), Binding = new Binding(property), SortMemberPath = property switch { "Size" or "Amount" => "Bytes", "Share" => "Fraction", "Before" => "BeforeBytes", "After" => "AfterBytes", "Freed" => "FreedBytes", _ => property },
             ElementStyle = textStyle,
             Width = width == 0 ? new DataGridLength(1, DataGridLengthUnitType.Star) : new DataGridLength(width), MinWidth = 48 });
+        TableInteraction.Configure(table);
         return table;
     }
     public static Button IconButton(string geometry, string tooltip, Action action) {
         var button = Button(tooltip, action); button.Content = Icon(geometry); button.ToolTip = L.T(tooltip);
         button.Width = 28; button.Height = button.MinHeight = 28; button.MinWidth = 28; button.Padding = new Thickness(5); button.Margin = new Thickness(0);
+        button.BorderThickness = new Thickness(0); button.Background = Brushes.Transparent;
         System.Windows.Automation.AutomationProperties.SetName(button, L.T(tooltip)); return button;
     }
     public static void Sort(DataGrid table, string member, System.ComponentModel.ListSortDirection direction = System.ComponentModel.ListSortDirection.Descending) {
@@ -75,6 +77,7 @@ internal static class View {
         var cellStyle = new Style(typeof(DataGridCell), (Style)Application.Current.FindResource(typeof(DataGridCell)));
         cellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
         table.Columns.Insert(0, new DataGridTemplateColumn { CellTemplate = template, CellStyle = cellStyle, Width = 28, MinWidth = 28, CanUserResize = false, CanUserSort = false });
+        TableInteraction.EnableChecks(table, property);
     }
     public static string Size(long bytes) {
         string[] units = ["B", "KiB", "MiB", "GiB", "TiB"]; double number = bytes; int index = 0;

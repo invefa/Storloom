@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '0.5.2',
+    [string] $Version = '0.5.3',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -70,6 +70,11 @@ foreach ($folder in @('rules', 'docs')) {
             'message-display.md', 'message-display.zh-CN.md', 'themes.md', 'themes.zh-CN.md', 'quickstart.md', 'quickstart.zh-CN.md')
     }
     foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $repo "$folder/$file") -Destination $target -Force }
+}
+$figures = Join-Path $package 'docs/figures'
+New-Item -ItemType Directory -Path $figures -Force | Out-Null
+foreach ($image in @('storage.en.png', 'storage.zh-CN.png', 'cleanup.en.png', 'cleanup.zh-CN.png')) {
+    Copy-Item -LiteralPath (Join-Path $repo "docs/figures/$image") -Destination $figures
 }
 $revision = & git -C $repo rev-parse --verify HEAD 2>$null
 @{ name = 'Storloom'; version = $Version; runtime = 'win-x64'; revision = $revision } |

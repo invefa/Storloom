@@ -4,6 +4,18 @@ A Windows storage manager for reviewing cleanup, archiving selected cache files,
 
 [简体中文](README.zh-CN.md) · [Getting started](docs/quickstart.md) · [Rule reference](docs/rules.md) · [AI rule guide](docs/ai-rules.md) · [Chat compatibility](docs/chat-exporters.md)
 
+## Screenshots
+
+Screenshots use synthetic example data. No personal accounts or local scan results are shown.
+
+Storage analysis in the light theme:
+
+![Storage analysis with example folders](docs/figures/storage.en.png)
+
+Cleanup preview in the dark theme:
+
+![Cleanup preview with example cache files](docs/figures/cleanup.en.png)
+
 ## Run
 
 Extract the Windows x64 package into a writable folder and run **Storloom.exe**. Windows 10/11 x64; the runtime is included. The application and chat exporters need no Python backend. `cli/Storloom.Cli.exe --help` lists CLI commands.

@@ -19,7 +19,8 @@ Storloom的桌面界面采用WPF与WPF UI。主题资源统一管理应用标题
   "Selection": "#dddddd",
   "Hover": "#e8e8e8",
   "Danger": "#4b4b4b",
-  "TextSelection": "#aaaaaa"
+  "TextSelection": "#aaaaaa",
+  "SelectedText": "#202020"
 }
 ```
 

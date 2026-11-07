@@ -46,6 +46,7 @@ public static class ControlFeedback {
         bool passiveEditor = control is TextBox editor && (editor.AcceptsReturn || editor.IsReadOnly || editor.IsKeyboardFocusWithin);
         if (passiveEditor) animate = false;
         if (!passiveEditor && control.IsEnabled && (control.IsMouseOver || (bool)control.GetValue(PressedProperty))) {
+            if (color.A == 0) color = ParentColor(control);
             double amount = (bool)control.GetValue(PressedProperty) ? .18 : .08;
             var ink = Color("Ink");
             // Filled buttons need a visible state change while preserving foreground contrast.
@@ -57,5 +58,12 @@ public static class ControlFeedback {
         var brush = new SolidColorBrush(color); frame.Background = brush;
         if (animate && !Theme.ReduceMotion && SystemParameters.ClientAreaAnimation)
             brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(previous, color, TimeSpan.FromMilliseconds((bool)control.GetValue(PressedProperty) ? 65 : 100)));
+    }
+    private static Color ParentColor(DependencyObject control) {
+        for (var parent = VisualTreeHelper.GetParent(control); parent != null; parent = VisualTreeHelper.GetParent(parent)) {
+            var brush = parent switch { Panel panel => panel.Background, Border border => border.Background, Control item => item.Background, _ => null };
+            if (brush is SolidColorBrush { Color.A: > 0 } solid) return solid.Color;
+        }
+        return Color("Canvas");
     }
 }

@@ -351,5 +351,8 @@
   "AboutDescription": "分析存储空间, 清理缓存并校验归档",
   "ReleaseHistory": "版本历史",
   "ReportIssue": "反馈问题",
-  "AboutComponents": "基于 .NET, WPF UI 和 WebView2 构建. 第三方许可证随附在程序目录中"
+  "AboutComponents": "基于 .NET, WPF UI 和 WebView2 构建. 第三方许可证随附在程序目录中",
+  "FitColumn": "将列调整为合适的大小",
+  "FitAllColumns": "将所有列调整为合适的大小",
+  "ResetColumns": "恢复默认列宽"
 }

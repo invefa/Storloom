@@ -12,7 +12,7 @@ foreach ($path in $paths) {
         $path -match '\.(db|db-wal|db-shm|key|pem|pfx|jsonl|log|trx|zip|exe|dll|pdb)$') {
         $failures.Add("Forbidden indexed file: $path"); continue
     }
-    if ($path -eq 'src/Storloom.App/Assets/storloom.ico') {
+    if ($path -match '\.(ico|png)$') {
         $start = [Diagnostics.ProcessStartInfo]::new('git')
         $start.WorkingDirectory = $repo; $start.UseShellExecute = $false; $start.CreateNoWindow = $true
         $start.RedirectStandardOutput = $true
@@ -20,7 +20,7 @@ foreach ($path in $paths) {
         $process = [Diagnostics.Process]::Start($start); $buffer = [IO.MemoryStream]::new()
         try {
             $process.StandardOutput.BaseStream.CopyTo($buffer); $process.WaitForExit()
-            if ($process.ExitCode -ne 0) { throw 'Cannot inspect indexed icon.' }
+            if ($process.ExitCode -ne 0) { throw 'Cannot inspect indexed image.' }
             $content = [Text.Encoding]::UTF8.GetString($buffer.ToArray()) + [Text.Encoding]::Unicode.GetString($buffer.ToArray())
             $lines = @($content)
             $readExit = 0

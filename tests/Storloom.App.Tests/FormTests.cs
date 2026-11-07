@@ -19,6 +19,7 @@ public sealed class FormTests {
     private static readonly Lazy<Dispatcher> Ui = new(() => {
         var ready = new TaskCompletionSource<Dispatcher>();
         var thread = new Thread(() => {
+            AppContext.SetSwitch("Switch.System.Windows.Controls.Text.UseAdornerForTextboxSelectionRendering", false);
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             ready.SetResult(app.Dispatcher); app.Run();
         }) { IsBackground = true };
@@ -141,6 +142,87 @@ public sealed class FormTests {
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
     private static async Task<bool> AsResult(Task task){await task;return true;}
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void HeaderSizingDoubleClickTooltipsAndMenuSeparatorsWorkTogether(AppTheme theme) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true,SidebarCollapsed=true});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();
+            var table=Descendants(window).OfType<DataGrid>().Single(d=>d.Name=="cleanup_rules");var row=(DataGridRow)table.ItemContainerGenerator.ContainerFromIndex(0)!;
+            var cell=Descendants(row).OfType<DataGridCell>().Single(c=>c.Column==table.Columns[1]);
+            bool Selected()=>(bool)row.Item.GetType().GetProperty("Selected")!.GetValue(row.Item)!;
+            void DoubleClick(object source)=>table.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=Control.PreviewMouseDoubleClickEvent,Source=source});
+            Assert.False(Selected());DoubleClick(cell);Assert.True(Selected(),"row double-click should check");Assert.True(Descendants(row).OfType<CheckBox>().Single().IsChecked,"checkbox should update");
+            DoubleClick(cell);Assert.False(Selected());
+            var check=Descendants(row).OfType<CheckBox>().Single();check.IsChecked=true;DoubleClick(check);Assert.True(Selected(),"checkbox double-click should not toggle twice");
+            Assert.Equal(row.Item.GetType().GetProperty("Name")!.GetValue(row.Item),cell.ToolTip);
+            var header=Descendants(table).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>().Single(h=>h.Column==table.Columns[1]);
+            var original=header.Column.Width;var menu=header.ContextMenu;Assert.NotNull(menu);menu.PlacementTarget=header;menu.IsOpen=true;Pump();Capture(menu,"header-context-"+theme);
+            ((MenuItem)menu.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));Pump();Assert.True(header.Column.Width.IsAuto,"fit column should set Auto");
+            ((MenuItem)menu.Items[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));Pump();Assert.All(table.Columns.Where(c=>c.CanUserResize),c=>Assert.True(c.Width.IsAuto));Assert.Equal(28,table.Columns[0].ActualWidth);
+            ((MenuItem)menu.Items[3]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));Pump();Assert.Equal(original.UnitType,header.Column.Width.UnitType);menu.IsOpen=false;
+            var navigation=Descendants(window).OfType<ListBox>().Single(l=>l.Name=="navigation");var item=(ListBoxItem)navigation.SelectedItem;var sidebar=(Grid)navigation.Parent;
+            double left=item.TranslatePoint(new Point(0,0),sidebar).X,right=sidebar.ActualWidth-item.TranslatePoint(new Point(item.ActualWidth,0),sidebar).X;
+            Assert.InRange(Math.Abs(left-right),0,1);Assert.Equal(new Thickness(0),((Border)item.Template.FindName("item",item)).BorderThickness);
+            Assert.Equal(new Thickness(0),Descendants(window).OfType<Button>().Single(b=>b.Name=="toggle_sidebar").BorderThickness);
+            var file=(MenuItem)Descendants(window).OfType<Menu>().Single().Items[0];file.IsSubmenuOpen=true;Pump();
+            var popup=(System.Windows.Controls.Primitives.Popup)file.Template.FindName("PART_Popup",file);var separator=file.Items.OfType<Separator>().First();separator.ApplyTemplate();
+            Assert.Contains(Descendants(separator).OfType<Border>(),b=>b.Background is SolidColorBrush brush&&brush.Color==((SolidColorBrush)Theme.Brush("Line")).Color);
+            Capture((FrameworkElement)popup.Child,"menu-separators-"+theme);file.IsSubmenuOpen=false;
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory]
+    [InlineData("en")]
+    [InlineData("zh-CN")]
+    public void PublicReadmeScreenshotsUseOnlySyntheticDisplayData(string locale) => OnUi(() => {
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language=locale,Theme=AppTheme.Light,ReduceMotion=true});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();var type=typeof(ShellWindow);
+            var entries=new[]{new StorageEntry(@"C:\Example\Applications",12884901888,12400,1),new StorageEntry(@"C:\Example\Projects",7516192768,8200,1),new StorageEntry(@"C:\Example\Media",5368709120,320,1),new StorageEntry(@"C:\Example\Archives",3221225472,120,1),new StorageEntry(@"C:\Example\Cache",1073741824,4200,1)};
+            var scan=new StorageScan(@"C:\Example",DateTimeOffset.UtcNow,[new(@"C:\Example",entries.Sum(e=>e.Bytes),entries.Sum(e=>e.Files),0),..entries],[],[],entries.Sum(e=>e.Files),entries.Sum(e=>e.Bytes),false);
+            type.GetField("storageScan",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,scan);type.GetMethod("RenderStorage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);
+            window.Navigate("overview");Pump();((TextBlock)type.GetField("status",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!).Text=L.T("ScanSummary",scan.Files,scan.Bytes/1073741824d,0);Capture(window,"public-"+locale+"-storage");
+            Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});
+            var catalog=new RuleCatalog{Rules=Enumerable.Range(0,14).Select(i=>new CleanupRule{Id="example-cache-"+i,Name="Application cache "+(i+1),Names=new(){{"zh-CN","应用缓存 "+(i+1)}},Description="Example data for the screenshot. Review matched files before cleanup.",Descriptions=new(){{"zh-CN","截图使用示例数据, 处理前请核对匹配文件"}},Roots=[@"C:\Example\Cache"]}).ToList()};
+            type.GetField("engine",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,new CleanupEngine(catalog));
+            var plan=new CleanupPlan{Computer="EXAMPLE-PC",UserProfile=@"C:\Example\Profile",Files=Enumerable.Range(0,60).Select(i=>new Candidate("example-cache-"+(i%14),@"C:\Example\Cache",@"C:\Example\Cache\session-"+(i+1).ToString("D3")+".cache",new FileStamp(1048576L*(i+1),0,0,0,(ulong)i,1))).ToList()};
+            type.GetField("cleanupPlan",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,plan);type.GetMethod("RenderRules",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);
+            window.Navigate("cleanup");Pump();((TextBlock)type.GetField("status",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!).Text=L.T("CatalogSummary",14);var table=Descendants(window).OfType<DataGrid>().Single(d=>d.Name=="cleanup_rules");
+            foreach(var item in table.Items.Cast<object>().Take(3))item.GetType().GetProperty("Selected")!.SetValue(item,true);
+            Capture(window,"public-"+locale+"-cleanup");
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void SelectedEditorGlyphsStayVisibleAndScrollbarThumbReachesBothEnds(AppTheme theme) => OnUi(() => {
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        var window=new ThemeWindow("Selection fixture",900,500){ShowInTaskbar=false};
+        var input=new TextBox{Text="Selected text remains readable 0123456789",Width=480,Height=32,Margin=new Thickness(20),VerticalAlignment=VerticalAlignment.Top};
+        window.Body.Children.Add(input);
+        try {
+            window.Show();window.Activate();input.Focus();input.SelectAll();Pump();window.UpdateLayout();
+            Assert.Equal(((SolidColorBrush)Theme.Brush("SelectedText")).Color,((SolidColorBrush)input.SelectionTextBrush).Color);
+            var bitmap=new RenderTargetBitmap(900,500,96,96,PixelFormats.Pbgra32);bitmap.Render(window);byte[] pixels=new byte[900*500*4];bitmap.CopyPixels(pixels,900*4,0);var origin=input.TranslatePoint(new Point(0,0),window);
+            var ink=((SolidColorBrush)input.SelectionTextBrush).Color;int glyphPixels=0;
+            for(int y=6;y<26;y++)for(int x=10;x<460;x++) {int offset=(((int)origin.Y+y)*900+(int)origin.X+x)*4;if(Math.Abs(pixels[offset]-ink.B)<25&&Math.Abs(pixels[offset+1]-ink.G)<25&&Math.Abs(pixels[offset+2]-ink.R)<25)glyphPixels++;}
+            Capture(window,"selection-readable-"+theme);Assert.True(glyphPixels>100,$"Expected readable selected glyphs, found {glyphPixels} ink pixels.");
+            window.Body.Children.Clear();
+            var table=new DataGrid{IsReadOnly=true,AutoGenerateColumns=false};table.Columns.Add(new DataGridTextColumn{Header="Fixture",Binding=new System.Windows.Data.Binding("Name"),Width=new DataGridLength(1,DataGridLengthUnitType.Star)});
+            table.ItemsSource=Enumerable.Range(0,150).Select(i=>new{Name="Row "+i}).ToArray();window.Body.Children.Add(table);Pump();window.UpdateLayout();
+            var scroll=Descendants(table).OfType<ScrollViewer>().Single(s=>s.Name=="DG_ScrollViewer");scroll.ScrollToTop();Pump();
+            var bar=Descendants(table).OfType<System.Windows.Controls.Primitives.ScrollBar>().Single(s=>s.Name=="PART_VerticalScrollBar");
+            var track=(System.Windows.Controls.Primitives.Track)bar.Template.FindName("PART_Track",bar);
+            Assert.InRange(track.Thumb.TranslatePoint(new Point(0,0),bar).Y,0,1);
+            Assert.InRange(track.DecreaseRepeatButton.ActualHeight,0,1);
+            scroll.ScrollToEnd();Pump();window.UpdateLayout();
+            Assert.InRange(Math.Abs(track.Thumb.TranslatePoint(new Point(0,track.Thumb.ActualHeight),bar).Y-bar.ActualHeight),0,1);
+            Capture(window,"scrollbar-endpoints-"+theme);
+        } finally {window.Close();}
+    });
     [Theory]
     [InlineData("en",AppTheme.Light)]
     [InlineData("zh-CN",AppTheme.OneDark)]

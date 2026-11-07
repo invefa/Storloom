@@ -25,6 +25,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private OperationPanel operationView = null!;
     private GridSplitter logDivider = null!;
     private GridSplitter sidebarDivider = null!;
+    private Button sidebarToggle = null!;
     private Button? operationButton;
     private string currentPage = "cleanup";
     public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
@@ -79,10 +80,10 @@ public sealed partial class ShellWindow : ThemeWindow {
         }
         navigation.SelectionChanged += (_, _) => { if (navigation.SelectedItem is ListBoxItem selected) Navigate((string)selected.Tag); };
         var sidebar = View.Grid(View.Auto, View.Fill); sidebar.SetResourceReference(Panel.BackgroundProperty, "Sidebar");
-        var collapseSidebar = View.IconButton("M 1,3 L 15,3 M 1,8 L 15,8 M 1,13 L 15,13", "ToggleSidebar", ToggleSidebar);
+        var collapseSidebar = sidebarToggle = View.IconButton("M 1,3 L 15,3 M 1,8 L 15,8 M 1,13 L 15,13", "ToggleSidebar", ToggleSidebar);
         collapseSidebar.Name = "toggle_sidebar"; collapseSidebar.HorizontalAlignment = HorizontalAlignment.Left; collapseSidebar.Margin = new Thickness(8, 4, 0, 2);
         View.Add(sidebar, collapseSidebar, 0); View.Add(sidebar, navigation, 1);
-        View.Add(center, sidebar, 0); sidebarDivider = SidebarSplitter(); View.Add(center, sidebarDivider, 0, 1);
+        View.Add(center, sidebar, 0); sidebarDivider = SidebarSplitter("Canvas", HorizontalAlignment.Left); View.Add(center, sidebarDivider, 0, 1);
         ApplySidebar();
         pageHost = new Grid { Margin = new Thickness(12, 14, 18, 12) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
         var logSplitter = logDivider = new GridSplitter { Height = 5, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Collapsed };
@@ -108,13 +109,13 @@ public sealed partial class ShellWindow : ThemeWindow {
         Body.Children.Add(root); BuildOverview(); BuildRules(); BuildChats();
         navigation.SelectedIndex = currentPage == "overview" ? 0 : currentPage == "chats" ? 2 : 1;
     }
-    private static GridSplitter SidebarSplitter(string background = "Sidebar") {
+    private static GridSplitter SidebarSplitter(string background = "Sidebar", HorizontalAlignment lineAlignment = HorizontalAlignment.Right) {
         var splitter = new GridSplitter { Name = "sidebar_splitter", Width = 10, Background = Brushes.Transparent, Cursor = Cursors.SizeWE,
             ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndNext };
         var template = new ControlTemplate(typeof(GridSplitter));
         var hitArea = new FrameworkElementFactory(typeof(Grid)); hitArea.SetResourceReference(Panel.BackgroundProperty, background);
         var line = new FrameworkElementFactory(typeof(Border)); line.SetValue(FrameworkElement.WidthProperty, 1d);
-        line.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Right);
+        line.SetValue(FrameworkElement.HorizontalAlignmentProperty, lineAlignment);
         line.SetResourceReference(Border.BackgroundProperty, "Line"); hitArea.AppendChild(line); template.VisualTree = hitArea;
         splitter.Template = template; return splitter;
     }
@@ -126,7 +127,10 @@ public sealed partial class ShellWindow : ThemeWindow {
         bool compact = preferences.SidebarCollapsed;
         sidebarColumn.MinWidth = compact ? 44 : 128; sidebarColumn.MaxWidth = compact ? 44 : 260;
         sidebarColumn.Width = new GridLength(compact ? 44 : Math.Clamp(preferences.SidebarWidth, 128, 260)); sidebarDivider.IsEnabled = !compact;
+        sidebarToggle.HorizontalAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        sidebarToggle.Margin = new Thickness(compact ? 0 : 8, 4, 0, 2);
         foreach (ListBoxItem item in navigation.Items) {
+            item.HorizontalContentAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
             var contents = (DockPanel)item.Content; var label = contents.Children.OfType<TextBlock>().Single(); label.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
             contents.Children.OfType<System.Windows.Shapes.Path>().Single().Margin = new Thickness(0, 0, compact ? 0 : 8, 0);
         }

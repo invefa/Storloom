@@ -4,6 +4,18 @@
 
 [English](README.md) · [快速上手](docs/quickstart.zh-CN.md) · [规则参考](docs/rules.zh-CN.md) · [AI规则指南](docs/ai-rules.zh-CN.md) · [聊天兼容性](docs/chat-exporters.zh-CN.md)
 
+## 界面示例
+
+截图均使用专门生成的示例数据，不展示个人账号或本地扫描结果。
+
+浅色主题下的空间分析：
+
+![示例目录的空间分析](docs/figures/storage.zh-CN.png)
+
+深色主题下的清理预览：
+
+![示例缓存文件的清理预览](docs/figures/cleanup.zh-CN.png)
+
 ## 使用
 
 解压Windows x64包到可写目录，运行 **Storloom.exe**。支持64位Windows 10/11，包内带运行时。软件本身和聊天导出不依赖Python后端。命令行入口为`cli/Storloom.Cli.exe`。

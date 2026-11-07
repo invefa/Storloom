@@ -159,7 +159,7 @@
   "OverviewLead": "Choose a drive or folder, then scan its contents",
   "ScanFolder": "Analyze folder",
   "CleanupTitle": "Review before making space",
-  "CleanupLead": "1  Choose rule sets     2  Scan and select     3  Review and execute",
+  "CleanupLead": "1  Choose rules     2  Scan and select     3  Review",
   "ScanCaches": "Scan cleanup items",
   "ChooseRuleSets": "Choose rule sets...",
   "ReviewSelection": "Review selected...",
@@ -351,5 +351,8 @@
   "AboutDescription": "Storage analysis, cleanup and verified archiving",
   "ReleaseHistory": "Releases",
   "ReportIssue": "Report an issue",
-  "AboutComponents": "Built with .NET, WPF UI and WebView2. Third-party licenses are included in the application folder."
+  "AboutComponents": "Built with .NET, WPF UI and WebView2. Third-party licenses are included in the application folder.",
+  "FitColumn": "Size column to fit",
+  "FitAllColumns": "Size all columns to fit",
+  "ResetColumns": "Restore default widths"
 }

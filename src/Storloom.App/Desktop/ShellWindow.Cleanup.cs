@@ -23,7 +23,7 @@ public sealed partial class ShellWindow {
         var left = View.Grid(View.Auto, View.Auto, View.Fill); var header = layout.Children[0]; layout.Children.RemoveAt(0);
         View.Add(left, header, 0); View.Add(left, bar, 1); View.Add(left, ruleList, 2);
         View.Add(split, left, 0); var divider = SidebarSplitter("Canvas"); divider.Name = "cleanup_splitter"; View.Add(split, divider, 0, 1);
-        var right = View.Grid(View.Auto, View.Auto, View.Auto, View.Fill); ruleTitle = View.Text(L.T("NoRuleSelection"), 17); ruleDescription = View.Text("", color: "Muted");
+        var right = View.Grid(View.Auto, View.Auto, View.Auto, View.Fill); right.Margin = new Thickness(10, 0, 0, 0); ruleTitle = View.Text(L.T("NoRuleSelection"), 17); ruleDescription = View.Text("", color: "Muted");
         View.Add(right, ruleTitle, 0); View.Add(right, ruleDescription, 1);
         treatment = new ComboBox { Margin = new Thickness(12, 0, 0, 0), MinWidth = 240 };
         var treatmentRow = new DockPanel { Margin = new Thickness(0, 2, 0, 8) }; var treatmentLabel = View.Text(L.T("Treatment")); treatmentLabel.Margin = new Thickness(0); treatmentRow.Children.Add(treatmentLabel); treatmentRow.Children.Add(treatment);

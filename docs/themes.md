@@ -19,7 +19,8 @@ A theme file overrides any subset of these colors with six-digit `#RRGGBB` strin
   "Selection": "#dddddd",
   "Hover": "#e8e8e8",
   "Danger": "#4b4b4b",
-  "TextSelection": "#aaaaaa"
+  "TextSelection": "#aaaaaa",
+  "SelectedText": "#202020"
 }
 ```
 
