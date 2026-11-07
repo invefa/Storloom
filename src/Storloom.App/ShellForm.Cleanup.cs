@@ -31,20 +31,21 @@ public sealed partial class ShellForm {
         ruleDescription = Ui.Text(""); ruleDescription.AutoSize = false; ruleDescription.Dock = DockStyle.Fill;
         ruleDescription.Height = 57; ruleDescription.Margin = new Padding(0, 0, 0, 10);
         right.Controls.Add(ruleTitle, 0, 0); right.Controls.Add(ruleDescription, 0, 1);
-        var actionRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2,
+        var actionRow = new BufferedGrid { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2,
             Margin = new Padding(0, 0, 0, 12) };
         actionRow.ColumnStyles.Add(new(SizeType.Absolute, 88)); actionRow.ColumnStyles.Add(new(SizeType.Percent, 100));
-        actionRow.Controls.Add(Ui.Text(L.T("Treatment")), 0, 0);
-        treatment = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = Padding.Empty };
+        actionRow.MinimumSize = new Size(0, 36);
+        actionRow.Controls.Add(Ui.FieldLabel(L.T("Treatment")), 0, 0);
+        treatment = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = Padding.Empty };
         actionRow.Controls.Add(treatment, 1, 0); right.Controls.Add(actionRow, 0, 2);
-        var details = new TabControl { Dock = DockStyle.Fill, Margin = Padding.Empty };
+        var details = new BufferedTabs { Dock = DockStyle.Fill, Margin = Padding.Empty };
         var filePage = new TabPage(L.T("MatchedFiles"));
         var fileLayout = Ui.Grid(Ui.Auto(), Ui.Fill(), Ui.Auto()); fileLayout.Padding = new Padding(6);
         candidateEmpty = Ui.Text(L.T("NoCandidates")); candidateEmpty.Margin = new Padding(8, 8, 0, 12);
         fileLayout.Controls.Add(candidateEmpty, 0, 0);
         candidateList = Ui.List(("Path", 600), ("Bytes", 100)); candidateList.CheckBoxes = true; candidateList.Name = "cleanup-files";
         fileLayout.Controls.Add(candidateList, 0, 1);
-        var navigationRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Margin = new Padding(0, 10, 0, 0) };
+        var navigationRow = new BufferedGrid { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Margin = new Padding(0, 10, 0, 0) };
         navigationRow.ColumnStyles.Add(new(SizeType.Percent, 100)); for (int i = 0; i < 3; i++) navigationRow.ColumnStyles.Add(new(SizeType.AutoSize));
         filter = Ui.Input(); filter.PlaceholderText = L.T("Filter");
         pageLabel = Ui.Text("1 / 1"); pageLabel.Margin = new Padding(4, 8, 0, 0);
@@ -56,7 +57,7 @@ public sealed partial class ShellForm {
         ruleIssues = Ui.List(("Path", 430), ("State", 300)); var issuePage = new TabPage(L.T("Issues")); issuePage.Controls.Add(ruleIssues);
         details.TabPages.AddRange([filePage, issuePage]); right.Controls.Add(details, 0, 3); split.Panel2.Controls.Add(right);
         layout.Controls.Add(split, 0, 2);
-        var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 14, 0, 0) };
+        var footer = new BufferedGrid { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 14, 0, 0) };
         footer.ColumnStyles.Add(new(SizeType.Percent, 100)); footer.ColumnStyles.Add(new(SizeType.AutoSize));
         selectionSummary = Ui.Text(L.T("CatalogSummary", engine.Catalog.Rules.Count)); selectionSummary.Margin = new Padding(0, 8, 8, 0);
         reviewSelection = AsyncButton("ReviewSelection", ExecuteRules, true); reviewSelection.Enabled = false; reviewSelection.Name = "review-cleanup";
@@ -87,7 +88,7 @@ public sealed partial class ShellForm {
             var files = cleanupPlan?.Files.Where(f => f.RuleId == rule.Id).ToArray() ?? [];
             bool command = cleanupPlan?.Commands.Any(c => c.RuleId == rule.Id) == true;
             Ui.Row(ruleList, rule, L.RuleName(rule), EffectiveAction(rule), rule.Action == CleanupAction.Command ?
-                cleanupPlan == null ? "-" : command ? L.T("ToolManaged") : L.T("ToolNotAvailable") : cleanupPlan == null ? "-" : Ui.Size(files.Sum(f => f.Stamp.Bytes)));
+                cleanupPlan == null ? "-" : command ? NativeSize(rule.Id) : L.T("ToolNotAvailable") : cleanupPlan == null ? "-" : Ui.Size(files.Sum(f => f.Stamp.Bytes)));
             ruleList.Items[^1].Checked = false;
         }
         ruleList.EndUpdate(); rendering = false;
@@ -97,6 +98,8 @@ public sealed partial class ShellForm {
     private string EffectiveAction(CleanupRule rule) => rule.Action == CleanupAction.Command ? L.T("Command") :
         treatments.GetValueOrDefault(rule.Id) switch { Treatment.Copy => L.T("Copy"), Treatment.Move => L.T("Move"),
             _ => L.T(rule.Action.ToString()) };
+    private string NativeSize(string id) => cleanupPlan?.Measurements.GetValueOrDefault(id) is CacheMeasurement measurement && measurement.Complete ?
+        (measurement.Estimated ? "~" : "") + Ui.Size(measurement.Bytes) : L.T("SizeNotScanned");
     private void RenderRuleDetails() {
         if (SelectedRule() is not CleanupRule rule) return;
         ruleTitle.Text = L.RuleName(rule); ruleDescription.Text = L.RuleDescription(rule);
@@ -130,7 +133,8 @@ public sealed partial class ShellForm {
         var selected = SelectedFiles(); var ids = SelectedRules();
         int commands = cleanupPlan?.Commands.Count(c => ids.Contains(c.RuleId)) ?? 0;
         reviewSelection.Enabled = cleanupPlan != null && (selected.Count > 0 || commands > 0);
-        selectionSummary.Text = L.T("SummarySelection", selected.Count, Ui.Size(selected.Sum(f => f.Stamp.Bytes)), commands);
+        long nativeBytes = cleanupPlan?.Measurements.Where(m => ids.Contains(m.Key) && m.Value.Complete).Sum(m => m.Value.Bytes) ?? 0;
+        selectionSummary.Text = L.T("SummarySelection", selected.Count, Ui.Size(selected.Sum(f => f.Stamp.Bytes) + nativeBytes), commands);
     }
     private async Task ScanRules() => await Run(async token => {
         var progress = Progress(); cleanupPlan = await Task.Run(() => engine.Scan(progress: progress, cancellation: token));
@@ -143,12 +147,13 @@ public sealed partial class ShellForm {
         if (cleanupPlan == null) throw new InvalidOperationException(L.T("SelectionRequired"));
         var snapshot = cleanupPlan; var files = SelectedFiles(); var paths = files.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var ids = SelectedRules(); var transfers = new List<TransferPlan>(); var deletes = new List<string>(); var commands = new List<string>();
+        var transferNames = new Dictionary<Guid, string>();
         var review = new List<ReviewItem>();
         foreach (string id in ids) {
             var rule = engine.Catalog.Rules.Single(r => r.Id == id); var matches = files.Where(f => f.RuleId == id).ToArray();
             if (rule.Action == CleanupAction.Command) {
                 var command = snapshot.Commands.SingleOrDefault(c => c.RuleId == id) ?? throw new InvalidDataException(L.T("ToolNotAvailable"));
-                commands.Add(id); review.Add(new(L.RuleName(rule), L.T("Command"), L.T("ToolManaged"), CommandText(command), L.T("NativeScope"))); continue;
+                commands.Add(id); review.Add(new(L.RuleName(rule), L.T("Command"), NativeSize(id), CommandText(command), L.T("NativeScope"))); continue;
             }
             if (matches.Length == 0) continue;
             var choice = treatments.GetValueOrDefault(id);
@@ -160,6 +165,7 @@ public sealed partial class ShellForm {
             } else if (rule.Action is CleanupAction.Copy or CleanupAction.Move) plans = engine.CreateTransferPlans(snapshot, [id], paths);
             else deletes.Add(id);
             transfers.AddRange(plans);
+            foreach (var plan in plans) transferNames[plan.Id] = L.RuleName(rule);
             review.Add(new(L.RuleName(rule), choice == Treatment.Rule ? L.T(rule.Action.ToString()) : L.T(choice == Treatment.Copy ? "ArchiveCopy" : "ArchiveMove"),
                 Ui.Size(matches.Sum(f => f.Stamp.Bytes)), string.Join(Environment.NewLine, plans.Select(p => p.Source + " -> " + p.Destination)),
                 string.Join(Environment.NewLine, matches.Select(f => f.Path).Take(30))));
@@ -170,15 +176,22 @@ public sealed partial class ShellForm {
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         await Run(async token => {
             int processed = 0, toolSuccess = 0, issues = 0;
+            var results = new List<CleanupItemResult>();
             var progress = Progress(); string journal = Path.Combine(dataRoot, "journals");
             foreach (var plan in transfers) {
+                operationView.AddLog(L.T("PhaseCopyVerify") + ": " + plan.Source);
                 var result = await Task.Run(() => new TransferService().Execute(plan, journal, progress, token));
+                results.Add(new(transferNames[plan.Id], L.T(plan.Mode.ToString()), null, null,
+                    result.RemovedBytes, result.Issues.Count == 0 ? L.T("Complete") : L.T("Incomplete")));
                 processed += result.VerifiedFiles; issues += result.Issues.Count; token.ThrowIfCancellationRequested();
             }
             bool toolFailed = false;
             if (commands.Count > 0) {
-                var outcomes = await engine.ApplyCommands(snapshot, commands, journal, token);
+                var outcomes = await engine.ApplyCommands(snapshot, commands, journal, token, progress);
                 foreach (var result in outcomes) {
+                    results.Add(new(L.RuleName(engine.Catalog.Rules.Single(r => r.Id == result.RuleId)), L.T("Command"),
+                        result.BeforeBytes, result.AfterBytes, result.FreedBytes,
+                        L.T(result.ExitCode == 0 && !result.Cancelled && !result.TimedOut ? "Complete" : "Incomplete")));
                     if (result.ExitCode == 0 && !result.Cancelled && !result.TimedOut) toolSuccess++;
                     else { issues++; toolFailed = true; }
                     token.ThrowIfCancellationRequested();
@@ -188,12 +201,16 @@ public sealed partial class ShellForm {
                     outcomes, skippedRules = commands.Except(outcomes.Select(r => r.RuleId)).Concat(toolFailed ? deletes : []).ToArray() });
             }
             if (toolFailed) issues += deletes.Count;
-            if (deletes.Count > 0 && !toolFailed) {
-                var result = await Task.Run(() => engine.Apply(snapshot, deletes, journal, paths, progress, token));
+            if (deletes.Count > 0 && !toolFailed) foreach (string id in deletes) {
+                operationView.AddLog(L.T("Delete") + ": " + L.RuleName(engine.Catalog.Rules.Single(r => r.Id == id)));
+                var result = await Task.Run(() => engine.Apply(snapshot, [id], journal, paths, progress, token));
                 processed += result.Deleted; issues += result.Skipped;
+                results.Add(new(L.RuleName(engine.Catalog.Rules.Single(r => r.Id == id)), L.T("Delete"), null, null,
+                    result.LogicalBytes, L.T(result.Skipped == 0 ? "Complete" : "Incomplete")));
             }
+            JsonFiles.Write(Path.Combine(journal, $"cleanup-summary-{Guid.NewGuid():N}.json"), results);
             cleanupPlan = null; excluded.Clear(); RenderRules(); status.Text = L.T("OperationDone", processed, toolSuccess, issues);
-            MessageBox.Show(this, status.Text + Environment.NewLine + L.T("NextScan"), L.T("DoneTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            using var report = new CleanupResultsForm(results); report.ShowDialog(this);
         });
     }
 }

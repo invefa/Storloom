@@ -49,37 +49,43 @@ public static class ChatCipher {
 
     public static byte[] DecryptPage(ReadOnlySpan<byte> page, ReadOnlySpan<byte> key,
         ReadOnlySpan<byte> salt, uint pageNumber, CipherParameters parameters) {
-        if (page.Length != PageSize || key.Length != 32 || salt.Length != 16 || pageNumber == 0)
-            throw new CryptographicException("Invalid encrypted page.");
-        if (pageNumber == 1 && !page[..16].SequenceEqual(salt))
-            throw new CryptographicException("Page-one salt differs from the authenticated database.");
-        int start = pageNumber == 1 ? 16 : 0;
-        int end = PageSize - parameters.Reserve;
-        int digestSize = parameters.Mac == HashAlgorithmName.SHA512 ? 64 : 20;
-        byte[] macSalt = salt.ToArray();
-        for (int i = 0; i < macSalt.Length; i++) macSalt[i] ^= 0x3a;
-        byte[] macKey = Rfc2898DeriveBytes.Pbkdf2(key, macSalt, 2, parameters.Kdf, 32);
-        try {
-            byte[] authenticated = new byte[end - start + 16 + 4];
+        using var decoder = new PageDecryptor(key, salt, parameters);
+        byte[] plain = new byte[PageSize]; decoder.Decrypt(page, pageNumber, plain); return plain;
+    }
+
+    private sealed class PageDecryptor : IDisposable {
+        private readonly byte[] salt, macKey;
+        private readonly Aes aes;
+        private readonly CipherParameters parameters;
+        public PageDecryptor(ReadOnlySpan<byte> key, ReadOnlySpan<byte> salt, CipherParameters parameters) {
+            if (key.Length != 32 || salt.Length != 16) throw new CryptographicException("Invalid encrypted page key or salt.");
+            this.salt = salt.ToArray(); this.parameters = parameters;
+            byte[] macSalt = salt.ToArray(); for (int i = 0; i < macSalt.Length; i++) macSalt[i] ^= 0x3a;
+            macKey = Rfc2898DeriveBytes.Pbkdf2(key, macSalt, 2, parameters.Kdf, 32);
+            aes = Aes.Create(); aes.Key = key.ToArray();
+        }
+        public void Decrypt(ReadOnlySpan<byte> page, uint number, Span<byte> plain) {
+            if (page.Length != PageSize || plain.Length != PageSize || number == 0) throw new CryptographicException("Invalid encrypted page.");
+            if (number == 1 && !page[..16].SequenceEqual(salt)) throw new CryptographicException("Page-one salt differs from the authenticated database.");
+            int start = number == 1 ? 16 : 0, end = PageSize - parameters.Reserve;
+            int digestSize = parameters.Mac == HashAlgorithmName.SHA512 ? 64 : 20;
+            Span<byte> authenticated = stackalloc byte[PageSize];
+            int length = end - start + 20;
             page.Slice(start, end - start + 16).CopyTo(authenticated);
-            BinaryPrimitives.WriteUInt32LittleEndian(authenticated.AsSpan(authenticated.Length - 4), pageNumber);
-            byte[] actual = parameters.Mac == HashAlgorithmName.SHA512 ?
-                HMACSHA512.HashData(macKey, authenticated) : HMACSHA1.HashData(macKey, authenticated);
-            if (!CryptographicOperations.FixedTimeEquals(actual, page.Slice(end + 16, digestSize)))
-                throw new CryptographicException($"Encrypted page authentication failed: {pageNumber}");
-            using var aes = Aes.Create();
-            aes.Key = key.ToArray();
-            byte[] plain = new byte[PageSize];
-            aes.DecryptCbc(page.Slice(start, end - start), page.Slice(end, 16),
-                plain.AsSpan(start, end - start), PaddingMode.None);
-            page[end..].CopyTo(plain.AsSpan(end));
-            if (pageNumber == 1) Header.CopyTo(plain, 0);
-            return plain;
-        } finally { CryptographicOperations.ZeroMemory(macKey); }
+            BinaryPrimitives.WriteUInt32LittleEndian(authenticated.Slice(length - 4, 4), number);
+            Span<byte> actual = stackalloc byte[64];
+            if (parameters.Mac == HashAlgorithmName.SHA512) HMACSHA512.HashData(macKey, authenticated[..length], actual);
+            else HMACSHA1.HashData(macKey, authenticated[..length], actual);
+            if (!CryptographicOperations.FixedTimeEquals(actual[..digestSize], page.Slice(end + 16, digestSize)))
+                throw new CryptographicException($"Encrypted page authentication failed: {number}");
+            aes.DecryptCbc(page.Slice(start, end - start), page.Slice(end, 16), plain.Slice(start, end - start), PaddingMode.None);
+            page[end..].CopyTo(plain[end..]); if (number == 1) Header.CopyTo(plain);
+        }
+        public void Dispose() { aes.Dispose(); CryptographicOperations.ZeroMemory(macKey); }
     }
 
     public static bool DecryptDatabase(string source, string destination, byte[] secret,
-        ChatPlatform platform, CancellationToken cancellation = default) {
+        ChatPlatform platform, CancellationToken cancellation = default, IProgress<ScanProgress>? progress = null) {
         using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
         byte[] prefix = new byte[Math.Min(input.Length, 1024 + PageSize)];
         input.ReadExactly(prefix);
@@ -88,7 +94,11 @@ public static class ChatCipher {
         if (plainOffset >= 0) {
             input.Position = plainOffset;
             using var copy = new FileStream(destination, FileMode.CreateNew, FileAccess.Write);
-            input.CopyTo(copy);
+            var buffer = new byte[1024 * 1024]; int count;
+            while ((count = input.Read(buffer)) > 0) {
+                cancellation.ThrowIfCancellationRequested(); copy.Write(buffer, 0, count);
+                progress?.Report(new("chat-decrypt", 0, input.Position, input.Length, Detail: Path.GetFileName(source)));
+            }
             copy.Flush(true);
             foreach (string suffix in new[] { "-wal", "-shm" })
                 if (File.Exists(source + suffix)) File.Copy(source + suffix, destination + suffix);
@@ -104,13 +114,17 @@ public static class ChatCipher {
         bool shiftedLockPage = false;
         try {
             using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.ReadWrite);
+            using var decoder = new PageDecryptor(key, salt, parameters);
+            byte[] plainPage = new byte[PageSize];
             uint number = 1;
             while (true) {
                 cancellation.ThrowIfCancellationRequested();
                 if (IsQqLockPlaceholder(page, number, parameters.Wrapper, platform)) {
                     output.Write(page); shiftedLockPage = true;
-                } else output.Write(DecryptPage(page, key, salt, number, parameters));
+                } else { decoder.Decrypt(page, number, plainPage); output.Write(plainPage); }
                 number++;
+                if (number % 256 == 0 || input.Position == input.Length)
+                    progress?.Report(new("chat-decrypt", 0, input.Position, input.Length, Detail: Path.GetFileName(source)));
                 if (input.Position == input.Length) break;
                 input.ReadExactly(page);
             }
@@ -131,6 +145,8 @@ public static class ChatCipher {
     private static void ApplyWal(string path, FileStream output, byte[] key, byte[] salt,
         CipherParameters parameters, CancellationToken cancellation) {
         if (!File.Exists(path) || new FileInfo(path).Length == 0) return;
+        using var decoder = new PageDecryptor(key, salt, parameters);
+        byte[] plainPage = new byte[PageSize];
         using var wal = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         byte[] header = new byte[32];
         wal.ReadExactly(header);
@@ -158,7 +174,7 @@ public static class ChatCipher {
                 throw new InvalidDataException("WAL frame checksum mismatch; export refused.");
             uint pageNumber = BinaryPrimitives.ReadUInt32BigEndian(frame);
             if (pageNumber == 0) throw new InvalidDataException("Invalid WAL page number.");
-            _ = DecryptPage(frame.AsSpan(24), key, salt, pageNumber, parameters);
+            decoder.Decrypt(frame.AsSpan(24), pageNumber, plainPage);
             uint size = BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(4));
             if (size != 0) { commitEnd = wal.Position; commitPages = size; }
         }
@@ -170,7 +186,7 @@ public static class ChatCipher {
             uint pageNumber = BinaryPrimitives.ReadUInt32BigEndian(frame);
             if (pageNumber > commitPages) continue;
             output.Position = ((long)pageNumber - 1) * PageSize;
-            output.Write(DecryptPage(frame.AsSpan(24), key, salt, pageNumber, parameters));
+            decoder.Decrypt(frame.AsSpan(24), pageNumber, plainPage); output.Write(plainPage);
         }
         output.SetLength((long)commitPages * PageSize);
     }

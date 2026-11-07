@@ -5,7 +5,8 @@ namespace Storloom.Core.Chats;
 
 public sealed class SqliteReader : IDisposable {
     private IntPtr database;
-    private static readonly object Gate = new();
+    private static readonly ReaderWriterLockSlim Gate = new();
+    private bool locked, exclusive;
     private uint? previousPendingByte;
 
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
@@ -36,7 +37,9 @@ public sealed class SqliteReader : IDisposable {
     private static extern int sqlite3_test_control(int operation, uint value);
 
     public SqliteReader(string path, bool shiftedQQ = false) {
-        Monitor.Enter(Gate);
+        exclusive = shiftedQQ && new FileInfo(path).Length > 0x3ffff000;
+        if (exclusive) Gate.EnterWriteLock(); else Gate.EnterReadLock();
+        locked = true;
         try {
             if (shiftedQQ && new FileInfo(path).Length > 0x3ffff000) {
                 previousPendingByte = unchecked((uint)sqlite3_test_control(11, 0x3ffffc00));
@@ -82,6 +85,6 @@ public sealed class SqliteReader : IDisposable {
         if (previousPendingByte is uint previous) {
             sqlite3_test_control(11, previous); previousPendingByte = null;
         }
-        if (Monitor.IsEntered(Gate)) Monitor.Exit(Gate);
+        if (locked) { locked = false; if (exclusive) Gate.ExitWriteLock(); else Gate.ExitReadLock(); }
     }
 }

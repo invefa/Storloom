@@ -1,0 +1,9 @@
+<Project>
+  <!-- WebView2's package includes both desktop UI adapters. This repository uses WinForms. -->
+  <Target Name="ExcludeUnusedWebViewWpf" BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(UseWindowsForms)' == 'true' And '$(UseWPF)' != 'true'">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+</Project>

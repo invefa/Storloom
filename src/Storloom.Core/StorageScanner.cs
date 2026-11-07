@@ -9,6 +9,7 @@ public sealed class StorageScanner {
         CancellationToken cancellation = default) {
         root = PathPolicy.Normalize(root);
         PathPolicy.AssertNoLinks(root);
+        progress?.Report(new("storage", 0, 0, Detail: root));
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
         var directories = new Dictionary<string, StorageEntry>(StringComparer.OrdinalIgnoreCase);
         var largest = new PriorityQueue<StorageEntry, long>();

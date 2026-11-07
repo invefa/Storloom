@@ -6,6 +6,8 @@ namespace Storloom.App;
 
 public sealed record AppPreferences {
     public string Language { get; init; } = L.Language;
+    public AppTheme Theme { get; init; }
+    public int ChatParallelism { get; init; } = 2;
     public string BackupRoot { get; init; } = "";
     public string ArchiveRoot { get; init; } = "";
     public string[]? EnabledRuleSets { get; init; }
@@ -17,6 +19,7 @@ internal class DialogBase : Form {
         Font = Ui.BodyFont; BackColor = Ui.Canvas; ForeColor = Ui.Ink; StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false; MinimizeBox = false; MaximizeBox = false; Icon = ProductInfo.LoadIcon();
         AutoScaleMode = AutoScaleMode.Dpi;
+        DoubleBuffered = true; Shown += (_, _) => Ui.ApplyTheme(this);
     }
 }
 
@@ -26,24 +29,33 @@ internal sealed class PreferencesForm : DialogBase {
         bool rulesPage = false) : base("Preferences", new Size(740, 550)) {
         Result = preferences; Padding = new Padding(18);
         var layout = Ui.Grid(Ui.Fill(), Ui.Auto()); Controls.Add(layout);
-        var tabs = new TabControl { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 16) };
-        var general = new TabPage(L.T("General")) { Padding = new Padding(18), BackColor = Color.White };
-        var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
+        var tabs = new BufferedTabs { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 16) };
+        var general = new TabPage(L.T("General")) { Padding = new Padding(18), BackColor = Ui.Surface };
+        var fields = new BufferedGrid { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
         fields.ColumnStyles.Add(new(SizeType.Absolute, 140)); fields.ColumnStyles.Add(new(SizeType.Percent, 100));
         fields.ColumnStyles.Add(new(SizeType.AutoSize));
-        var languages = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180, Margin = new Padding(0, 0, 0, 18) };
+        var languages = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180, Anchor = AnchorStyles.Left, Margin = Padding.Empty };
         languages.Items.AddRange(["English", "简体中文"]); languages.SelectedIndex = preferences.Language == "en" ? 0 : 1;
-        fields.Controls.Add(Ui.Text(L.T("LanguageLabel")), 0, 0); fields.Controls.Add(languages, 1, 0);
+        fields.Controls.Add(Ui.FieldLabel(L.T("LanguageLabel")), 0, 0); fields.Controls.Add(languages, 1, 0);
         TextBox Field(string label, string value, int row) {
             var input = Ui.Input(); input.Text = value;
-            fields.Controls.Add(Ui.Text(L.T(label)), 0, row); fields.Controls.Add(input, 1, row);
+            fields.Controls.Add(Ui.FieldLabel(L.T(label)), 0, row); fields.Controls.Add(input, 1, row);
             var browse = Ui.Button("Browse"); browse.Click += (_, _) => { string p = Ui.Folder(this, input.Text); if (p != "") input.Text = p; };
             fields.Controls.Add(browse, 2, row); return input;
         }
         var backup = Field("BackupTo", preferences.BackupRoot, 1);
         var archive = Field("ArchiveRoot", preferences.ArchiveRoot, 2);
+        var themes = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210,
+            Anchor = AnchorStyles.Left, Margin = Padding.Empty };
+        themes.Items.AddRange([L.T("ThemeLight"), "One Dark Pro"]); themes.SelectedIndex = (int)preferences.Theme;
+        fields.Controls.Add(Ui.FieldLabel(L.T("ThemeLabel")), 0, 3); fields.Controls.Add(themes, 1, 3);
+        var workers = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210, Anchor = AnchorStyles.Left };
+        workers.Items.AddRange(["1", "2", "4"]); workers.SelectedIndex = preferences.ChatParallelism == 1 ? 0 : preferences.ChatParallelism == 4 ? 2 : 1;
+        fields.Controls.Add(Ui.FieldLabel(L.T("ChatWorkers")), 0, 4); fields.Controls.Add(workers, 1, 4);
+        var workersHelp = Ui.Text(L.T("ChatWorkersHelp")); workersHelp.MaximumSize = new Size(400, 0);
+        fields.Controls.Add(workersHelp, 1, 5); fields.SetColumnSpan(workersHelp, 2);
         general.Controls.Add(fields); tabs.TabPages.Add(general);
-        var rulePage = new TabPage(L.T("RuleSets")) { Padding = new Padding(18), BackColor = Color.White };
+        var rulePage = new TabPage(L.T("RuleSets")) { Padding = new Padding(18), BackColor = Ui.Surface };
         var ruleLayout = Ui.Grid(Ui.Auto(), Ui.Fill(), Ui.Auto(), Ui.Auto()); rulePage.Controls.Add(ruleLayout);
         ruleLayout.Controls.Add(Ui.Text(L.T("SettingsHelp")), 0, 0);
         var sets = RuleSets.ReadIndex(rulesDirectory).Sets;
@@ -82,7 +94,7 @@ internal sealed class PreferencesForm : DialogBase {
                 var catalog = RuleSets.Load(rulesDirectory, enabled, Path.Combine(dataRoot, "rules.json"));
                 if (catalog.Rules.Count == 0) throw new InvalidDataException(L.T("NoRuleSets"));
                 _ = new CleanupEngine(catalog, settings);
-                Result = preferences with { Language = languages.SelectedIndex == 0 ? "en" : "zh-CN",
+                Result = preferences with { Language = languages.SelectedIndex == 0 ? "en" : "zh-CN", Theme = (AppTheme)themes.SelectedIndex, ChatParallelism = int.Parse(workers.SelectedItem!.ToString()!),
                     BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), EnabledRuleSets = enabled };
                 DialogResult = DialogResult.OK;
             } catch (Exception ex) { MessageBox.Show(this, ex.Message, L.T("Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning); }
@@ -100,7 +112,7 @@ internal sealed class ReviewForm : DialogBase {
         foreach (var item in items) Ui.Row(list, item, item.Name, item.Action, item.Amount);
         layout.Controls.Add(list, 0, 1);
         var details = new TextBox { ReadOnly = true, Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Both,
-            BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 12, 0, 12) };
+            BackColor = Ui.Surface, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 12, 0, 12) };
         list.SelectedIndexChanged += (_, _) => { if (list.SelectedItems.Count == 1) {
             var item = (ReviewItem)list.SelectedItems[0].Tag!; details.Text = item.Destination + Environment.NewLine + item.Details;
         } };
@@ -116,23 +128,37 @@ internal sealed class ReviewForm : DialogBase {
 internal sealed class HelpForm : DialogBase {
     public HelpForm(int topic = 0, string? document = null) : base("QuickStart", new Size(850, 620)) {
         Padding = new Padding(18); var layout = Ui.Grid(Ui.Fill(), Ui.Auto()); Controls.Add(layout);
-        var tabs = new TabControl { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 12) };
+        var tabs = new BufferedTabs { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 12) };
         var entries = new[] { ("HelpCleanupTitle", "HelpCleanupBody"), ("HelpArchiveTitle", "HelpArchiveBody"),
             ("HelpChatTitle", "HelpChatBody"), ("HelpCommandsTitle", "HelpCommandsBody"), ("HelpTroubleshootingTitle", "HelpTroubleshootingBody"),
             ("NavOverview", "HelpStorageBody") };
         foreach (var (title, body) in entries) {
             var page = new TabPage(L.T(title)) { Padding = new Padding(16) };
-            page.Controls.Add(new TextBox { Multiline = true, ReadOnly = true, BorderStyle = BorderStyle.None,
-                BackColor = Color.White, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, Text = L.T(body) }); tabs.TabPages.Add(page);
+            page.Controls.Add(FormatHelp(L.T(title), L.T(body))); tabs.TabPages.Add(page);
         }
         if (document != null) {
             var page = new TabPage(L.T("OpenAiGuide")) { Padding = new Padding(16) };
-            page.Controls.Add(new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill,
-                ScrollBars = ScrollBars.Both, Text = document }); tabs.TabPages.Add(page); topic = tabs.TabCount - 1;
+            page.Controls.Add(FormatHelp(L.T("OpenAiGuide"), document)); tabs.TabPages.Add(page); topic = tabs.TabCount - 1;
         }
         tabs.SelectedIndex = Math.Clamp(topic, 0, tabs.TabCount - 1); layout.Controls.Add(tabs, 0, 0);
         var footer = Ui.Flow(true); var close = Ui.Button("Close"); close.DialogResult = DialogResult.Cancel;
         footer.Controls.Add(close); layout.Controls.Add(footer, 0, 1); CancelButton = close;
+    }
+    private static RichTextBox FormatHelp(string title, string body) {
+        var text = new RichTextBox { ReadOnly = true, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill,
+            BackColor = Ui.Surface, ForeColor = Ui.Ink, Font = new Font(Ui.BodyFont.FontFamily, 11f), DetectUrls = false };
+        text.SelectionFont = new Font(Ui.BodyFont.FontFamily, 17f); text.SelectionColor = Ui.Ink;
+        text.AppendText(title + "\n\n");
+        foreach (string paragraph in body.Replace("\r", "").Split("\n\n", StringSplitOptions.RemoveEmptyEntries)) {
+            foreach (string line in paragraph.Split('\n')) {
+                bool step = System.Text.RegularExpressions.Regex.IsMatch(line, @"^\d+\.") || line.StartsWith('#');
+                text.SelectionFont = new Font(Ui.BodyFont.FontFamily, step ? 11f : 10.5f, step ? FontStyle.Bold : FontStyle.Regular);
+                text.SelectionColor = Ui.Ink; text.SelectionIndent = step ? 0 : 10;
+                text.AppendText(line.Trim().TrimStart('#').TrimStart() + "\n");
+            }
+            text.AppendText("\n");
+        }
+        text.Select(0, 0); return text;
     }
 }
 

@@ -31,3 +31,15 @@ Keep raw backup only finishes without decryption. Use previous verified backup l
 ## Relocated caches
 
 Unknown junctions and symlinks remain blocked. If a cache was relocated, inspect its link target and add a private file rule for the verified physical cache leaf. Do not point a rule at a whole profile, Steam HTML profile, app settings, chat account, or application directory. For example, a Steam renderer cache is disposable while its neighboring Local Storage and Network folders can contain sessions. Local rules are merged by ID over enabled sets, and remain private.
+
+## Progress and results
+
+The operation area shows phases, throughput, estimated remaining time when a total is known, and a collapsible log. An unknown-size scan stays indeterminate. Copy work includes writes and verification reads, so its work-byte total exceeds source size. Cancellation preserves completed work and journals. Results list released logical bytes per cleanup item; native tools show complete before/after scans, with unknown values excluded from totals.
+
+## Conversation reader
+
+Use Open reading archive after export, or File > Open reading archive to select messages.html. Search conversations on the left, read sender-labelled bubbles on the right, and move through chronological 300-message pages. Message search covers the current page. Move the entire reading directory, including its JS/CSS, conversations, and assets. The embedded viewer needs Microsoft Edge WebView2 Runtime; a browser can open the same HTML offline.
+
+Contact names prefer remarks, nicknames, aliases, then IDs when supported metadata is available. Recognized local images, legacy XOR image containers, and browser-supported local media can be shown. New encrypted images requiring a separate key, unsupported resource indexes, SILK voice, and unsupported contact tables remain visibly unavailable. Reading copies do not replace raw backups.
+
+To upgrade an old reading export, reopen its verified raw backup sidecar and export into a fresh directory. The original account need not be copied again. Prefer 1 database worker on a hard drive; try 2 or 4 on an SSD. Export reports include phaseSeconds for full backup verification, database work, and reader indexing.

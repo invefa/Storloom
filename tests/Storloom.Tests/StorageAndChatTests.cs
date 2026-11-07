@@ -36,6 +36,8 @@ public sealed class StorageAndChatTests : IDisposable {
         FileIn(selected, "db_storage/message/message_0.db"); FileIn(selected, "media/fixture.txt");
         var location = Assert.Single(ChatDiscovery.Discover([selected]).Where(l => PathPolicy.Under(l.Database, selected)));
         Assert.Equal(selected, location.Directory);
+        Assert.Equal(2, location.AccountFiles); Assert.True(location.SizeComplete);
+        Assert.Equal(new FileInfo(location.Database).Length + new FileInfo(Path.Combine(selected, "media/fixture.txt")).Length, location.AccountBytes);
         var plan = new TransferService().Plan(location.Directory, Path.Combine(root, "backup"));
         Assert.Contains(plan.Files, f => f.RelativePath.EndsWith("fixture.txt"));
     }
@@ -62,6 +64,7 @@ public sealed class StorageAndChatTests : IDisposable {
         var result = service.Execute(plan, Dir("journals"));
         Assert.Equal(2, result.VerifiedFiles); Assert.Empty(result.Issues);
         Assert.Equal(mode == TransferMode.Move ? 2 : 0, result.RemovedFiles);
+        Assert.Equal(mode == TransferMode.Move ? 14 : 0, result.RemovedBytes);
         Assert.Equal("fixture", File.ReadAllText(Path.Combine(target, "sub/a[1].txt")));
         Assert.Equal(mode == TransferMode.Copy, File.Exists(first));
         Assert.Equal(mode == TransferMode.Copy, File.Exists(second));
@@ -147,7 +150,10 @@ public sealed class StorageAndChatTests : IDisposable {
             Path.Combine(root, "export"), ChatPlatform.QQ);
         Assert.Equal(2, result.Messages); Assert.True(result.Complete);
         string html = File.ReadAllText(Path.Combine(result.Directory, "messages.html"));
-        Assert.DoesNotContain("<script>alert", html); Assert.Contains("&lt;script&gt;", html);
+        Assert.DoesNotContain("<script>alert", html);
+        string page = File.ReadAllText(Directory.GetFiles(Path.Combine(result.Directory, "conversations"), "*.js").Single());
+        Assert.DoesNotContain("<script>", page); Assert.Contains("\\u003Cscript\\u003E", page);
+        Assert.Contains("document.createTextNode(m.Text)", File.ReadAllText(Path.Combine(result.Directory, "reader.js")));
         Assert.Equal(2, File.ReadLines(Path.Combine(result.Directory, "messages.jsonl")).Count());
         Assert.True(File.Exists(database));
     }
@@ -242,7 +248,7 @@ public sealed class StorageAndChatTests : IDisposable {
         var service = new TransferService(); var backup = service.Execute(service.Plan(source,
             Path.Combine(root, "backup")), Dir("journals"));
         using var cancel = new CancellationTokenSource();
-        var progress = new ImmediateProgress(_ => cancel.Cancel());
+        var progress = new ImmediateProgress(p => { if (p.RuleId == "chat-export") cancel.Cancel(); });
         string export = Path.Combine(root, "export");
         var result = new ChatExporter().ExportVerifiedBackup(backup.Manifest, export, ChatPlatform.QQ,
             progress: progress, cancellation: cancel.Token);
@@ -309,6 +315,54 @@ public sealed class StorageAndChatTests : IDisposable {
 
     private sealed class ImmediateProgress(Action<ScanProgress> action) : IProgress<ScanProgress> {
         public void Report(ScanProgress value) => action(value);
+    }
+
+    [Fact]
+    public void TargetTamperingBeforeBatchVerificationPreventsPublicationAndSourceRemoval() {
+        string source=Dir("source"), destination=Path.Combine(root,"archive");
+        FileIn(source,"first.bin","first fixture"); FileIn(source,"second.bin","second fixture");
+        var service=new TransferService();var plan=service.Plan(source,destination,TransferMode.Move);
+        bool changed=false;
+        var progress=new ImmediateProgress(p=>{
+            if(!changed && p.RuleId=="transfer" && p.Files==2) {
+                changed=true;
+                File.AppendAllText(Path.Combine(destination+".storloom-"+plan.Id.ToString("N")+".partial","first.bin"),"tampered");
+            }
+        });
+        Assert.Throws<IOException>(()=>service.Execute(plan,Dir("journals"),progress));
+        Assert.True(changed);Assert.False(Directory.Exists(destination));Assert.True(File.Exists(Path.Combine(source,"first.bin")));
+        Assert.True(File.Exists(Path.Combine(source,"second.bin")));
+    }
+
+    [Fact]
+    public void ReusedDatabaseCipherContextPreservesAuthenticatedPagesAndRecordsThroughput() {
+        const int pages = 4096;
+        byte[] secret = Enumerable.Range(0,32).Select(i => (byte)i).ToArray(), salt = Enumerable.Range(1,16).Select(i => (byte)i).ToArray();
+        var parameters = new CipherParameters(0,80,HashAlgorithmName.SHA512,HashAlgorithmName.SHA512,256000,true);
+        string encrypted = Path.Combine(root,"cipher-fixture.db");
+        using(var output = File.Create(encrypted)) for(uint number=1;number<=pages;number++) {
+            byte[] plain = new byte[4096]; if(number==1) "SQLite format 3\0"u8.CopyTo(plain);
+            output.Write(EncryptPage(plain,secret,salt,number,parameters));
+        }
+        var baseline = new List<double>(); var reused = new List<double>();
+        for(int run=0;run<3;run++) {
+            string first=Path.Combine(root,$"page-context-{run}.db"), second=Path.Combine(root,$"database-context-{run}.db");
+            var clock=System.Diagnostics.Stopwatch.StartNew();
+            using(var input=File.OpenRead(encrypted)) using(var output=File.Create(first)) {
+                byte[] page=new byte[4096];
+                for(uint number=1;number<=pages;number++){input.ReadExactly(page);output.Write(ChatCipher.DecryptPage(page,secret,salt,number,parameters));}
+                output.Flush(true);
+            }
+            baseline.Add(clock.Elapsed.TotalMilliseconds); clock.Restart();
+            ChatCipher.DecryptDatabase(encrypted,second,secret,ChatPlatform.WeChat); reused.Add(clock.Elapsed.TotalMilliseconds);
+            using var original=File.OpenRead(first);using var optimized=File.OpenRead(second);
+            Assert.Equal(SHA256.HashData(original),SHA256.HashData(optimized));
+        }
+        DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
+        Assert.NotNull(repo);
+        JsonFiles.Write(Path.Combine(repo!.FullName,"artifacts/performance/cipher-context.json"),new {
+            fixtureMiB=16, pages, runs=3, perPageMedianMs=baseline.Order().ElementAt(1), reusedMedianMs=reused.Order().ElementAt(1),
+            outputHashesEqual=true, scope="Synthetic authenticated pages with file I/O; not a real-account benchmark." });
     }
 
     private static byte[] EncryptPage(byte[] plain, byte[] secret, byte[] salt, uint number,

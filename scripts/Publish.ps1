@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '0.3.0',
+    [string] $Version = '0.4.0',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -35,6 +35,17 @@ foreach ($entry in @(@('Storloom.App', $package), @('Storloom.Cli', (Join-Path $
         if (!$notices) { throw "Runtime license missing: $($framework.name)" }
         $notices | Copy-Item -Destination $licenseTarget
     }
+}
+# WebView2 SDK license and notice, from the exact restored package.
+$appProject = [xml](Get-Content -LiteralPath (Join-Path $repo 'src/Storloom.App/Storloom.App.csproj') -Raw)
+$webViewVersion = ($appProject.Project.ItemGroup.PackageReference | Where-Object Include -eq 'Microsoft.Web.WebView2').Version
+if (!$webViewVersion) { throw 'Cannot resolve the WebView2 SDK version.' }
+$webViewLicenseTarget = Join-Path $package 'licenses/Microsoft.Web.WebView2'
+New-Item -ItemType Directory -Path $webViewLicenseTarget -Force | Out-Null
+foreach ($notice in @('LICENSE.txt', 'NOTICE.txt')) {
+    $licenseFile = Join-Path $nugetRoot "microsoft.web.webview2/$webViewVersion/$notice"
+    if (!(Test-Path -LiteralPath $licenseFile)) { throw 'WebView2 SDK license missing.' }
+    Copy-Item -LiteralPath $licenseFile -Destination $webViewLicenseTarget
 }
 # Explicit public inputs only. Never copy data/, source workspaces, or prior artifacts.
 foreach ($file in @('README.md', 'README.zh-CN.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {

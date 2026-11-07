@@ -28,7 +28,9 @@ public sealed record TransferJournal {
     public string ProgressLog { get; init; } = "";
 }
 public sealed record TransferResult(string Destination, int VerifiedFiles, int RemovedFiles,
-    long Bytes, string Manifest, bool Cancelled, List<ScanIssue> Issues);
+    long Bytes, string Manifest, bool Cancelled, List<ScanIssue> Issues) {
+    public long RemovedBytes { get; init; }
+}
 
 public sealed class TransferService {
     public TransferPlan Plan(string source, string destination, TransferMode mode = TransferMode.Copy,
@@ -88,6 +90,11 @@ public sealed class TransferService {
         foreach (string directory in plan.EmptyDirectories)
             if (directory != ".") _ = Child(plan.Destination, directory);
         long needed = plan.Files.Sum(f => f.Stamp.Bytes);
+        long workBytes = 0;
+        void Advanced(int count, string detail) {
+            workBytes += count;
+            progress?.Report(new("transfer", 0, workBytes, checked(needed * 2), plan.Files.Count, detail));
+        }
         if (new DriveInfo(Path.GetPathRoot(plan.Destination)!).AvailableFreeSpace < needed + 1024 * 1024)
             throw new IOException("Not enough destination space for the verified copy.");
         string staging = plan.Destination + ".storloom-" + plan.Id.ToString("N") + ".partial";
@@ -102,6 +109,7 @@ public sealed class TransferService {
         var receipts = new List<TransferReceipt>();
         var issues = new List<ScanIssue>();
         int removed = 0;
+        long removedBytes = 0;
         long bytes = 0;
         bool published = false;
         string eventsPath = manifestPath + ".jsonl";
@@ -120,6 +128,7 @@ public sealed class TransferService {
         Save("Planned");
         Directory.CreateDirectory(staging);
         try {
+            progress?.Report(new("transfer", 0, 0, checked(needed * 2), plan.Files.Count, SourceBytes: needed));
             foreach (var entry in plan.Files) {
                 cancellation.ThrowIfCancellationRequested();
                 CheckProcesses(plan.Processes);
@@ -130,39 +139,46 @@ public sealed class TransferService {
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read)) {
                     if (NativeFile.ReadStamp(source) != entry.Stamp) throw new IOException("Source changed before copying.");
+                    using var sourceDigest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
                         byte[] buffer = new byte[1024 * 1024];
                         int count;
                         while ((count = input.Read(buffer)) > 0) {
                             cancellation.ThrowIfCancellationRequested(); output.Write(buffer, 0, count);
+                            sourceDigest.AppendData(buffer, 0, count); Advanced(count, "copy: " + entry.RelativePath);
                         }
                         output.Flush(true);
                     }
-                    input.Position = 0;
-                    byte[] sourceHash = Hash(input, cancellation);
-                    using var copied = File.OpenRead(target);
-                    if (!CryptographicOperations.FixedTimeEquals(sourceHash, Hash(copied, cancellation)) ||
-                        input.Length != entry.Stamp.Bytes || NativeFile.ReadStamp(source) != entry.Stamp)
-                        throw new IOException("Copy verification failed.");
+                    byte[] sourceHash = sourceDigest.GetHashAndReset();
+                    if (input.Length != entry.Stamp.Bytes || NativeFile.ReadStamp(source) != entry.Stamp)
+                        throw new IOException("Source changed while copying.");
                     receipts.Add(new(entry.RelativePath, entry.Stamp.Bytes, Convert.ToHexString(sourceHash)));
                 }
                 File.SetLastWriteTimeUtc(target, new DateTime(entry.Stamp.WriteUtcTicks, DateTimeKind.Utc));
                 bytes += entry.Stamp.Bytes;
                 Event("Copied", receipts[^1]);
-                progress?.Report(new("transfer", receipts.Count, bytes));
+                progress?.Report(new("transfer", receipts.Count, workBytes, checked(needed * 2), plan.Files.Count, entry.RelativePath));
             }
             foreach (string directory in plan.EmptyDirectories)
                 Directory.CreateDirectory(directory == "." ? staging : Child(staging, directory));
             cancellation.ThrowIfCancellationRequested();
-            // Verify the entire target again before accepting it or removing any source.
+            // Verify every destination against its streaming source hash before publishing the batch.
             foreach (var entry in receipts) {
                 cancellation.ThrowIfCancellationRequested();
                 using var target = File.OpenRead(Child(staging, entry.RelativePath));
-                if (Convert.ToHexString(Hash(target, cancellation)) != entry.Sha256)
+                if (Convert.ToHexString(Hash(target, cancellation,
+                    count => Advanced(count, "verify batch: " + entry.RelativePath))) != entry.Sha256)
                     throw new IOException("Destination changed before publishing.");
             }
             AssertParents(plan.Destination);
-            Directory.Move(staging, plan.Destination);
+            for (int attempt = 0; ; attempt++) {
+                cancellation.ThrowIfCancellationRequested(); AssertParents(plan.Destination);
+                try { Directory.Move(staging, plan.Destination); break; }
+                catch (IOException ex) when (attempt < 6 && (ex.HResult & 0xffff) is 5 or 32 or 33) {
+                    // Windows indexers can briefly hold a newly written media file without delete sharing.
+                    if (cancellation.WaitHandle.WaitOne(50)) cancellation.ThrowIfCancellationRequested();
+                }
+            }
             published = true;
             Save("Verified");
             if (plan.Mode == TransferMode.Move) {
@@ -186,6 +202,8 @@ public sealed class TransferService {
                         Event("RemovingSource", new { entry.RelativePath });
                         NativeFile.DeleteVerified(new("transfer", plan.Source, source, entry.Stamp));
                         removed++;
+                        removedBytes += entry.Stamp.Bytes;
+                        progress?.Report(new("transfer-remove", removed, 0, TotalFiles: plan.Files.Count, Detail: entry.RelativePath));
                         Event("SourceRemoved", new { entry.RelativePath });
                     } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
                         issues.Add(new("transfer", entry.RelativePath, ex.Message));
@@ -201,7 +219,7 @@ public sealed class TransferService {
             throw;
         }
         return new(plan.Destination, receipts.Count, removed, bytes, published ? archiveManifest : manifestPath,
-            cancellation.IsCancellationRequested, issues);
+            cancellation.IsCancellationRequested, issues) { RemovedBytes = removedBytes };
     }
 
     public static string Child(string root, string relative) {
@@ -212,12 +230,13 @@ public sealed class TransferService {
         return full;
     }
 
-    public static byte[] Hash(Stream input, CancellationToken cancellation = default) {
+    public static byte[] Hash(Stream input, CancellationToken cancellation = default, Action<int>? bytesRead = null) {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         byte[] buffer = new byte[1024 * 1024];
         int count;
         while ((count = input.Read(buffer)) > 0) {
             cancellation.ThrowIfCancellationRequested(); hash.AppendData(buffer, 0, count);
+            bytesRead?.Invoke(count);
         }
         return hash.GetHashAndReset();
     }

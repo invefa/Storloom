@@ -5,7 +5,10 @@ namespace Storloom.Core;
 
 public sealed record ToolCommandPlan(string RuleId, CleanupTool Tool, string Executable,
     string Sha256, string[] Arguments, string? Script = null, string? ScriptSha256 = null);
-public sealed record ToolCommandResult(string RuleId, int? ExitCode, bool Cancelled, bool TimedOut, string Journal);
+public sealed record ToolCommandResult(string RuleId, int? ExitCode, bool Cancelled, bool TimedOut, string Journal,
+    long? BeforeBytes = null, long? AfterBytes = null) {
+    public long? FreedBytes => BeforeBytes is long before && AfterBytes is long after ? before - after : null;
+}
 
 // Recipes are intentionally owned by the application, never interpolated into a shell.
 public static class ToolCleanupService {
@@ -55,12 +58,14 @@ public static class ToolCleanupService {
     }
 
     public static async Task<ToolCommandResult> Execute(ToolCommandPlan plan, CleanupRule rule,
-        CleanerSettings settings, string journalDirectory, CancellationToken cancellation = default) {
+        CleanerSettings settings, string journalDirectory, CancellationToken cancellation = default,
+        IProgress<ScanProgress>? progress = null) {
         Validate(plan, rule, settings);
         if (settings.CommandTimeoutSeconds is < 1 or > 3600) throw new InvalidDataException("Invalid command timeout.");
         if (CleanupEngine.RunningProcesses(rule).Length > 0)
             throw new IOException("Close applications listed by the cleanup rule before running its tool.");
         cancellation.ThrowIfCancellationRequested();
+        var before = await Task.Run(() => CacheMeasurementService.Measure(plan, rule, settings, progress, cancellation, exact: true), cancellation);
         Directory.CreateDirectory(journalDirectory);
         string journal = Path.Combine(journalDirectory, $"tool-{Guid.NewGuid():N}.json");
         using var executableLock = new FileStream(plan.Executable, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -68,6 +73,7 @@ public static class ToolCleanupService {
         Validate(plan, rule, settings);
         var start = new ProcessStartInfo(plan.Executable) { UseShellExecute = false, CreateNoWindow = true,
             WorkingDirectory = Path.GetFullPath(journalDirectory), RedirectStandardOutput = true, RedirectStandardError = true };
+        if (plan.Tool == CleanupTool.PipCache) start.Environment["PYTHONIOENCODING"] = "utf-8";
         foreach (string argument in plan.Arguments) start.ArgumentList.Add(argument);
         JsonFiles.Write(journal, new { state = "Starting", plan });
         using var process = new Process { StartInfo = start };
@@ -78,8 +84,10 @@ public static class ToolCleanupService {
         object gate = new();
         async Task Drain(StreamReader reader) {
             char[] buffer = new char[4096]; int count;
-            while ((count = await reader.ReadAsync(buffer)) > 0)
+            while ((count = await reader.ReadAsync(buffer)) > 0) {
                 lock (gate) if (output.Length < 1024 * 1024) output.Append(buffer, 0, Math.Min(count, 1024 * 1024 - output.Length));
+                progress?.Report(new("native-tool", 0, 0, Detail: new string(buffer, 0, Math.Min(count, 300)).Trim()));
+            }
         }
         try {
             if (!process.Start()) throw new IOException("The cleanup tool did not start.");
@@ -96,7 +104,13 @@ public static class ToolCleanupService {
                 try { await Task.WhenAll(stdout, stderr); }
                 catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException) { }
             }
-            var result = new ToolCommandResult(rule.Id, process.ExitCode, cancelled, timedOut, journal);
+            CacheMeasurement? after = null;
+            if (!cancelled && !cancellation.IsCancellationRequested) {
+                try { after = await Task.Run(() => CacheMeasurementService.Measure(plan, rule, settings, progress, cancellation, exact: true), cancellation); }
+                catch (OperationCanceledException) { cancelled = true; }
+            } else if (cancellation.IsCancellationRequested) cancelled = true;
+            var result = new ToolCommandResult(rule.Id, process.ExitCode, cancelled, timedOut, journal,
+                before.Complete ? before.Bytes : null, after?.Complete == true ? after.Bytes : null);
             JsonFiles.Write(journal, new { state = cancelled ? "Cancelled" : timedOut ? "TimedOut" :
                 process.ExitCode == 0 ? "Completed" : "Failed", plan, result, output = output.ToString() });
             return result;

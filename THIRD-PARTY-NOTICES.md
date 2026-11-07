@@ -98,3 +98,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## Microsoft .NET
 
 Self-contained distributions include Microsoft .NET runtime binaries. The exact restored runtime packs' LICENSE and available THIRD-PARTY-NOTICES files are copied into `licenses/<framework>/` under each published application directory. Sources: https://github.com/dotnet/runtime and https://github.com/dotnet/winforms (MIT and third-party terms). The Windows SQLite system component is provided by the operating system and is not redistributed here.
+
+## Microsoft Edge WebView2 SDK
+
+The Windows application includes the Microsoft.Web.WebView2 managed SDK and loader for the optional embedded archive reader. The exact restored SDK's LICENSE.txt and NOTICE.txt are included under licenses/Microsoft.Web.WebView2 in release packages. The Microsoft Edge WebView2 Runtime is installed separately and is not bundled. Source and terms: https://www.nuget.org/packages/Microsoft.Web.WebView2 and https://learn.microsoft.com/microsoft-edge/webview2/.

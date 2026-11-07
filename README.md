@@ -43,7 +43,7 @@ Install .NET 10 SDK on Windows. The baseline rolls forward within .NET 10 featur
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.3.0
+./scripts/Publish.ps1 -Version 0.4.0
 ```
 
 The package script copies only public binaries, rules, documentation, and notices into a fresh directory, audits local identity paths, and emits ZIP/SHA-256. It never copies `data/` or test fixtures. CI builds/tests on Windows; the packaging workflow creates artifacts without publishing a GitHub Release. The icon source is SVG; `scripts/Build-Icon.ps1` regenerates the multi-size Windows ICO.
@@ -51,3 +51,11 @@ The package script copies only public binaries, rules, documentation, and notice
 Tests cover identity/boundary guards, copy/move/archive verification, native-recipe tampering/output/cancellation/timeout using a separate test executable, synthetic encrypted chat/WAL data, a complete verified-backup GUI export, locale parity, and bilingual page/dialog rendering. Fixture tests do not certify every real client version, login capture, or restorability.
 
 MIT. See [third-party notices](THIRD-PARTY-NOTICES.md) for the adapted WeChat capture component and ZstdSharp. Exact .NET runtime license/notice files accompany self-contained packages.
+
+## Appearance, progress, and reading archives
+
+Preferences offer Light and One Dark Pro themes and 1, 2, or 4 chat database workers. Prefer 1 on a hard drive and try bounded parallelism on an SSD. Operations show phase progress, throughput, estimated remaining time when a denominator is known, and a collapsible local log. The native list viewport is restored after resizing; buffered containers and owner drawing avoid repeated full-page invalidation.
+
+Account sizes include databases, images, video, and attachments. Reading archives provide named conversations, chronological 300-message pages, search within the current page, and recognized local media. The embedded viewer needs Microsoft Edge WebView2 Runtime; the same messages.html works offline in a browser with its adjacent assets. Names fall back to IDs when contact metadata is unavailable. New WeChat encrypted images, resource-index-only attachments, SILK voice, and unsupported contact schemas remain explicitly unavailable; the raw backup remains authoritative.
+
+Native cleanup rules can measure tool-discovered directories or explicit directory roots. Results show each deletion's processed logical bytes and each native command's before/after difference. Unknown or partial measurements are not reported as zero. See the rule reference for configuration.

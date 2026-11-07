@@ -21,7 +21,7 @@ public sealed class CleanupEngine {
         foreach (var rule in catalog.Rules) {
             if (!matchers.TryAdd(rule.Id, new RuleMatcher(rule)))
                 throw new InvalidDataException($"Duplicate rule: {rule.Id}");
-            foreach (string pattern in rule.Roots) {
+            foreach (string pattern in rule.Roots.Concat(rule.Measurement?.Roots ?? [])) {
                 string expanded = resolver.Expand(pattern);
                 if (expanded.Contains("**")) throw new InvalidDataException("Root glob cannot contain **.");
                 // Validate non-wildcard anchors before a scan has any side effects.
@@ -49,11 +49,17 @@ public sealed class CleanupEngine {
         long bytes = 0;
         foreach (var matcher in matchers.Values.Where(m => selected.Contains(m.Rule.Id))) {
             CleanupRule rule = matcher.Rule;
+            progress?.Report(new("scan-rule", plan.Files.Count, bytes, Detail: rule.Name));
             string[] running = RunningProcesses(rule);
             if (running.Length > 0) plan.Issues.Add(new(rule.Id, "",
                 "Close running applications before cleanup: " + string.Join(", ", running)));
             if (rule.Action == CleanupAction.Command) {
-                try { plan.Commands.Add(ToolCleanupService.Plan(rule, Settings)); }
+                try {
+                    var command = ToolCleanupService.Plan(rule, Settings); plan.Commands.Add(command);
+                    var measurement = CacheMeasurementService.Measure(command, rule, Settings, progress, cancellation);
+                    plan.Measurements[rule.Id] = measurement;
+                    foreach (var issue in measurement.Issues) AddIssue(plan, rule.Id, issue.Path, issue.Reason);
+                }
                 catch (Exception ex) when (Recoverable(ex)) { AddIssue(plan, rule.Id, "", ex.Message); }
                 continue;
             }
@@ -271,7 +277,7 @@ public sealed class CleanupEngine {
     }
 
     public async Task<List<ToolCommandResult>> ApplyCommands(CleanupPlan plan, IEnumerable<string> ruleIds,
-        string journalDirectory, CancellationToken cancellation = default) {
+        string journalDirectory, CancellationToken cancellation = default, IProgress<ScanProgress>? progress = null) {
         ValidatePlan(plan);
         var selected = SelectRules(ruleIds, true);
         if (selected.Any(id => matchers[id].Rule.Action != CleanupAction.Command))
@@ -283,7 +289,7 @@ public sealed class CleanupEngine {
         var results = new List<ToolCommandResult>();
         foreach (var command in commands) {
             cancellation.ThrowIfCancellationRequested();
-            var result = await ToolCleanupService.Execute(command, matchers[command.RuleId].Rule, Settings, journalDirectory, cancellation);
+            var result = await ToolCleanupService.Execute(command, matchers[command.RuleId].Rule, Settings, journalDirectory, cancellation, progress);
             results.Add(result);
             if (result.Cancelled || result.TimedOut || result.ExitCode != 0) break;
         }

@@ -136,6 +136,60 @@
               "UvPrune",
               null
             ]
+          },
+          "measurement": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "enum": [
+                  "Tool",
+                  "Directories",
+                  "ToolReport"
+                ]
+              },
+              "roots": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "const": "Directories"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "roots"
+                  ],
+                  "properties": {
+                    "roots": {
+                      "minItems": 1
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "roots": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              }
+            ]
           }
         },
         "allOf": [
@@ -212,8 +266,41 @@
                 },
                 "tool": {
                   "type": "null"
+                },
+                "measurement": {
+                  "type": "null"
                 }
               }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "measurement": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "const": "ToolReport"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                }
+              },
+              "required": [
+                "measurement"
+              ]
+            },
+            "then": {
+              "properties": {
+                "tool": {
+                  "const": "PipCache"
+                }
+              },
+              "required": [
+                "tool"
+              ]
             }
           }
         ]

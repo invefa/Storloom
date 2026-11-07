@@ -64,7 +64,8 @@ public sealed class RuleAndToolTests : IDisposable {
         string host = Path.Combine(directory, "dotnet.exe");
         File.Copy(Path.Combine(directory, "Storloom.ToolFixture.exe"), host);
         File.WriteAllText(Path.Combine(directory, "fixture-mode.txt"), mode);
-        return (new() { Id = "fixture-tool", Name = "Isolated tool", Action = CleanupAction.Command, Tool = CleanupTool.NuGetHttpCache },
+        return (new() { Id = "fixture-tool", Name = "Isolated tool", Action = CleanupAction.Command, Tool = CleanupTool.NuGetHttpCache,
+                Measurement = new() { Mode = CacheMeasureMode.Directories, Roots = [Dir("tool/cache")] } },
             new() { ToolPaths = new() { ["dotnet"] = host }, CommandTimeoutSeconds = 1 });
     }
     [Fact]
@@ -101,6 +102,27 @@ public sealed class RuleAndToolTests : IDisposable {
         result = await ToolCleanupService.Execute(ToolCleanupService.Plan(rule, settings), rule,
             settings with { CommandTimeoutSeconds = 10 }, Dir("journals"), cancellation.Token);
         Assert.True(result.Cancelled); Assert.False(result.TimedOut); Assert.Contains("Cancelled", File.ReadAllText(result.Journal));
+    }
+    [Fact]
+    public void NativeSizeReportCanBeSelectedWithoutAcceptingArbitraryCommands() {
+        var (original, settings) = FixtureTool("pip-info-fixture");
+        string python = Path.Combine(root,"tool","python.exe");File.Copy(settings.ToolPaths["dotnet"],python);
+        var rule=original with {Tool=CleanupTool.PipCache,Measurement=new(){Mode=CacheMeasureMode.ToolReport}};
+        settings=settings with {ToolPaths=new(){["python"]=python}};
+        var plan=new CleanupEngine(new(){Rules=[rule]},settings).Scan();var measured=plan.Measurements[rule.Id];
+        Assert.True(measured.Complete);Assert.True(measured.Estimated);Assert.Equal(2700002000,measured.Bytes);
+        Assert.Throws<InvalidDataException>(()=>new CleanupEngine(new(){Rules=[rule with {Tool=CleanupTool.UvPrune}]}));
+    }
+    [Fact]
+    public async Task NativeCleanupMeasuresActualBeforeAndAfterAndDoesNotCountRetainedFiles() {
+        var (rule, settings) = FixtureTool("clean-cache"); string cache = rule.Measurement!.Roots.Single();
+        File.WriteAllBytes(Path.Combine(cache, "removable.cache"), new byte[512]);
+        File.WriteAllBytes(Path.Combine(cache, "retained.cache"), new byte[32]);
+        var engine = new CleanupEngine(new() { Rules = [rule] }, settings); var plan = engine.Scan();
+        Assert.Equal(544, plan.Measurements[rule.Id].Bytes); Assert.True(plan.Measurements[rule.Id].Complete);
+        var result = Assert.Single(await engine.ApplyCommands(plan, [rule.Id], Dir("journals")));
+        Assert.Equal(544, result.BeforeBytes); Assert.Equal(32, result.AfterBytes); Assert.Equal(512, result.FreedBytes);
+        Assert.True(File.Exists(Path.Combine(cache, "retained.cache")));
     }
     [Fact]
     public void CommandRulesRejectArbitraryJsonFieldsAndCannotUseFileExecutors() {

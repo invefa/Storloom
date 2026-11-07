@@ -3,11 +3,17 @@ using Microsoft.Win32;
 namespace Storloom.Core.Chats;
 
 public sealed record ChatLocation(ChatPlatform Platform, string Directory, string Account,
-    string Database, long DatabaseBytes);
+    string Database, long DatabaseBytes) {
+    public long? AccountBytes { get; init; }
+    public long AccountFiles { get; init; }
+    public bool SizeComplete { get; init; }
+}
 
 public static class ChatDiscovery {
-    public static List<ChatLocation> Discover(IEnumerable<string>? additionalRoots = null) {
+    public static List<ChatLocation> Discover(IEnumerable<string>? additionalRoots = null,
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default) {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (additionalRoots == null) {
         string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         foreach (string root in new[] { Path.Combine(documents, "Tencent Files"),
@@ -24,6 +30,7 @@ public static class ChatDiscovery {
         foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == DriveType.Fixed))
             foreach (string name in new[] { "Tencent Files", "WeChat Files", "xwechat_files" })
                 roots.Add(Path.Combine(drive.RootDirectory.FullName, name));
+        }
         foreach (string root in additionalRoots ?? []) roots.Add(root);
         var results = new List<ChatLocation>();
         foreach (string root in roots.Where(Directory.Exists)) {
@@ -53,6 +60,13 @@ public static class ChatDiscovery {
                     }
             } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
-        return results;
+        return results.GroupBy(r => (r.Platform, r.Directory)).Select(group => {
+            cancellation.ThrowIfCancellationRequested();
+            var first = group.First();
+            var size = new StorageScanner().Scan(first.Directory, progress, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            return first with { DatabaseBytes = group.Sum(r => r.DatabaseBytes), AccountBytes = size.Bytes,
+                AccountFiles = size.Files, SizeComplete = size.Issues.Count == 0 };
+        }).ToList();
     }
 }

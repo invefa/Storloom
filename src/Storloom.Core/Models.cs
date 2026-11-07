@@ -6,6 +6,14 @@ namespace Storloom.Core;
 public enum RiskLevel { Low, Review }
 public enum CleanupAction { Delete, Copy, Move, Command }
 public enum CleanupTool { NuGetHttpCache, NpmCache, PipCache, UvPrune }
+public enum CacheMeasureMode { Tool, Directories, ToolReport }
+public sealed record CacheMeasureSpec {
+    public CacheMeasureMode Mode { get; init; }
+    public string[] Roots { get; init; } = [];
+}
+public sealed record CacheMeasurement(long Bytes, long Files, bool Complete, string Method, List<ScanIssue> Issues) {
+    public bool Estimated { get; init; }
+}
 
 public sealed record CleanupRule {
     public string Id { get; init; } = "";
@@ -15,6 +23,7 @@ public sealed record CleanupRule {
     public Dictionary<string, string> Descriptions { get; init; } = [];
     public CleanupAction Action { get; init; }
     public CleanupTool? Tool { get; init; }
+    public CacheMeasureSpec? Measurement { get; init; }
     public string? DestinationRoot { get; init; }
     public string[] Roots { get; init; } = [];
     public string[] Include { get; init; } = ["**"];
@@ -50,7 +59,8 @@ public sealed record FileStamp(
     uint Volume, ulong FileId, uint Links);
 public sealed record Candidate(string RuleId, string Root, string Path, FileStamp Stamp);
 public sealed record ScanIssue(string RuleId, string Path, string Reason);
-public sealed record ScanProgress(string RuleId, int Files, long Bytes);
+public sealed record ScanProgress(string RuleId, int Files, long Bytes,
+    long? TotalBytes = null, int? TotalFiles = null, string? Detail = null, long? SourceBytes = null);
 public sealed record CleanupPlan {
     public int Version { get; init; } = 1;
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -62,6 +72,7 @@ public sealed record CleanupPlan {
     public string SettingsHash { get; init; } = "";
     public List<Candidate> Files { get; init; } = [];
     public List<ToolCommandPlan> Commands { get; init; } = [];
+    public Dictionary<string, CacheMeasurement> Measurements { get; init; } = [];
     public List<ScanIssue> Issues { get; init; } = [];
 }
 

@@ -21,7 +21,7 @@ public sealed partial class ShellForm {
 
     private void BuildChats() {
         var layout = Page("chats", "ChatTitle", "ChatLead", Ui.Auto(), Ui.Fill(), Ui.Auto());
-        var steps = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Margin = new Padding(0, 0, 0, 18) };
+        var steps = new BufferedGrid { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Margin = new Padding(0, 0, 0, 18) };
         chatSteps = new Label[3];
         string[] titles = ["ChatStepAccount", "ChatStepBackup", "ChatStepExport"];
         for (int i = 0; i < 3; i++) {
@@ -30,22 +30,27 @@ public sealed partial class ShellForm {
             chatSteps[i].Padding = new Padding(12, 9, 12, 9); chatSteps[i].Margin = new Padding(0, 0, 8, 0);
             steps.Controls.Add(chatSteps[i], i, 0);
         }
-        chatContent = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(20), Margin = Padding.Empty };
+        chatContent = new BufferedPanel { Dock = DockStyle.Fill, BackColor = Ui.Surface, Padding = new Padding(20), Margin = Padding.Empty };
         chatFooter = Ui.Flow(true); chatFooter.Margin = new Padding(0, 16, 0, 0);
         layout.Controls.Add(steps, 0, 1); layout.Controls.Add(chatContent, 0, 2); layout.Controls.Add(chatFooter, 0, 3);
         chatStep = 0; RenderChatStage();
     }
     private void RenderChatStage() {
+        chatContent.SuspendLayout(); chatFooter.SuspendLayout();
+        try {
         foreach (Control control in chatContent.Controls.Cast<Control>().ToArray()) control.Dispose();
         foreach (Control control in chatFooter.Controls.Cast<Control>().ToArray()) control.Dispose();
         chatContent.Controls.Clear(); chatFooter.Controls.Clear(); backupInput = keyInput = null;
         for (int i = 0; i < chatSteps.Length; i++) {
-            chatSteps[i].BackColor = i == Math.Min(chatStep, 2) ? Color.FromArgb(220, 240, 235) : Color.Transparent;
+            chatSteps[i].BackColor = i == Math.Min(chatStep, 2) ? Ui.Selection : Color.Transparent;
             chatSteps[i].ForeColor = i == Math.Min(chatStep, 2) ? Ui.Accent : Ui.Muted;
         }
         if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup();
         else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
         chatFooter.Controls.Add(Button("QuickStart", () => { using var help = new HelpForm(2); help.ShowDialog(this); }));
+        } finally {
+        Ui.ApplyTheme(chatContent); Ui.ApplyTheme(chatFooter); chatContent.ResumeLayout(true); chatFooter.ResumeLayout(true);
+        }
     }
     private void BuildChatAccounts() {
         var body = Ui.Grid(Ui.Auto(), Ui.Auto(), Ui.Fill()); chatContent.Controls.Add(body);
@@ -56,7 +61,7 @@ public sealed partial class ShellForm {
         })]); body.Controls.Add(actions, 0, 1);
         chatList = Ui.List(("Account", 180), ("Platform", 100), ("AccountSize", 125)); chatList.MultiSelect = false;
         chatList.Name = "chat-accounts"; body.Controls.Add(chatList, 0, 2);
-        foreach (var location in locations) Ui.Row(chatList, location, location.Account, location.Platform.ToString(), Ui.Size(location.DatabaseBytes));
+        foreach (var location in locations) AddAccountRow(location);
         chatNext = Button("Next", () => {
             if (chatList.SelectedItems.Count != 1) throw new InvalidOperationException(L.T("NoAccountSelected"));
             var selected = (ChatLocation)chatList.SelectedItems[0].Tag!;
@@ -67,16 +72,19 @@ public sealed partial class ShellForm {
         chatList.SelectedIndexChanged += (_, _) => chatNext.Enabled = chatList.SelectedItems.Count == 1;
         chatFooter.Controls.Add(chatNext);
     }
-    private async Task DiscoverChats(string? root) => await Run(async _ => {
-        var found = await Task.Run(() => ChatDiscovery.Discover(root == null ? null : [root]));
-        locations = found.GroupBy(l => (l.Platform, l.Directory)).Select(group => {
-            var first = group.First(); return first with { DatabaseBytes = group.Sum(l => l.DatabaseBytes) };
-        }).ToList();
+    private async Task DiscoverChats(string? root) => await Run(async token => {
+        var progress = Progress();
+        locations = await Task.Run(() => ChatDiscovery.Discover(root == null ? null : [root], progress, token));
         chatList.BeginUpdate(); chatList.Items.Clear();
-        foreach (var location in locations) Ui.Row(chatList, location, location.Account, location.Platform.ToString(), Ui.Size(location.DatabaseBytes));
+        foreach (var location in locations) AddAccountRow(location);
         chatList.EndUpdate(); status.Text = locations.Count == 0 ? L.T("NoAccounts") : L.T("SelectAccount");
         if (chatList.Items.Count == 1) chatList.Items[0].Selected = true;
     });
+    private void AddAccountRow(ChatLocation location) {
+        Ui.Row(chatList, location, location.Account, location.Platform.ToString(), location.AccountBytes is long bytes ?
+            (location.SizeComplete ? Ui.Size(bytes) : L.T("AtLeastSize", Ui.Size(bytes))) : L.T("SizeNotScanned"));
+        chatList.Items[^1].ToolTipText = L.T("AccountSizeDetails", Ui.Size(location.DatabaseBytes), location.AccountFiles);
+    }
     private ChatLocation Account() => activeChat ?? throw new InvalidOperationException(L.T("NoAccountSelected"));
     private void OpenChatBackup() {
         using var dialog = new OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("OpenChatBackup") };
@@ -103,10 +111,10 @@ public sealed partial class ShellForm {
         var source = new TextBox { Dock = DockStyle.Top, ReadOnly = true, Text = location.Directory,
             BackColor = Ui.Canvas, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 10, 0, 18) };
         body.Controls.Add(source, 0, 2);
-        var destination = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
+        var destination = new BufferedGrid { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
         destination.ColumnStyles.Add(new(SizeType.Absolute, 110)); destination.ColumnStyles.Add(new(SizeType.Percent, 100));
         destination.ColumnStyles.Add(new(SizeType.AutoSize));
-        destination.Controls.Add(Ui.Text(L.T("BackupTo")), 0, 0); backupInput = Ui.Input(); backupInput.Text = preferences.BackupRoot;
+        destination.Controls.Add(Ui.FieldLabel(L.T("BackupTo")), 0, 0); backupInput = Ui.Input(); backupInput.Text = preferences.BackupRoot;
         destination.Controls.Add(backupInput, 1, 0);
         destination.Controls.Add(Button("Browse", () => { string path = Ui.Folder(this, backupInput.Text); if (path != "") backupInput.Text = path; }), 2, 0);
         body.Controls.Add(destination, 0, 3);
@@ -223,7 +231,7 @@ public sealed partial class ShellForm {
             if (NeedsKey() && key == null) throw new InvalidOperationException(L.T("ExportKeyMissing"));
             keyInput?.Clear();
             await Run(async token => {
-                var progress = Progress(); var result = await Task.Run(() => new ChatExporter().ExportVerifiedBackup(
+                var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism).ExportVerifiedBackup(
                     activeManifest!, target, account.Platform, key, progress, token));
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 chatStep = 3; SetCapturedKey(null); RenderChatStage();
@@ -232,15 +240,19 @@ public sealed partial class ShellForm {
         } finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
     }
     private void BuildChatFinished() {
-        var body = Ui.Grid(Ui.Auto(), Ui.Auto(), Ui.Auto(), Ui.Fill()); chatContent.Controls.Add(body);
+        var body = Ui.Grid(Ui.Auto(), Ui.Auto(), Ui.Auto(), Ui.Auto(), Ui.Fill()); chatContent.Controls.Add(body);
         body.Controls.Add(Ui.Text(L.T("ArchiveFinished"), true), 0, 0);
         body.Controls.Add(Ui.Text(L.T(readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), 0, 1);
         var paths = new TextBox { Dock = DockStyle.Top, Multiline = true, ReadOnly = true, Height = 95, ScrollBars = ScrollBars.Vertical,
             BackColor = Ui.Canvas, Text = ArchiveDirectory() + (readingDirectory == null ? "" : Environment.NewLine + readingDirectory), Margin = new Padding(0, 12, 0, 16) };
-        body.Controls.Add(paths, 0, 2);
+        if (exportReport != null && File.Exists(exportReport)) {
+            var report = JsonFiles.Read<ChatExportResult>(exportReport);
+            body.Controls.Add(Ui.Text(L.T("ReadingCoverage", report.Contacts, report.MediaFiles, report.UnresolvedMedia)), 0, 2);
+        }
+        body.Controls.Add(paths, 0, 3);
         chatFooter.Controls.Add(Button("NewChatArchive", () => { chatStep = 0; activeChat = null; activeManifest = null; SetCapturedKey(null); RenderChatStage(); }, true));
         chatFooter.Controls.Add(Button("OpenBackup", () => OpenFolder(ArchiveDirectory())));
-        if (readingDirectory != null) chatFooter.Controls.Add(Button("OpenReading", () => OpenFile(Path.Combine(readingDirectory, "messages.html"))));
+        if (readingDirectory != null && File.Exists(Path.Combine(readingDirectory, "messages.html"))) chatFooter.Controls.Add(Button("OpenReading", () => { using var reader = new ChatReaderForm(readingDirectory, dataRoot); reader.ShowDialog(this); }));
         if (exportReport != null) chatFooter.Controls.Add(Button("OpenReport", () => OpenFile(exportReport)));
     }
 }

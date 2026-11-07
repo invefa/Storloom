@@ -67,7 +67,11 @@ public sealed class RuleMatcher {
                 string.IsNullOrWhiteSpace(rule.DestinationRoot)) ||
             (rule.Action == CleanupAction.Command && (rule.Tool == null || !Enum.IsDefined(rule.Tool.Value) ||
                 rule.Roots.Length != 0 || rule.DestinationRoot != null || rule.Risk != RiskLevel.Review)) ||
-            (rule.Action != CleanupAction.Command && rule.Tool != null)) {
+            (rule.Action != CleanupAction.Command && (rule.Tool != null || rule.Measurement != null)) ||
+            (rule.Measurement is CacheMeasureSpec measure && (!Enum.IsDefined(measure.Mode) ||
+                (measure.Mode != CacheMeasureMode.Directories && measure.Roots.Length != 0) ||
+                (measure.Mode == CacheMeasureMode.ToolReport && rule.Tool != CleanupTool.PipCache) ||
+                (measure.Mode == CacheMeasureMode.Directories && measure.Roots.Length == 0)))) {
             throw new InvalidDataException($"Invalid rule: {rule.Id}");
         }
         includes = rule.Include.Select(Glob.Compile).ToArray();

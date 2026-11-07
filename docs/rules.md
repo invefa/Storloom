@@ -104,3 +104,24 @@ Official references: [NuGet](https://learn.microsoft.com/en-us/dotnet/core/tools
 The default selected sets are system, browsers, and development. Optional sets add desktop-apps, communication-cn, media-cn, and native-tools. `builtin.json` contains the system category, not every category. CLI defaults load the manifest defaults; `--catalog` loads exactly that file.
 
 A GUI archive treatment does not rewrite the rule definition. It creates a verified transfer plan from the same scanned, checked matches. Destinations are separated by rule ID, source-root hash, and a fresh run directory. It cannot convert a Command rule to a file archive. Scan plans save candidate matches; reselect and review treatment after loading a saved plan. File rule links remain blocked; explicitly name a verified physical cache leaf in local overrides instead of following a broad junction.
+
+## Native cache measurements
+
+A Command rule accepts an optional measurement object. The default is `{"mode":"Tool"}`. Storloom runs a fixed read-only location query (`dotnet nuget locals http-cache --list`, `node <npm-cli.js> config get cache`, `python -m pip cache dir`, or `uv cache dir`), parses the canonical local directory, and scans its logical size. npm measures `_cacache`, matching the cleanup recipe. These queries have a 30-second upper limit, bounded output, and cancellation. They never accept arbitrary executable names, shell expressions, or output parsing code from a rule. A missing cache is zero; an inaccessible, linked, unsupported, or timed-out measurement is unknown.
+
+For a verified relocated cache, choose explicit roots:
+
+```json
+"measurement": {
+  "mode": "Directories",
+  "roots": ["%LocalAppData%\\ExampleApp\\Cache"]
+}
+```
+
+Explicit measurement roots are read-only, use the same token/glob resolver, reject links and entire drives, and must not be confused with deletion roots. File rules cannot define measurement. Overlapping measurement roots are counted once. Measurements do not authorize extra cleanup paths; the native tool still owns its cache scope.
+
+The executor measures again immediately before and after running the tool. The result records beforeBytes, afterBytes, and freedBytes. Differences use logical file sizes, can be negative if concurrent writes grew the cache, and are not filesystem allocated-space guarantees. Partial/unknown scans produce no released-byte claim. File deletions use the bytes of files actually removed; archive copies report zero source bytes released.
+
+Adding rule fields changes catalog hashes; rescan old cleanup plans before applying them.
+
+For pip only, `{"mode":"ToolReport"}` calls `python -m pip cache info` and parses its HTTP/wheel size totals. This native report rounds decimal sizes, so previews use a `~` prefix. Cleanup still performs exact directory measurements before and after execution; it never subtracts rounded estimates to claim released bytes. Unsupported native report formats remain unknown. Other tools currently use Tool directory discovery or explicit Directories measurements.
