@@ -77,6 +77,16 @@ foreach ($file in $ownFiles) {
             if ($file.Name -eq 'Storloom.dll' -and $encoding.CodePage -eq 1200 -and
                 $marker.Equals($publicDeveloper, [StringComparison]::OrdinalIgnoreCase)) {
                 $inspect = $inspect.Replace(': ' + $publicDeveloper, '').Replace($publicRepository, '')
+                # C# also stores const field values as length-prefixed UTF-16 metadata blobs.
+                # Mask only complete blobs; never remove bare names from arbitrary paths/text.
+                $metadataHex = [Convert]::ToHexString($bytes)
+                foreach ($value in @($publicDeveloper, $publicRepository)) {
+                    $payload = [Text.Encoding]::Unicode.GetBytes($value)
+                    if ($payload.Length -ge 128) { throw 'Public attribution exceeds the supported metadata blob size.' }
+                    $blob = $payload.Length.ToString('X2') + [Convert]::ToHexString($payload)
+                    $metadataHex = $metadataHex.Replace($blob, ('00' * ($payload.Length + 1)))
+                }
+                $inspect = $encoding.GetString([Convert]::FromHexString($metadataHex)).Replace(': ' + $publicDeveloper, '').Replace($publicRepository, '')
             }
             if ($inspect.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
                 throw "Machine-specific content found in $($file.Name); packaging stopped."
