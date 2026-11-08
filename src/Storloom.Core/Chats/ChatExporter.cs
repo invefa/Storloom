@@ -33,6 +33,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
     public Dictionary<string, double> PhaseSeconds { get; init; } = [];
     public long VerifiedBackupBytes { get; init; }
     public bool BackupReverified { get; init; }
+    public bool CanResume { get; init; }
 }
 
 public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false) {
@@ -44,7 +45,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
 
     public ChatExportResult ExportVerifiedBackup(string manifestPath, string destination,
         ChatPlatform platform, byte[]? secret = null, IProgress<ScanProgress>? progress = null,
-        CancellationToken cancellation = default, bool verifyBackup = true) {
+        CancellationToken cancellation = default, bool verifyBackup = true, bool resume = false) {
         cancellation.ThrowIfCancellationRequested();
         var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
         var verificationClock = System.Diagnostics.Stopwatch.StartNew();
@@ -89,12 +90,12 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             verifiedFiles++;
         }
         return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false,
-            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup);
+            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume);
     }
 
     private ChatExportResult ExportCore(string source, string destination, ChatPlatform platform,
         byte[]? secret, IProgress<ScanProgress>? progress, CancellationToken cancellation,
-        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false) {
+        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination);
         if (PathPolicy.Under(destination, source) || PathPolicy.Under(source, destination) ||
@@ -103,18 +104,40 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         string[] processNames = platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"];
         if (requireClosedClient && CleanupEngine.RunningProcesses(new CleanupRule { Processes = processNames }).Length > 0)
             throw new IOException("Close the chat client before exporting a consistent snapshot.");
-        if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Export destination must be new.");
+        if (!resume && (Directory.Exists(destination) || File.Exists(destination))) throw new IOException("Export destination must be new.");
+        if (resume && (verified == null || !Directory.Exists(destination))) throw new InvalidDataException("Resume requires an existing checkpoint and verified backup.");
+        if (resume && !File.Exists(Path.Combine(destination, "export-progress.json")))
+            throw new InvalidDataException("This export has no supported checkpoint. Exports started by older versions cannot be resumed.");
         string[] databases = FindDatabases(source, platform).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         if (databases.Length == 0) throw new InvalidDataException("No supported message databases found.");
         Directory.CreateDirectory(destination); PathPolicy.AssertNoLinks(destination);
-        string work = Path.Combine(destination, ".work-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(work);
+        string lockPath = Path.Combine(destination, ".export.lock"); if (File.Exists(lockPath)) PathPolicy.AssertNoLinks(lockPath);
+        using var lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        string progressPath = Path.Combine(destination, "export-progress.json");
+        string identity = verified == null ? "" : JsonFiles.Hash(new { Pipeline = 1, Language = L.Language, LocalImages = useLocalImageConfiguration,
+            Receipts = verified.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).ToArray() });
+        var checkpoint = resume ? JsonFiles.Read<ChatExportProgress>(progressPath) : new ChatExportProgress {
+            Source = source, Platform = platform, Identity = identity, Work = ".work-" + Guid.NewGuid().ToString("N") };
+        if (checkpoint.Version != 1 || checkpoint.Finished || checkpoint.Source != source || checkpoint.Platform != platform || checkpoint.Identity != identity ||
+            !Regex.IsMatch(checkpoint.Work, "^\\.work-[a-f0-9]{32}$")) throw new InvalidDataException("Export checkpoint does not match this backup or export format.");
+        string work = TransferService.Child(destination, checkpoint.Work);
+        if (resume) {
+            progress?.Report(new("chat-resume", 0, 0));
+            PathPolicy.AssertNoLinks(work);
+            foreach (var pair in checkpoint.Databases) {
+                if (pair.Key < 0 || pair.Key >= databases.Length || pair.Value.Messages < 0 || pair.Value.File.Path != Path.Combine(checkpoint.Work, $"{pair.Key}.jsonl"))
+                    throw new InvalidDataException("Invalid database export checkpoint.");
+                ExportProgressFiles.Validate(destination, pair.Value.File, false, cancellation);
+            }
+        } else { Directory.CreateDirectory(work); if (verified != null) JsonFiles.Write(progressPath, checkpoint); }
+        object checkpointGate = new(); bool readerFinished = false;
         var issues = new System.Collections.Concurrent.ConcurrentBag<ScanIssue>();
         if (platform == ChatPlatform.QQ)
             foreach (string database in EnumerateDatabases(source, platform).Where(p => IsQQGuildDatabase(source, p)))
                 issues.Add(new("chat-export", Path.GetRelativePath(source, database),
                     "QQ Guild uses a separate database key and is not included in this reading export. Its files remain in the raw backup."));
         var contacts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        int completed = 0; long messages = 0;
+        int completed = checkpoint.Databases.Count; long messages = checkpoint.Databases.Values.Sum(d => d.Messages);
         var weights = new long[databases.Length]; var databaseBytes = databases.Select(p => new FileInfo(p).Length).ToArray();
         var decryptWeights = new long[databases.Length];
         long totalDatabaseBytes = databaseBytes.Sum();
@@ -134,7 +157,10 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 finally { DeletePlain(plain); }
             }
             Parallel.For(0, databases.Length, new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellation }, index => {
+                bool alreadyParsed; lock (checkpointGate) alreadyParsed = checkpoint.Databases.ContainsKey(index);
+                if (alreadyParsed) { Interlocked.Exchange(ref weights[index], databaseBytes[index]); return; }
                 string database = databases[index], plain = Path.Combine(work, $"{index}.db"), output = Path.Combine(work, $"{index}.jsonl");
+                string pending = output + ".parsing";
                 try {
                     long preparedBytes = 0; for (int i = 0; i < decryptWeights.Length; i++) preparedBytes += Interlocked.Read(ref decryptWeights[i]);
                     progress?.Report(new("chat-decrypt", Volatile.Read(ref completed), preparedBytes, totalDatabaseBytes, Detail: Path.GetFileName(database)));
@@ -147,7 +173,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                     using var reader = new SqliteReader(plain, shifted);
                     if (reader.Query("PRAGMA quick_check", cancellation).Any(r => r[0]?.ToString() != "ok")) throw new InvalidDataException("SQLite integrity check failed.");
                     long totalRows = CountMessages(reader, platform, cancellation), parsedRows = 0;
-                    using var writer = new StreamWriter(output, false, new UTF8Encoding(false), 128 * 1024);
+                    using var writer = new StreamWriter(pending, false, new UTF8Encoding(false), 128 * 1024);
                     foreach (var message in ReadMessages(reader, platform, cancellation)) {
                         writer.WriteLine(JsonSerializer.Serialize(message));
                         long count = Interlocked.Increment(ref messages);
@@ -160,47 +186,52 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                         }
                     }
                     Interlocked.Exchange(ref weights[index], databaseBytes[index]);
+                    writer.Flush(); writer.Close(); File.Move(pending, output, true);
+                    if (verified != null) lock (checkpointGate) {
+                        checkpoint.Databases[index] = new(parsedRows, ExportProgressFiles.Proof(destination, output)); JsonFiles.Write(progressPath, checkpoint);
+                    }
                     Interlocked.Increment(ref completed);
                 } catch (Exception ex) when (ExportFailure(ex)) { issues.Add(new("chat-export", Path.GetRelativePath(source, database), ex.Message)); }
-                finally { DeletePlain(plain); }
+                finally { DeletePlain(plain); if (File.Exists(pending)) File.Delete(pending); }
             });
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration);
+            if (verified != null && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null);
+            progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {
                 string output = Path.Combine(work, $"{index}.jsonl"); if (!File.Exists(output)) continue;
                 foreach (string line in File.ReadLines(output)) {
                     cancellation.ThrowIfCancellationRequested();
+                    if (assembled++ < archive.ProcessedMessages) continue;
                     var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid parsed message.");
                     archive.Add(message);
-                    if (++assembled % 300 == 0) progress?.Report(new("chat-reader", (int)Math.Min(assembled, int.MaxValue), 0,
+                    if (assembled % 300 == 0) progress?.Report(new("chat-reader", (int)Math.Min(assembled, int.MaxValue), 0,
                         TotalFiles: (int)Math.Min(messages, int.MaxValue), Detail: message.Conversation));
                 }
-                File.Delete(output);
             }
             archive.Finish(progress);
+            readerFinished = true;
         } catch (OperationCanceledException) {
+            archive?.SaveSafeProgress();
             issues.Add(new("chat-export", "", "Export cancelled; output is incomplete."));
-            if (!File.Exists(Path.Combine(destination, "messages.jsonl"))) {
-                using var partial = new StreamWriter(Path.Combine(destination, "messages.jsonl"));
-                foreach (string parsed in Directory.GetFiles(work, "*.jsonl").Where(p => int.TryParse(Path.GetFileNameWithoutExtension(p), out _)).Order())
-                    foreach (string line in File.ReadLines(parsed)) partial.WriteLine(line);
-            }
         }
         catch (Exception ex) when (ExportFailure(ex) || ex is AggregateException) { issues.Add(new("chat-export", "", ex.Message)); }
         finally {
             archive?.Dispose();
-            // This invocation owns this exact fresh work directory, including decrypted temporary files.
-            if (PathPolicy.Under(work, destination) && Directory.Exists(work)) Directory.Delete(work, true);
+            // Retain committed JSON spools for resume, never decrypted temporary databases.
+            foreach (string file in Directory.GetFiles(work, "*.db*")) { PathPolicy.AssertNoLinks(file); File.Delete(file); }
+            if (verified != null) { checkpoint.Finished = readerFinished && completed == databases.Length; JsonFiles.Write(progressPath, checkpoint); }
+            if ((verified == null || checkpoint.Finished) && PathPolicy.Under(work, destination) && Directory.Exists(work)) Directory.Delete(work, true);
         }
         bool complete = issues.IsEmpty && completed == databases.Length && messages > 0 && (archive?.UnresolvedMedia ?? 0) == 0 && (archive?.UnsupportedMessages ?? 0) == 0;
-        if (!complete && File.Exists(Path.Combine(destination, "messages.jsonl")))
-            messages = File.ReadLines(Path.Combine(destination, "messages.jsonl")).LongCount();
+        if (!complete) messages = archive?.ProcessedMessages ?? 0;
         var result = new ChatExportResult(destination, messages, completed, issues.ToList(), complete) {
             Contacts = contacts.Count, MediaFiles = archive?.MediaFiles ?? 0, UnresolvedMedia = archive?.UnresolvedMedia ?? 0,
             UnsupportedMessages = archive?.UnsupportedMessages ?? 0,
             ElapsedSeconds = clock.Elapsed.TotalSeconds + verificationSeconds, Parallelism = parallelism,
             BackupReverified = backupReverified, VerifiedBackupBytes = backupReverified ? verified?.Values.Sum(e => e.Bytes) ?? 0 : 0,
+            CanResume = verified != null && !checkpoint.Finished,
             PhaseSeconds = new() { ["backupVerification"] = verificationSeconds, ["databaseProcessing"] = databaseSeconds,
                 ["readerIndex"] = readerStarted > 0 ? clock.Elapsed.TotalSeconds - readerStarted : 0 } };
         JsonFiles.Write(Path.Combine(destination, "export-report.json"), result); return result;

@@ -11,6 +11,16 @@ Reviewed 2026-11-07 using upstream source and licenses. These are independent pr
 
 ## Current implementation
 
+### Performance and resumable reading exports
+
+Backup selection and header inspection run on a worker; rendering reuses their immutable result. The actual export revalidates its manifest and backup. Reader assembly serializes each message once, caches conversation IDs, and batches append-only spools with an 8 Mi-character buffer budget rather than opening a file for every interleaved message. A local synthetic 30,000-message / 128-interleaved-conversation comparison reduced assembly from about 13.4 seconds to under 1 second. This is a stage benchmark, not a real-backup completion-time promise.
+
+Verified-backup exports create `export-progress.json` and retain committed JSON spools inside their own `.work-*` directory after interruption. Completed databases are reused; an interrupted database that has not committed restarts. Reader progress is committed about every 30 seconds, on safe cancellation, and at phase boundaries; finished conversation pages are reused. Resume validates backup identity, settings, file sizes and SHA-256 prefixes, verifies existing media, and discards only uncommitted output tails. It refuses altered checkpoints, incompatible inputs and concurrent writers. Keys are never stored: encrypted backups require a newly supplied or captured key. Decrypted database working files are removed after cancellation.
+
+In the GUI, load the same raw backup, obtain its key if needed, click **Resume reading export**, and choose the interrupted reading-export folder. CLI: `chat-export --platform QQ --backup MANIFEST.json --destination EXISTING_FOLDER --resume` with the same image/language settings and key options. Keep `export-progress.json` and `.work-*` together; these contain private chat export data. Successful completion removes temporary spools. Exports started before version 0.6.7 have no checkpoint and cannot be adopted by this feature. Running tasks are not upgraded in place.
+
+The operation bar remains visible while working, with a phase percentage or an activity indicator when totals are unknown. Resume throughput and ETA use work completed since the resume, excluding already completed messages.
+
 QQ account discovery, key validation and reading export select the main `nt_qq/nt_db/nt_msg.db` independently of filesystem enumeration order. QQ Guild's identically named database uses a separate key: it remains in the raw backup, is excluded from the main-chat reader, and is recorded as an unsupported database in the export report. A reading export containing such a database is reported incomplete.
 
 Wrapped NTQQ databases can include preallocated zero-filled space beyond the logical SQLite page count. Storloom reads that count from the authenticated first page only when its change counter matches the version-valid-for counter, checks every byte beyond that boundary is zero, and excludes that padding from the decrypted working copy. Active pages still require authentication; stale size headers, truncated databases and nonzero tails are rejected. The source and raw backup remain unchanged. Failed or partial exports display their errors and do not report a successful operation; a failure with no exported databases does not offer an empty reader.

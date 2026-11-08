@@ -328,7 +328,7 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Fact]
-    public void CancelledExportProducesAnIncompleteReportAndRemovesPlaintextWork() {
+    public void CancelledExportRetainsResumeProgressButRemovesDecryptedDatabases() {
         string source = Dir("account");
         CreateDatabase(Path.Combine(source, "nt_msg.db"),
             "CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");" +
@@ -341,10 +341,77 @@ public sealed class StorageAndChatTests : IDisposable {
         string export = Path.Combine(root, "export");
         var result = new ChatExporter().ExportVerifiedBackup(backup.Manifest, export, ChatPlatform.QQ,
             progress: progress, cancellation: cancel.Token);
-        Assert.False(result.Complete); Assert.Equal(500, result.Messages);
+        Assert.False(result.Complete); Assert.Equal(0, result.Messages); Assert.True(result.CanResume);
         Assert.NotEmpty(result.Issues); Assert.True(File.Exists(Path.Combine(export, "export-report.json")));
-        Assert.Empty(Directory.GetDirectories(export, ".work-*"));
+        Assert.Empty(Directory.GetFiles(export, "*.db*", SearchOption.AllDirectories));
+        Assert.True(File.Exists(Path.Combine(export, "export-progress.json")));
         Assert.True(File.Exists(Path.Combine(source, "nt_msg.db")));
+    }
+
+    [Fact]
+    public void ResumeReusesParsedDatabasesAndDoesNotDuplicateMessages() {
+        string source=Dir("account");
+        CreateDatabase(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");WITH RECURSIVE seq(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM seq WHERE x<901) INSERT INTO c2c_msg_table SELECT x%32,2,x,'fixture' FROM seq;");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(root,"raw")),Dir("journals"));
+        using var cancel=new CancellationTokenSource();string target=Path.Combine(root,"reading");
+        var first=new ChatExporter().ExportVerifiedBackup(backup.Manifest,target,ChatPlatform.QQ,
+            progress:new ImmediateProgress(p=>{if(p.RuleId=="chat-reader"&&p.Files>=300)cancel.Cancel();}),cancellation:cancel.Token);
+        Assert.True(first.CanResume);Assert.Equal(300,first.Messages);
+        var stages=new List<string>();
+        var resumed=new ChatExporter().ExportVerifiedBackup(backup.Manifest,target,ChatPlatform.QQ,
+            progress:new ImmediateProgress(p=>stages.Add(p.RuleId)),verifyBackup:false,resume:true);
+        Assert.True(resumed.Complete);Assert.False(resumed.CanResume);Assert.Equal(901,resumed.Messages);
+        Assert.DoesNotContain("chat-decrypt",stages);Assert.DoesNotContain("chat-export",stages);
+        var records=File.ReadLines(Path.Combine(target,"messages.jsonl")).Select(line=>System.Text.Json.JsonSerializer.Deserialize<ChatMessage>(line)!).ToArray();
+        Assert.Equal(901,records.Select(m=>m.Id).Distinct().Count());Assert.Equal(901,records.Select(m=>m.Timestamp).Distinct().Count());
+        Assert.Empty(Directory.GetDirectories(target,".work-*"));
+    }
+
+    [Fact]
+    public void ResumeRejectsChangedParsedCheckpointFilesWithoutOverwritingThem() {
+        string source=Dir("account");CreateDatabase(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1,'fixture');");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(root,"raw")),Dir("journals"));
+        using var cancel=new CancellationTokenSource();string target=Path.Combine(root,"reading");
+        new ChatExporter().ExportVerifiedBackup(backup.Manifest,target,ChatPlatform.QQ,
+            progress:new ImmediateProgress(p=>{if(p.RuleId=="chat-reader")cancel.Cancel();}),cancellation:cancel.Token);
+        string parsed=Directory.GetFiles(target,"0.jsonl",SearchOption.AllDirectories).Single();File.AppendAllText(parsed,"modified");
+        string before=File.ReadAllText(parsed);
+        Assert.Throws<InvalidDataException>(()=>new ChatExporter().ExportVerifiedBackup(backup.Manifest,target,ChatPlatform.QQ,verifyBackup:false,resume:true));
+        Assert.Equal(before,File.ReadAllText(parsed));
+    }
+
+    [Fact]
+    public void ResumeRefusesAnOldExportFolderWithoutCreatingFiles() {
+        string source=Dir("account");CreateDatabase(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(root,"raw")),Dir("journals"));
+        string old=Dir("old-export");FileIn(old,"messages.jsonl","synthetic old export");
+        Assert.Throws<InvalidDataException>(()=>new ChatExporter().ExportVerifiedBackup(backup.Manifest,old,ChatPlatform.QQ,verifyBackup:false,resume:true));
+        Assert.Single(Directory.GetFiles(old));Assert.Equal("synthetic old export",File.ReadAllText(Path.Combine(old,"messages.jsonl")));
+    }
+
+    [Fact]
+    public void ReaderCheckpointsRollbackUncommittedTailsAndKeepFinishedPages() {
+        string source=Dir("source"),target=Dir("reading"),work=Dir("reading/work");
+        ChatMessage Message(int i)=>new("QQ","group:"+(i%32),"fixture",i,1,"fixture message");
+        using(var writer=new ChatArchiveWriter(source,target,work,new(),null,default,"fixture",resumable:true)) {
+            for(int i=0;i<200;i++)writer.Add(Message(i));writer.SaveProgress();
+            for(int i=200;i<300;i++)writer.Add(Message(i));
+        }
+        using var cancel=new CancellationTokenSource();
+        using(var writer=new ChatArchiveWriter(source,target,work,new(),null,cancel.Token,"fixture",resumable:true)) {
+            Assert.Equal(200,writer.ProcessedMessages);
+            for(int i=200;i<500;i++)writer.Add(Message(i));
+            Assert.Throws<OperationCanceledException>(()=>writer.Finish(new ImmediateProgress(p=>{if(p.RuleId=="chat-pages")cancel.Cancel();})));
+            Assert.True(writer.SpoolWrites<64);
+        }
+        string page=Directory.GetFiles(Path.Combine(target,"conversations"),"*-0.js").Single();DateTime modified=File.GetLastWriteTimeUtc(page);
+        using(var writer=new ChatArchiveWriter(source,target,work,new(),null,default,"fixture",resumable:true)) {
+            Assert.Equal(500,writer.ProcessedMessages);writer.Finish(null);
+        }
+        Assert.Equal(modified,File.GetLastWriteTimeUtc(page));
+        var records=File.ReadLines(Path.Combine(target,"messages.jsonl")).Select(line=>System.Text.Json.JsonSerializer.Deserialize<ChatMessage>(line)!).ToArray();
+        Assert.Equal(500,records.Length);Assert.Equal(500,records.Select(m=>m.Id).Distinct().Count());
+        Assert.Equal(32,Directory.GetFiles(Path.Combine(target,"conversations"),"*-0.js").Length);
     }
 
     [Theory]
@@ -399,7 +466,8 @@ public sealed class StorageAndChatTests : IDisposable {
             for(int offset=0;offset<data.Length;offset+=4096)output.Write(EncryptPage(data.AsSpan(offset,4096).ToArray(),secret,salt,(uint)(offset/4096+1),parameters));
             output.Write(new byte[4096*4]);
         }
-        var result=new ChatExporter().Export(account,Path.Combine(root,"reading"),ChatPlatform.QQ,secret);
+        var service=new TransferService();var backup=service.Execute(service.Plan(account,Path.Combine(root,"raw")),Dir("journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.QQ,secret);
         Assert.True(result.Complete);Assert.Equal(1,result.Databases);Assert.Equal(1,result.Messages);
         Assert.Equal(1024+data.Length+4096*4,new FileInfo(encrypted).Length);
     }

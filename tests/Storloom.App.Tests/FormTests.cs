@@ -782,6 +782,43 @@ public sealed class FormTests {
     });
 
     [Fact]
+    public void PreparedBackupViewsDoNotReopenTheManifestOrDatabaseOnTheUiThread() => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),raw=Path.Combine(fixture,"raw");Directory.CreateDirectory(source);
+        File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,raw),Path.Combine(fixture,"journals"));
+        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        try {
+            window.Show();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            type.GetField("activeChat",flags)!.SetValue(window,new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));
+            var load=(Task)type.GetMethod("UseChatBackup",flags)!.Invoke(window,new object[]{backup.Manifest})!;
+            bool dispatched=false;window.Dispatcher.BeginInvoke(new Action(()=>dispatched=true));Pump();Assert.True(dispatched);Wait(AsResult(load));
+            File.Move(backup.Manifest,backup.Manifest+".unavailable");
+            using var held=new FileStream(Path.Combine(raw,"nt_msg.db"),FileMode.Open,FileAccess.Read,FileShare.None);
+            type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();
+            Assert.Contains(Descendants(window).OfType<Button>(),b=>Equals(b.Content,L.T("ResumeReading")));
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void OperationProgressRemainsVisibleAndShowsTheCurrentPhaseFraction(AppTheme theme) => OnUi(() => {
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        var panel=new OperationPanel();var window=new ThemeWindow("Progress fixture",900,420){ShowInTaskbar=false};window.Body.Children.Add(panel);
+        try {
+            window.Show();panel.Start();panel.Report(new("chat-reader",75,0,TotalFiles:100));Pump();window.UpdateLayout();
+            var bar=Descendants(panel).OfType<ProgressBar>().Single();
+            Assert.True(bar.IsVisible);Assert.InRange(bar.ActualHeight,6,10);Assert.Equal(.75,bar.Value,3);
+            var track=(FrameworkElement)bar.Template.FindName("PART_Track",bar);var indicator=(FrameworkElement)bar.Template.FindName("PART_Indicator",bar);
+            Assert.InRange(indicator.ActualWidth/track.ActualWidth,.74,.76);
+            panel.Report(new("chat-resume",0,0));Pump();Assert.True(bar.IsVisible);Assert.True(bar.IsIndeterminate);
+            panel.ToggleExpanded();panel.Height=56;Pump();window.UpdateLayout();
+            Assert.InRange(bar.TranslatePoint(new Point(0,bar.ActualHeight),panel).Y,0,panel.ActualHeight);
+            panel.Finish("Fixture complete",true);panel.Start();Pump();Assert.True(bar.IsVisible);Assert.True(bar.IsIndeterminate);Assert.Equal(0,bar.Value);
+        } finally {window.Close();}
+    });
+
+    [Fact]
     public void FailedReadingExportShowsErrorsAndDoesNotOfferAnEmptyReader() => OnUi(() => {
         string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);
         File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);

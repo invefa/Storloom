@@ -5,11 +5,15 @@ using Storloom.Core.Chats;
 
 namespace Storloom.App;
 public sealed partial class ShellWindow {
+    private sealed record PreparedChatArchive(string Manifest, string Source, string Directory, ChatLocation Location, bool Encrypted);
+    private PreparedChatArchive? preparedArchive;
     private ChatLocation Account() => activeChat ?? throw new InvalidOperationException(L.T("NoAccountSelected"));
 
-    private void OpenChatBackup() {
+    private async void OpenChatBackup() {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("OpenChatBackup") };
         if (dialog.ShowDialog(this) != true) return;
+        await Run(async token => {
+        var selected = await Task.Run(() => {
         var manifest = JsonFiles.Read<TransferJournal>(dialog.FileName);
         string directory = PathPolicy.Normalize(manifest.Plan.Destination);
         if (directory.Length <= 3) throw new InvalidDataException("A backup must be a specific account directory.");
@@ -19,38 +23,47 @@ public sealed partial class ShellWindow {
         if (database == null) { platform = ChatPlatform.WeChat; database = ChatExporter.FindDatabases(directory, platform).FirstOrDefault(); }
         if (database == null) throw new InvalidDataException("No supported message database found in this archive.");
         string source = PathPolicy.Normalize(manifest.Plan.Source);
-        activeChat = new(platform, source, Path.GetFileName(source),
+        var account = new ChatLocation(platform, source, Path.GetFileName(source),
             TransferService.Child(source, Path.GetRelativePath(directory, database)), new FileInfo(database).Length);
-        activeManifest = dialog.FileName; _ = ArchiveDirectory(); SetCapturedKey(null);
+        return (account, archive: ReadChatArchive(dialog.FileName, account, manifest));
+        }, token);
+        activeChat = selected.account; activeManifest = dialog.FileName; preparedArchive = selected.archive; SetCapturedKey(null);
         readingDirectory = exportReport = null; chatStep = 2; RenderChatStage(); Navigate("chats");
+        });
     }
 
-    private string ArchiveDirectory() {
-        if (activeManifest == null) throw new InvalidOperationException(L.T("ScanFirst"));
-        var journal = JsonFiles.Read<TransferJournal>(activeManifest);
-        if (!journal.Plan.Source.Equals(Account().Directory, StringComparison.OrdinalIgnoreCase) ||
+    private static PreparedChatArchive ReadChatArchive(string manifest, ChatLocation account, TransferJournal? journal = null) {
+        journal ??= JsonFiles.Read<TransferJournal>(manifest);
+        if (!journal.Plan.Source.Equals(account.Directory, StringComparison.OrdinalIgnoreCase) ||
             journal.State is not ("Verified" or "Completed" or "CopiedWithRetainedSources" or "CancelledAfterVerification") ||
             journal.Receipts.Count != journal.Plan.Files.Count)
             throw new InvalidDataException("The selected account has no matching verified raw backup.");
         if (PathPolicy.Normalize(journal.Plan.Destination).Length <= 3)
             throw new InvalidDataException("A backup must be a specific account directory.");
-        PathPolicy.AssertNoLinks(journal.Plan.Destination); return journal.Plan.Destination;
+        string directory = PathPolicy.Normalize(journal.Plan.Destination);
+        PathPolicy.AssertNoLinks(directory);
+        string database = account.Platform == ChatPlatform.QQ ? ChatExporter.FindDatabases(directory, account.Platform).FirstOrDefault()
+            ?? throw new InvalidDataException("No supported QQ message database found in this archive.")
+            : TransferService.Child(directory, Path.GetRelativePath(account.Directory, account.Database));
+        PathPolicy.AssertNoLinks(database);
+        using var input = File.OpenRead(database); byte[] head = new byte[Math.Min(1040, input.Length)]; input.ReadExactly(head);
+        bool encrypted = !head.AsSpan().StartsWith("SQLite format 3\0"u8) && !(account.Platform == ChatPlatform.QQ && head.Length >= 1040 && head.AsSpan(1024).StartsWith("SQLite format 3\0"u8));
+        return new(manifest, account.Directory, directory, account with { Directory = directory, Database = database }, encrypted);
     }
-
-    private ChatLocation ArchiveAccount() {
-        string archived = ArchiveDirectory(); var account = Account();
-        string database = account.Platform == ChatPlatform.QQ
-            ? ChatExporter.FindDatabases(archived, account.Platform).FirstOrDefault() ?? throw new InvalidDataException("No supported QQ message database found in this archive.")
-            : TransferService.Child(archived, Path.GetRelativePath(account.Directory, account.Database));
-        return account with { Directory = archived, Database = database };
+    private PreparedChatArchive ChatArchive() {
+        if (activeManifest == null) throw new InvalidOperationException(L.T("ScanFirst"));
+        // UI entry points prepare this on a worker. Reuse the immutable view when rendering.
+        if (preparedArchive?.Manifest != activeManifest || preparedArchive.Source != Account().Directory)
+            preparedArchive = ReadChatArchive(activeManifest, Account());
+        return preparedArchive;
     }
-
-    private bool NeedsKey() {
-        var location = ArchiveAccount(); using var input = File.OpenRead(location.Database);
-        byte[] head = new byte[Math.Min(1040, input.Length)]; input.ReadExactly(head);
-        return !head.AsSpan().StartsWith("SQLite format 3\0"u8) && !(location.Platform == ChatPlatform.QQ &&
-            head.Length >= 1040 && head.AsSpan(1024).StartsWith("SQLite format 3\0"u8));
-    }
+    private string ArchiveDirectory() => ChatArchive().Directory;
+    private ChatLocation ArchiveAccount() => ChatArchive().Location;
+    private bool NeedsKey() => ChatArchive().Encrypted;
+    private async Task UseChatBackup(string manifest) => await Run(async token => {
+        var account = Account(); var archive = await Task.Run(() => ReadChatArchive(manifest, account), token);
+        activeManifest = manifest; preparedArchive = archive; chatStep = 2; RenderChatStage();
+    });
 
     private async Task BackupChat() {
         var location = Account(); string root = backupInput?.Text.Trim() ?? "";
@@ -72,6 +85,7 @@ public sealed partial class ShellWindow {
             if (result.Cancelled) { status.Text = L.T("Cancelled"); return; }
             if (result.Issues.Count > 0) throw new IOException("Raw backup was not completed. Inspect its journal.");
             activeManifest = result.Manifest; verifiedBackups[location.Directory] = result.Manifest;
+            preparedArchive = await Task.Run(() => ReadChatArchive(result.Manifest, location), token);
             JsonFiles.Write(Path.Combine(dataRoot, "chat-backups.json"), verifiedBackups);
             chatStep = 2; RenderChatStage(); status.Text = L.T("BackupVerified");
         });
@@ -95,9 +109,14 @@ public sealed partial class ShellWindow {
     }
     private IProgress<ChatDiagnostic> ChatDiagnostics() => new Progress<ChatDiagnostic>(value => { if (operation != null) operationView.AddDiagnostic(value); });
 
-    private async Task ExportChat() {
+    private Task ExportChat() => ExportChatTo(null);
+    private async Task ResumeChat() {
+        string directory = View.Folder(this);
+        if (directory != "") await ExportChatTo(directory);
+    }
+    private async Task ExportChatTo(string? resumeDirectory) {
         var account = Account(); string raw = ArchiveDirectory();
-        string target = raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
+        string target = resumeDirectory ?? raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
         byte[]? key = capturedKey?.ToArray();
         try {
             if (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password)) {
@@ -113,7 +132,7 @@ public sealed partial class ShellWindow {
             keyInput?.Clear();
             await Run(async token => {
                 var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true).ExportVerifiedBackup(
-                    activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup));
+                    activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup, resume: resumeDirectory != null));
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 operationIncomplete = !result.Complete;
                 foreach (var issue in result.Issues) operationView.AddLog($"[{issue.RuleId}] {issue.Path}: {issue.Reason}");

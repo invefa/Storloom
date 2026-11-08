@@ -20,13 +20,14 @@ public sealed class OperationPanel : Grid {
     public bool Expanded { get; private set; } = true;
     public event Action<bool>? ExpansionChanged;
     private readonly TextBlock state = View.Text(""), timing = View.Text("", color: "Muted");
-    private readonly ProgressBar progress = new() { Height = 2, MinHeight = 0, Maximum = 1, Margin = new Thickness(0, 3, 0, 0) };
+    private readonly ProgressBar progress = new() { Name = "operation_progress", Height = 6, MinHeight = 6, Maximum = 1, Margin = new Thickness(0, 5, 0, 3) };
     private readonly Stopwatch clock = new();
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly Button collapse;
     private ScanProgress? latest;
     private string phase = "", detail = "";
     private double phaseStart;
+    private long phaseStartDone;
     private bool followPending;
     private readonly Queue<string> retained = new();
     private int retainedCharacters;
@@ -43,6 +44,7 @@ public sealed class OperationPanel : Grid {
         state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
         row.Children.Add(state); View.Add(this, row, 0); View.Add(this, progress, 1); View.Add(this, Log, 2);
         progress.SetResourceReference(Control.ForegroundProperty, "Accent"); progress.SetResourceReference(Control.BackgroundProperty, "Line");
+        progress.SetResourceReference(FrameworkElement.StyleProperty, "OperationProgress");
         FollowToggle.Checked += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { if (Follow) Log.ScrollToEnd(); }));
         Log.PreviewMouseWheel += (_, _) => PauseFollowing();
         Log.PreviewMouseLeftButtonDown += (_, _) => PauseFollowing();
@@ -93,19 +95,23 @@ public sealed class OperationPanel : Grid {
     }
     public void Start() {
         latest = null; phase = detail = ""; phaseStart = 0; Log.Clear(); retained.Clear(); retainedCharacters = 0; earlierLinesDropped = false; clock.Restart(); timer.Start();
+        progress.BeginAnimation(ProgressBar.ValueProperty, null); progress.Value = 0;
+        progress.Tag = Theme.ReduceMotion ? "reduced" : "animate";
         progress.Visibility = Visibility.Visible; progress.IsIndeterminate = true; state.Text = L.T("OperationStarting"); AddLog(L.English("OperationStarting"));
         AddDiagnostic(new("operation.start"));
         if (DebugToggle.IsChecked == true) AddLog($"[debug] Storloom={ProductInfo.Version}; runtime={Environment.Version}; process64Bit={Environment.Is64BitProcess}");
     }
     public void Report(ScanProgress value) {
         latest = value;
-        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; AddLog(L.English(PhaseKey(phase))); AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
+        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes != null ? value.Bytes : value.Files; AddLog(L.English(PhaseKey(phase))); AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; AddLog(detail); }
         state.Text = Phase(phase) + (value.TotalBytes is long bytes ? $" | {View.Size(value.Bytes)} / {View.Size(bytes)}" : value.TotalFiles is int files ? $" | {value.Files:N0} / {files:N0}" : "");
         long total = value.TotalBytes ?? value.TotalFiles ?? 0, done = value.TotalBytes != null ? value.Bytes : value.Files;
         progress.IsIndeterminate = total <= 0;
+        progress.Visibility = Visibility.Visible;
         if (total > 0) {
             double target = Math.Clamp(done / (double)total, 0, 1);
+            state.Text += $" | {target:P0}";
             if (Theme.ReduceMotion) { progress.BeginAnimation(ProgressBar.ValueProperty, null); progress.Value = target; }
             else progress.BeginAnimation(ProgressBar.ValueProperty, new System.Windows.Media.Animation.DoubleAnimation(target, TimeSpan.FromMilliseconds(120)));
         }
@@ -116,8 +122,9 @@ public sealed class OperationPanel : Grid {
         if (latest == null) { timing.Text = L.T("ElapsedOnly", elapsed); return; }
         double seconds = Math.Max(0.1, clock.Elapsed.TotalSeconds - phaseStart);
         long total = latest.TotalBytes ?? latest.TotalFiles ?? 0, done = latest.TotalBytes != null ? latest.Bytes : latest.Files;
-        string eta = total > done && done > 0 && seconds > 1 ? TimeSpan.FromSeconds(Math.Min(359999, (total - done) * seconds / done)).ToString(@"hh\:mm\:ss") : "--:--:--";
-        timing.Text = L.T("OperationTiming", elapsed, eta, latest.TotalBytes != null ? View.Size((long)(done / seconds)) + "/s" : $"{done / seconds:N0} /s");
+        long advanced = Math.Max(0, done - phaseStartDone);
+        string eta = total > done && advanced > 0 && seconds > 1 ? TimeSpan.FromSeconds(Math.Min(359999, (total - done) * seconds / advanced)).ToString(@"hh\:mm\:ss") : "--:--:--";
+        timing.Text = L.T("OperationTiming", elapsed, eta, latest.TotalBytes != null ? View.Size((long)(advanced / seconds)) + "/s" : $"{advanced / seconds:N0} /s");
     }
     public void Finish(string summary, bool complete) {
         timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
@@ -127,7 +134,7 @@ public sealed class OperationPanel : Grid {
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
-        "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-discovery" => "FindAccounts",
+        "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-resume" => "PhaseResumeExport", "chat-discovery" => "FindAccounts",
         "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
 }
 

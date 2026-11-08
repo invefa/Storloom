@@ -105,7 +105,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView.DebugLoggingChanged += enabled => Guard(() => { preferences = preferences with { DebugLogging = enabled }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences); });
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
-            double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 40;
+            double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 56;
             if (!expanded && logRow.ActualHeight > 80) preferences = preferences with { LogHeight = logRow.ActualHeight };
             AnimateLog(target); logSplitter.IsEnabled = expanded;
         };
@@ -210,7 +210,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         object? previousContent = operationButton?.Content;
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
-        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 40);
+        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 56);
         operationView.Start(); cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Visibility = Visibility.Collapsed; statusFooter.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Text = L.T("OperationStarting"); bool complete = false;

@@ -17,23 +17,74 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private readonly Dictionary<string, string> contacts;
     private readonly Dictionary<string, TransferReceipt>? verified;
     private readonly CancellationToken cancellation;
-    private readonly StreamWriter json;
+    private readonly ExportAppendFile json;
+    private readonly StringBuilder jsonBuffer = new();
     private readonly Dictionary<string, Conversation> conversations = [];
-    private readonly Dictionary<string, StreamWriter> writers = [];
+    private readonly Dictionary<string, StringBuilder> buffers = [];
+    private readonly Dictionary<string, ExportAppendFile> spools = [];
+    private readonly Dictionary<string, string> conversationIds = [];
+    private readonly Dictionary<string, ExportFileProgress[]> generated = [];
+    private long bufferedCharacters;
+    private DateTime checkpointTime = DateTime.UtcNow;
+    private readonly bool resumable;
+    private string ProgressPath => Path.Combine(work, "reader-progress.json");
+    private sealed record WriterProgress(long Messages, int Media, int Missing, int Unsupported,
+        Conversation[] Conversations, ExportFileProgress Main, ExportFileProgress[] Spools,
+        Dictionary<string, ExportFileProgress[]> Generated);
+    public long ProcessedMessages => messageId;
+    internal int SpoolWrites { get; private set; }
     private readonly Dictionary<string, List<string>> media = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ChatMedia?> resolved = new(StringComparer.OrdinalIgnoreCase);
     private readonly WeChatImages images;
     private long messageId;
+    private bool adding;
     public int MediaFiles { get; private set; }
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false) {
+        source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination); work = PathPolicy.Normalize(work);
         this.source = source; this.destination = destination; this.work = work; this.contacts = contacts;
         this.verified = verified; this.cancellation = cancellation;
         this.account = account;
+        this.resumable = resumable;
         images = new WeChatImages(account, source, useLocalImageConfiguration);
-        json = new StreamWriter(Path.Combine(destination, "messages.jsonl"), false, new UTF8Encoding(false), 128 * 1024);
+        WriterProgress? previous = resumable && File.Exists(ProgressPath) ? JsonFiles.Read<WriterProgress>(ProgressPath) : null;
+        if (previous != null) {
+            if (previous.Main.Path != "messages.jsonl") throw new InvalidDataException("Invalid reader checkpoint output.");
+            if (previous.Messages < 0 || previous.Conversations.Sum(c => c.Count) != previous.Messages)
+                throw new InvalidDataException("Invalid reader checkpoint counters.");
+            foreach (var proof in previous.Spools.Append(previous.Main)) ExportProgressFiles.Validate(destination, proof, true, cancellation);
+            foreach (var proof in previous.Generated.Values.SelectMany(p => p)) ExportProgressFiles.Validate(destination, proof, false, cancellation);
+            string assets = Path.Combine(destination, "assets");
+            if (Directory.Exists(assets)) foreach (string path in Directory.EnumerateFiles(assets)) {
+                cancellation.ThrowIfCancellationRequested(); PathPolicy.AssertNoLinks(path);
+                if (Regex.IsMatch(Path.GetFileName(path), "^\\.pending-[a-f0-9]{32}$")) { File.Delete(path); continue; }
+                string digest = Path.GetFileNameWithoutExtension(path);
+                using var input = File.OpenRead(path);
+                if (!Regex.IsMatch(digest, "^[a-f0-9]{64}$") || Convert.ToHexString(TransferService.Hash(input, cancellation)).ToLowerInvariant() != digest)
+                    throw new InvalidDataException("Exported media changed; resume refused.");
+            }
+            messageId = previous.Messages; MediaFiles = previous.Media; UnresolvedMedia = previous.Missing; UnsupportedMessages = previous.Unsupported;
+            if (Directory.Exists(assets)) MediaFiles = Directory.EnumerateFiles(assets).Count();
+            foreach (var c in previous.Conversations) {
+                if (!Regex.IsMatch(c.Id, "^[a-f0-9]{24}$") || c.File != "conversation-" + c.Id + ".jsonl")
+                    throw new InvalidDataException("Invalid reader checkpoint conversation.");
+                conversations[c.Id] = c with { File = Path.Combine(work, c.File) };
+            }
+            foreach (var p in previous.Generated) generated[p.Key] = p.Value;
+            foreach (var proof in previous.Spools) {
+                string path = TransferService.Child(destination, proof.Path);
+                string id = Path.GetFileNameWithoutExtension(path)["conversation-".Length..];
+                if (!conversations.ContainsKey(id) || path != conversations[id].File) throw new InvalidDataException("Invalid reader spool checkpoint.");
+                spools[id] = new ExportAppendFile(path, proof);
+            }
+            var committedPaths = spools.Values.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in Directory.GetFiles(work, "conversation-*.jsonl"))
+                if (!committedPaths.Contains(path)) { PathPolicy.AssertNoLinks(path); File.Delete(path); }
+        }
+        json = new ExportAppendFile(Path.Combine(destination, "messages.jsonl"), previous?.Main);
+        if (previous == null) json.Append([]);
         IEnumerable<string> files = verified?.Keys ?? EnumerateMediaFiles(source);
         foreach (string relative in files) {
             cancellation.ThrowIfCancellationRequested();
@@ -44,6 +95,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 values.Add(relative);
             }
         }
+        if (resumable && previous == null) SaveProgress();
     }
     private static IEnumerable<string> EnumerateMediaFiles(string root) {
         var pending = new Stack<string>(); pending.Push(root);
@@ -57,11 +109,12 @@ internal sealed class ChatArchiveWriter : IDisposable {
     }
     public void Add(ChatMessage original) {
         cancellation.ThrowIfCancellationRequested();
+        adding = true;
         original = MessagePresentation.ResolveSenderPrefix(original);
         string peer = original.Conversation.StartsWith("direct:") ? original.Conversation[7..] :
             original.Conversation.StartsWith("group:") ? original.Conversation[6..] : original.Conversation;
         string name = contacts.GetValueOrDefault(peer, peer);
-        var message = original with { Id = "m" + ++messageId, ConversationName = name, SenderName = contacts.GetValueOrDefault(original.Sender, original.SenderName ?? original.Sender),
+        var message = original with { Id = "m" + (messageId + 1), ConversationName = name, SenderName = contacts.GetValueOrDefault(original.Sender, original.SenderName ?? original.Sender),
             IsSelf = original.IsSelf || original.Sender == account || account.StartsWith(original.Sender + "_", StringComparison.Ordinal) };
         var attachments = new List<ChatMedia>();
         var parts = MessagePresentation.Parse(message);
@@ -91,18 +144,36 @@ internal sealed class ChatArchiveWriter : IDisposable {
         parts = parts.Select(State).ToArray();
         if (missing) UnresolvedMedia++; if (unsupported) UnsupportedMessages++;
         message = message with { Media = attachments.ToArray(), Parts = parts };
-        json.WriteLine(JsonSerializer.Serialize(message));
-        string id = JsonFiles.Hash(message.Conversation)[..24].ToLowerInvariant();
+        string line = JsonSerializer.Serialize(message);
+        jsonBuffer.AppendLine(line);
+        if (jsonBuffer.Length >= 512 * 1024) FlushJson();
+        if (!conversationIds.TryGetValue(message.Conversation, out string? id))
+            conversationIds[message.Conversation] = id = JsonFiles.Hash(message.Conversation)[..24].ToLowerInvariant();
         if (!conversations.TryGetValue(id, out var conversation))
             conversations[id] = conversation = new(id, name, Path.Combine(work, "conversation-" + id + ".jsonl"), 0);
         conversations[id] = conversation with { Count = conversation.Count + 1 };
-        if (!writers.TryGetValue(id, out var writer)) {
-            if (writers.Count >= 24) { var oldest = writers.First(); oldest.Value.Dispose(); writers.Remove(oldest.Key); }
-            writers[id] = writer = new StreamWriter(conversation.File, true, new UTF8Encoding(false), 32 * 1024);
-        }
-        // Raw data remains available behind an explicit collapsed source disclosure in the reader.
-        writer.WriteLine(JsonSerializer.Serialize(message));
+        if (!buffers.TryGetValue(id, out var buffer)) buffers[id] = buffer = new StringBuilder();
+        int before = buffer.Length; buffer.AppendLine(line); bufferedCharacters += buffer.Length - before;
+        if (buffer.Length >= 512 * 1024) FlushSpool(id);
+        while (bufferedCharacters >= 8 * 1024 * 1024) FlushSpool(buffers.MaxBy(b => b.Value.Length).Key);
+        messageId++;
+        adding = false;
+        if (resumable && DateTime.UtcNow - checkpointTime >= TimeSpan.FromSeconds(30)) SaveProgress();
     }
+    private void FlushJson() { if (jsonBuffer.Length == 0) return; json.Append(Encoding.UTF8.GetBytes(jsonBuffer.ToString())); jsonBuffer.Clear(); }
+    private void FlushSpool(string id) {
+        if (!buffers.TryGetValue(id, out var buffer) || buffer.Length == 0) return;
+        if (!spools.TryGetValue(id, out var file)) spools[id] = file = new ExportAppendFile(conversations[id].File);
+        file.Append(Encoding.UTF8.GetBytes(buffer.ToString())); SpoolWrites++;
+        bufferedCharacters -= buffer.Length; buffers.Remove(id);
+    }
+    internal void SaveProgress() {
+        FlushJson(); foreach (string id in buffers.Keys.ToArray()) FlushSpool(id);
+        if (resumable) JsonFiles.Write(ProgressPath, new WriterProgress(messageId, MediaFiles, UnresolvedMedia, UnsupportedMessages,
+            conversations.Values.Select(c => c with { File = Path.GetFileName(c.File) }).ToArray(), json.Proof(destination), spools.Values.Select(f => f.Proof(destination)).ToArray(), generated));
+        checkpointTime = DateTime.UtcNow;
+    }
+    internal void SaveSafeProgress() { if (!adding) SaveProgress(); }
     private ChatMedia? ResolveMedia(string key) {
         var candidates = new[] { key + "_h.dat", key + "_W.dat", key, key + ".dat", key + ".jpg", key + ".png", key + ".gif", key + ".webp", key + ".mp4", key + "_t.dat", key + "_t_W.dat", key + "_thumb.jpg" }
             .Where(media.ContainsKey).SelectMany(k => media[k]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -135,6 +206,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         string filename = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant() + extension;
         string target = Path.Combine(assets, filename);
         if (!File.Exists(target)) { using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write); output.Write(data); MediaFiles++; }
+        else { PathPolicy.AssertNoLinks(target); using var existing = File.OpenRead(target); if (Convert.ToHexString(SHA256.HashData(existing)).ToLowerInvariant() != Path.GetFileNameWithoutExtension(target)) throw new InvalidDataException("Exported media changed; resume refused."); }
         return new("assets/" + filename, kind, Path.GetFileName(relative)) { Key = key, Quality = Thumbnail(relative) ? "thumbnail" : null };
     }
     private ChatMedia CopyStreaming(string key, string relative, string path, string extension) {
@@ -153,14 +225,21 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 throw new InvalidDataException("Archived media changed after verification.");
             string filename = digest.ToLowerInvariant() + extension, target = Path.Combine(assets, filename);
             if (!File.Exists(target)) { File.Move(temporary, target); MediaFiles++; }
+            else { PathPolicy.AssertNoLinks(target); using var existing = File.OpenRead(target); if (Convert.ToHexString(TransferService.Hash(existing, cancellation)) != digest) throw new InvalidDataException("Exported media changed; resume refused."); }
             return new("assets/" + filename, extension is ".mp4" or ".webm" ? "video" : "audio", Path.GetFileName(relative)) { Key = key };
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public void Finish(IProgress<ScanProgress>? progress) {
-        foreach (var writer in writers.Values) writer.Dispose(); writers.Clear(); json.Flush();
+        SaveProgress();
+        try { FinishCore(progress); }
+        catch { SaveProgress(); throw; }
+        SaveProgress();
+    }
+    private void FinishCore(IProgress<ScanProgress>? progress) {
         Directory.CreateDirectory(Path.Combine(destination, "conversations")); PathPolicy.AssertNoLinks(Path.Combine(destination, "conversations")); int done = 0;
         foreach (var entry in conversations.Values.ToArray()) {
             cancellation.ThrowIfCancellationRequested();
+            if (generated.ContainsKey(entry.Id)) { progress?.Report(new("chat-pages", ++done, 0, TotalFiles: conversations.Count)); continue; }
             // External merge keeps memory bounded for conversations with millions of messages.
             var runs = new List<string>(); var batch = new List<ChatMessage>(4000);
             void WriteRun() {
@@ -174,16 +253,21 @@ internal sealed class ChatArchiveWriter : IDisposable {
             var readers = runs.Select(File.OpenText).ToArray(); var queue = new PriorityQueue<(ChatMessage Message, int Run), (long Time, int Run)>();
             void Next(int index) { string? line = readers[index].ReadLine(); if (line != null) { var message = JsonSerializer.Deserialize<ChatMessage>(line)!; queue.Enqueue((message, index), (message.Timestamp, index)); } }
             int page = 0;
-            using var references = new StreamWriter(Path.Combine(destination, "conversations", entry.Id + "-refs.js"), false, new UTF8Encoding(false));
+            string referencesPath = Path.Combine(destination, "conversations", entry.Id + "-refs.js");
+            PrepareOutput(referencesPath);
+            using var references = new StreamWriter(referencesPath, false, new UTF8Encoding(false));
             references.Write("window.receiveReferences(" + JsonSerializer.Serialize(entry.Id) + ",{"); bool firstReference = true;
             void Reference(string? key, ChatMessage message) {
                 if (string.IsNullOrEmpty(key) || key == "0" || key == "seq:0") return;
                 if (!firstReference) references.Write(','); firstReference = false;
                 references.Write(JsonSerializer.Serialize(key) + ":" + JsonSerializer.Serialize(new { page, id = message.Id }));
             }
+            var proofs = new List<ExportFileProgress>();
             void WritePage() {
-                File.WriteAllText(Path.Combine(destination, "conversations", $"{entry.Id}-{page++}.js"),
+                string path = Path.Combine(destination, "conversations", $"{entry.Id}-{page++}.js"); PrepareOutput(path);
+                File.WriteAllText(path,
                     "window.receivePage(" + JsonSerializer.Serialize(entry.Id) + "," + (page - 1) + "," + JsonSerializer.Serialize(batch) + ");", new UTF8Encoding(false)); batch.Clear();
+                if (resumable) proofs.Add(ExportProgressFiles.Proof(destination, path));
             }
             try {
                 for (int i = 0; i < readers.Length; i++) Next(i);
@@ -194,7 +278,10 @@ internal sealed class ChatArchiveWriter : IDisposable {
             } finally { foreach (var reader in readers) reader.Dispose(); }
             references.Write("});");
             conversations[entry.Id] = entry with { Pages = page };
-            File.Delete(entry.File); foreach (string run in runs) File.Delete(run);
+            foreach (string run in runs) File.Delete(run);
+            references.Flush(); references.Close();
+            if (resumable) { proofs.Add(ExportProgressFiles.Proof(destination, referencesPath)); generated[entry.Id] = proofs.ToArray(); }
+            if (DateTime.UtcNow - checkpointTime >= TimeSpan.FromSeconds(30)) SaveProgress();
             progress?.Report(new("chat-pages", ++done, 0, TotalFiles: conversations.Count, Detail: entry.Name));
         }
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
@@ -207,5 +294,12 @@ internal sealed class ChatArchiveWriter : IDisposable {
             using var output = File.Create(Path.Combine(destination, asset)); stream.CopyTo(output);
         }
     }
-    public void Dispose() { foreach (var writer in writers.Values) writer.Dispose(); writers.Clear(); json.Dispose(); images.Dispose(); }
+    private static void PrepareOutput(string path) {
+        PathPolicy.AssertNoLinks(Path.GetDirectoryName(path)!);
+        if (File.Exists(path)) {
+            PathPolicy.AssertNoLinks(path);
+            if (NativeFile.ReadStamp(path).Links != 1) throw new IOException("Shared output files cannot be overwritten.");
+        }
+    }
+    public void Dispose() { foreach (var file in spools.Values) file.Dispose(); json.Dispose(); images.Dispose(); }
 }
