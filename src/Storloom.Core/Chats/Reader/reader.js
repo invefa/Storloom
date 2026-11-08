@@ -366,7 +366,11 @@
  stage.addEventListener('wheel',e=>{e.preventDefault();const box=stage.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-box.left-box.width/2,e.clientY-box.top-box.height/2);},{passive:false});
  stage.onpointerdown=e=>{if(e.button!==0)return;drag={cx:e.clientX,cy:e.clientY,x,y};stage.setPointerCapture(e.pointerId);};stage.onpointermove=e=>{if(drag){x=drag.x+e.clientX-drag.cx;y=drag.y+e.clientY-drag.cy;transform();}};stage.onpointerup=()=>drag=null;stage.onpointercancel=()=>drag=null;
  $('zoom-in').onclick=()=>zoom(1.25);$('zoom-out').onclick=()=>zoom(.8);$('zoom-fit').onclick=fitImage;$('zoom-original').onclick=()=>{scale=1;x=y=0;transform();};picture.ondblclick=()=>{if(scale===1)fitImage();else{scale=1;x=y=0;transform();}};
- $('image-previous').onclick=()=>changeImage(-1);$('image-next').onclick=()=>changeImage(1);$('image-close').onclick=()=>preview.close();preview.onclick=e=>{if(e.target===preview)preview.close();};preview.onkeydown=e=>{if(e.key==='ArrowLeft')changeImage(-1);if(e.key==='ArrowRight')changeImage(1);if(e.key==='+')zoom(1.25);if(e.key==='-')zoom(.8);};window.addEventListener('resize',()=>{if(preview.open)fitImage();});
+ let backdropPressed=false;
+ function outsidePreview(e){const box=preview.getBoundingClientRect();return e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom;}
+ preview.addEventListener('pointerdown',e=>{backdropPressed=e.target===preview&&outsidePreview(e);});
+ preview.onclick=e=>{if(backdropPressed&&e.target===preview&&outsidePreview(e))preview.close();backdropPressed=false;};
+ $('image-previous').onclick=()=>changeImage(-1);$('image-next').onclick=()=>changeImage(1);$('image-close').onclick=()=>preview.close();preview.onkeydown=e=>{if(e.key==='ArrowLeft')changeImage(-1);if(e.key==='ArrowRight')changeImage(1);if(e.key==='+')zoom(1.25);if(e.key==='-')zoom(.8);};window.addEventListener('resize',()=>{if(preview.open)fitImage();});
  function hostAction(message){if(window.chrome?.webview){window.chrome.webview.postMessage(message);return true;}return false;}
  let statusTimer;function actionStatus(value){text('action-status',value);clearTimeout(statusTimer);statusTimer=setTimeout(()=>text('action-status',''),4000);}
  window.chrome?.webview?.addEventListener('message',e=>{if(e.data?.action==='reader-status'&&typeof e.data.text==='string')actionStatus(e.data.text);});
