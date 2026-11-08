@@ -448,6 +448,27 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Theory]
+    [InlineData(2,false)]
+    [InlineData(4,false)]
+    [InlineData(4,true)]
+    public void ParallelReaderPagesMatchSingleWorkerAndResumeAfterCancellation(int workers,bool interrupt) {
+        string source=Dir("source"),baseline=Dir("baseline"),target=Dir("parallel");
+        void Add(ChatArchiveWriter writer){for(int i=0;i<3200;i++)writer.Add(new("QQ","group:"+(i%16),"fixture",3200-i,1,"fixture"){ServerId=(i+1).ToString(),Sequence=(i+1).ToString()});}
+        using(var writer=new ChatArchiveWriter(source,baseline,Dir("baseline/work"),new(),null,default,"fixture",resumable:true)) {Add(writer);writer.Finish(null);}
+        using var cancel=new CancellationTokenSource();
+        using(var writer=new ChatArchiveWriter(source,target,Dir("parallel/work"),new(),null,cancel.Token,"fixture",resumable:true,pageParallelism:workers)) {
+            Add(writer);
+            if(interrupt)Assert.Throws<OperationCanceledException>(()=>writer.Finish(new ImmediateProgress(p=>{if(p.RuleId=="chat-pages")cancel.Cancel();})));
+            else writer.Finish(null);
+        }
+        if(interrupt)using(var writer=new ChatArchiveWriter(source,target,Path.Combine(target,"work"),new(),null,default,"fixture",resumable:true,pageParallelism:2))writer.Finish(null);
+        foreach(string file in Directory.GetFiles(baseline,"*",SearchOption.AllDirectories).Where(p=>!PathPolicy.Under(p,Path.Combine(baseline,"work")))) {
+            string relative=Path.GetRelativePath(baseline,file);
+            Assert.Equal(SHA256.HashData(File.ReadAllBytes(file)),SHA256.HashData(File.ReadAllBytes(Path.Combine(target,relative))));
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void CommittedEncryptedWalIsAppliedAndCorruptionIsRefused(bool corrupt) {

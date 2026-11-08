@@ -196,7 +196,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             });
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
             if (verified != null && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null);
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism);
             progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {

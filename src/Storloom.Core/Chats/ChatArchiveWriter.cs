@@ -28,6 +28,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private long bufferedCharacters;
     private DateTime checkpointTime = DateTime.UtcNow;
     private readonly bool resumable;
+    private readonly int pageParallelism;
     private string ProgressPath => Path.Combine(work, "reader-progress.json");
     private sealed record WriterProgress(long Messages, int Media, int Missing, int Unsupported,
         Conversation[] Conversations, ExportFileProgress Main, ExportFileProgress[] Spools,
@@ -43,7 +44,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1) {
+        this.pageParallelism = pageParallelism is >= 1 and <= 4 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination); work = PathPolicy.Normalize(work);
         this.source = source; this.destination = destination; this.work = work; this.contacts = contacts;
         this.verified = verified; this.cancellation = cancellation;
@@ -240,9 +242,12 @@ internal sealed class ChatArchiveWriter : IDisposable {
     }
     private void FinishCore(IProgress<ScanProgress>? progress) {
         Directory.CreateDirectory(Path.Combine(destination, "conversations")); PathPolicy.AssertNoLinks(Path.Combine(destination, "conversations")); int done = 0;
-        foreach (var entry in conversations.Values.ToArray()) {
+        object checkpointGate = new();
+        var entries = conversations.Values.ToArray();
+        Parallel.ForEach(entries, new ParallelOptions { MaxDegreeOfParallelism = pageParallelism, CancellationToken = cancellation }, entry => {
             cancellation.ThrowIfCancellationRequested();
-            if (generated.ContainsKey(entry.Id)) { progress?.Report(new("chat-pages", ++done, 0, TotalFiles: conversations.Count)); continue; }
+            bool alreadyGenerated; lock (checkpointGate) alreadyGenerated = generated.ContainsKey(entry.Id);
+            if (alreadyGenerated) { lock (checkpointGate) progress?.Report(new("chat-pages", ++done, 0, TotalFiles: entries.Length)); return; }
             // External merge keeps memory bounded for conversations with millions of messages.
             var runs = new List<string>(); var batch = new List<ChatMessage>(4000);
             ChatMessage[]? sorted = null;
@@ -300,13 +305,16 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 if (batch.Count > 0) WritePage();
             } finally { foreach (var reader in readers) reader.Dispose(); }
             references.Write("});");
-            conversations[entry.Id] = entry with { Pages = page };
             foreach (string run in runs) File.Delete(run);
             references.Flush(); references.Close();
-            if (resumable) { proofs.Add(ExportProgressFiles.Proof(destination, referencesPath)); generated[entry.Id] = proofs.ToArray(); }
-            if (DateTime.UtcNow - checkpointTime >= TimeSpan.FromSeconds(30)) SaveProgress();
-            progress?.Report(new("chat-pages", ++done, 0, TotalFiles: conversations.Count, Detail: entry.Name));
-        }
+            if (resumable) proofs.Add(ExportProgressFiles.Proof(destination, referencesPath));
+            lock (checkpointGate) {
+                conversations[entry.Id] = entry with { Pages = page };
+                if (resumable) generated[entry.Id] = proofs.ToArray();
+                if (DateTime.UtcNow - checkpointTime >= TimeSpan.FromSeconds(30)) SaveProgress();
+                progress?.Report(new("chat-pages", ++done, 0, TotalFiles: entries.Length, Detail: entry.Name));
+            }
+        });
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));
         File.WriteAllText(Path.Combine(destination, "archive-index.js"), "window.archiveIndex=" + JsonSerializer.Serialize(new {
