@@ -7,7 +7,7 @@ Storloom is MIT licensed. The following components retain their original license
 Source: https://github.com/labazhou2024/chatlog-keeper
 Revision: 2225294fd0761e10ce15540f21e7dbb2ac304c3c
 
-The Windows WeChat C# locator/debugger capture component was adapted from the upstream PowerShell-embedded source into src/Storloom.Core/Chats/NativeCapture/WeChatCapture.cs. SQLCipher/NTQQ compatibility and message-format research also informed the independent C# pipeline. Changes include namespace/API integration, removal of diagnostic calibration hooks, no-op diagnostic callbacks, signed-client validation, isolated worker lifecycle, and in-memory key handling. No Python runtime or upstream executable is bundled.
+The Windows WeChat and NTQQ C# debugger capture components were adapted from the upstream PowerShell-embedded sources into src/Storloom.Core/Chats/NativeCapture/WeChatCapture.cs and QQCapture.cs. The NTQQ adapter removes key logging, checks the signed module path and code bytes, honors the key-length argument, and accepts candidates only after authenticating the selected backup. SQLCipher/NTQQ compatibility and message-format research also informed the independent C# pipeline. Changes include namespace/API integration, removal of diagnostic calibration hooks, no-op diagnostic callbacks, signed-client validation, isolated worker lifecycle, and in-memory key handling. No Python runtime or upstream executable is bundled.
 
 MIT License
 

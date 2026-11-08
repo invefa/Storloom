@@ -2,6 +2,9 @@ using System.Diagnostics;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Storloom.Core;
+using Storloom.Core.Chats;
+using System.Text;
+using System.Globalization;
 
 namespace Storloom.App;
 
@@ -10,6 +13,9 @@ public sealed class OperationPanel : Grid {
         FontFamily = new FontFamily("Consolas"), FontSize = 12, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 0, BorderThickness = new Thickness(0), Padding = new Thickness(0, 8, 0, 0), VerticalContentAlignment = VerticalAlignment.Top };
     public CheckBox FollowToggle { get; } = new() { Content = L.T("FollowLog"), IsChecked = true, ToolTip = "Ctrl+Shift+L", VerticalAlignment = VerticalAlignment.Center };
+    public CheckBox DebugToggle { get; } = new() { Content = L.T("DebugLog"), ToolTip = L.T("DebugLogHelp"), VerticalAlignment = VerticalAlignment.Center };
+    public event Action? ExportRequested;
+    public event Action<bool>? DebugLoggingChanged;
     public bool Follow => FollowToggle.IsChecked == true;
     public bool Expanded { get; private set; } = true;
     public event Action<bool>? ExpansionChanged;
@@ -22,13 +28,17 @@ public sealed class OperationPanel : Grid {
     private string phase = "", detail = "";
     private double phaseStart;
     private bool followPending;
+    private readonly Queue<string> retained = new();
+    private int retainedCharacters;
+    private bool earlierLinesDropped;
     public OperationPanel() {
         Margin = new Thickness(16, 3, 16, 5); ControlFeedback.SetEnabled(Log, false);
         RowDefinitions.Add(new RowDefinition { Height = View.Auto }); RowDefinitions.Add(new RowDefinition { Height = View.Auto });
         RowDefinitions.Add(new RowDefinition { Height = View.Fill });
         var row = new DockPanel(); collapse = View.IconButton("M 1,5 L 7,11 13,5", "HideOperationLog", ToggleExpanded);
         collapse.Name = "toggle_log"; collapse.Margin = new Thickness(8, 0, 0, 0);
-        foreach (var control in new UIElement[] { collapse, FollowToggle, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
+        var export = View.IconButton("M 7,1 L 7,10 M 3,6 L 7,10 11,6 M 1,11 L 1,14 13,14 13,11", "ExportLog", () => ExportRequested?.Invoke()); export.Name = "export_log";
+        foreach (var control in new UIElement[] { collapse, export, FollowToggle, DebugToggle, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
         state.TextTrimming = TextTrimming.CharacterEllipsis; state.TextWrapping = TextWrapping.NoWrap;
         state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
         row.Children.Add(state); View.Add(this, row, 0); View.Add(this, progress, 1); View.Add(this, Log, 2);
@@ -38,6 +48,8 @@ public sealed class OperationPanel : Grid {
         Log.PreviewMouseLeftButtonDown += (_, _) => PauseFollowing();
         Log.PreviewKeyDown += (_, e) => { if (e.Key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End) PauseFollowing(); };
         timer.Tick += (_, _) => RefreshTiming(); Unloaded += (_, _) => timer.Stop();
+        DebugToggle.Checked += (_, _) => { AddLog("[debug] debug.enabled"); DebugLoggingChanged?.Invoke(true); };
+        DebugToggle.Unchecked += (_, _) => { AddLog("[debug] debug.disabled"); DebugLoggingChanged?.Invoke(false); };
     }
     public void ToggleFollowing() => FollowToggle.IsChecked = !Follow;
     public void PauseFollowing() => FollowToggle.IsChecked = false;
@@ -49,7 +61,12 @@ public sealed class OperationPanel : Grid {
     }
     public void AddLog(string message) {
         int start = Log.SelectionStart, length = Log.SelectionLength; double offset = Log.VerticalOffset;
-        Log.AppendText($"{DateTime.Now:HH:mm:ss}  {message.Replace('\r', ' ').Replace('\n', ' ')}\n");
+        string line = $"{DateTime.Now:HH:mm:ss}  {message.Replace('\r', ' ').Replace('\n', ' ')}\n";
+        const int limit = 16 * 1024 * 1024;
+        if (line.Length > limit) { line = line[^limit..]; earlierLinesDropped = true; }
+        retained.Enqueue(line); retainedCharacters += line.Length;
+        while (retainedCharacters > limit && retained.TryDequeue(out string? removed)) { retainedCharacters -= removed.Length; earlierLinesDropped = true; }
+        Log.AppendText(line);
         if (Log.SelectionStart != start || Log.SelectionLength != length) Log.Select(start, length);
         // Keep a bounded live tail. Operation journals remain on disk. Never trim while reading history.
         if (Follow && Log.Text.Length > 300000) Log.Text = Log.Text[^200000..];
@@ -58,13 +75,31 @@ public sealed class OperationPanel : Grid {
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { followPending = false; if (Follow) Log.ScrollToEnd(); }));
         } else if (!Follow) Log.ScrollToVerticalOffset(offset);
     }
+    public void AddDiagnostic(ChatDiagnostic diagnostic) {
+        if (DebugToggle.IsChecked != true) return;
+        // Stage IDs are fixed code identifiers, never free-form native callback output.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(diagnostic.Stage, "^[a-z0-9.-]{1,64}$")) return;
+        AddLog(string.Create(CultureInfo.InvariantCulture, $"[debug] {diagnostic.Stage}; processes={diagnostic.Processes}; regions={diagnostic.Regions}; scannedBytes={diagnostic.Bytes}; candidates={diagnostic.Candidates}; elapsedSeconds={diagnostic.ElapsedSeconds:F3}"));
+    }
+    public void AddException(Exception error) {
+        if (DebugToggle.IsChecked == true) AddLog($"[debug] exceptionType={error.GetType().FullName}; hresult=0x{error.HResult:X8}; stack={error.StackTrace}");
+    }
+    public void ExportLog(string path) {
+        using var output = new StreamWriter(path, false, new UTF8Encoding(true));
+        output.WriteLine($"Storloom {ProductInfo.Version} | {DateTimeOffset.Now:O}");
+        output.WriteLine($"Debug logging currently enabled: {DebugToggle.IsChecked == true}; earlier lines dropped: {earlierLinesDropped}");
+        output.WriteLine("Scope: current operation; retained log tail is bounded to 16 Mi characters.");
+        output.WriteLine(); foreach (string line in retained) output.Write(line);
+    }
     public void Start() {
-        latest = null; phase = detail = ""; phaseStart = 0; Log.Clear(); clock.Restart(); timer.Start();
+        latest = null; phase = detail = ""; phaseStart = 0; Log.Clear(); retained.Clear(); retainedCharacters = 0; earlierLinesDropped = false; clock.Restart(); timer.Start();
         progress.Visibility = Visibility.Visible; progress.IsIndeterminate = true; state.Text = L.T("OperationStarting"); AddLog(L.English("OperationStarting"));
+        AddDiagnostic(new("operation.start"));
+        if (DebugToggle.IsChecked == true) AddLog($"[debug] Storloom={ProductInfo.Version}; runtime={Environment.Version}; process64Bit={Environment.Is64BitProcess}");
     }
     public void Report(ScanProgress value) {
         latest = value;
-        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; AddLog(L.English(PhaseKey(phase))); }
+        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; AddLog(L.English(PhaseKey(phase))); AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; AddLog(detail); }
         state.Text = Phase(phase) + (value.TotalBytes is long bytes ? $" | {View.Size(value.Bytes)} / {View.Size(bytes)}" : value.TotalFiles is int files ? $" | {value.Files:N0} / {files:N0}" : "");
         long total = value.TotalBytes ?? value.TotalFiles ?? 0, done = value.TotalBytes != null ? value.Bytes : value.Files;
@@ -88,6 +123,7 @@ public sealed class OperationPanel : Grid {
         timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
         progress.Visibility = Visibility.Collapsed;
         if (complete) progress.Value = 1; state.Text = summary; timing.Text = L.T("ElapsedOnly", clock.Elapsed.ToString(@"hh\:mm\:ss")); AddLog(complete ? "Operation completed." : "Operation stopped. Review the reported results.");
+        AddDiagnostic(new(complete ? "operation.complete" : "operation.stopped", ElapsedSeconds: clock.Elapsed.TotalSeconds));
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {

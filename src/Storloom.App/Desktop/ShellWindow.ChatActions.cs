@@ -76,19 +76,22 @@ public sealed partial class ShellWindow {
     }
 
     private async Task CapturePassive() => await Run(async token => {
-        var archived = ArchiveAccount(); byte[] key = await Task.Run(() => PassiveKeyReader.Read(archived, cancellation: token));
+        var archived = ArchiveAccount(); var diagnostics = ChatDiagnostics();
+        byte[] key = await Task.Run(() => PassiveKeyReader.Read(archived, cancellation: token, diagnostics: diagnostics));
         SetCapturedKey(key); RenderChatStage(); status.Text = L.T("KeyReady");
     });
 
     private async Task CaptureActive() {
-        var location = ArchiveAccount(); if (!Confirm(L.T("ActiveKeyConfirm"))) return;
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Weixin.exe|Weixin.exe" };
+        var location = ArchiveAccount(); bool qq = location.Platform == ChatPlatform.QQ;
+        if (!Confirm(L.T(qq ? "QQActiveKeyConfirm" : "ActiveKeyConfirm"))) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = qq ? "QQ.exe|QQ.exe" : "Weixin.exe|Weixin.exe" };
         if (dialog.ShowDialog(this) != true) return;
         await Run(async token => {
-            byte[] key = await CaptureWorker.Capture(location, dialog.FileName, token);
+            byte[] key = await CaptureWorker.Capture(location, dialog.FileName, token, ChatDiagnostics());
             SetCapturedKey(key); RenderChatStage(); status.Text = L.T("KeyReady");
         });
     }
+    private IProgress<ChatDiagnostic> ChatDiagnostics() => new Progress<ChatDiagnostic>(value => { if (operation != null) operationView.AddDiagnostic(value); });
 
     private async Task ExportChat() {
         var account = Account(); string raw = ArchiveDirectory();

@@ -87,11 +87,11 @@ public sealed partial class ShellWindow {
     private void BuildChatExport() {
         bool encrypted = NeedsKey();
         var stack = View.Stack(View.Text(L.T("ExportStepTitle"), 23), View.Text(L.T("ExportStepLead"), color: "Muted"),
-            View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)), View.Text(L.T(!encrypted ? "PlainStep" : capturedKey != null ? "KeyReady" : Account().Platform == ChatPlatform.WeChat ? "WeChatKeyMethodsHelp" : "EncryptedStep")));
+            View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)), View.Text(L.T(!encrypted ? "PlainStep" : capturedKey != null ? "KeyReady" : Account().Platform == ChatPlatform.WeChat ? "WeChatKeyMethodsHelp" : "QQKeyMethodsHelp")));
         chatContent.Children.Add(new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         if (encrypted) {
             var methods = View.Row();
-            if (Account().Platform == ChatPlatform.WeChat) methods.Children.Add(AsyncButton("ReadWeChatLogin", CaptureActive, true));
+            methods.Children.Add(AsyncButton(Account().Platform == ChatPlatform.QQ ? "ReadQQLogin" : "ReadWeChatLogin", CaptureActive, true));
             methods.Children.Add(AsyncButton("ReadPassive", CapturePassive));
             stack.Children.Add(methods);
             var manual = new CheckBox { Content = L.T("ManualKey"), Margin = new Thickness(0, 16, 0, 8) };

@@ -101,7 +101,11 @@ public static class JsonFiles {
                 JsonSerializer.Serialize(stream, value, Options);
                 stream.Flush(true);
             }
-            File.Move(temporary, path, true);
+            // A Windows reader can briefly deny atomic replacement. Keep the old file intact.
+            for (int attempt = 0; ; attempt++) {
+                try { File.Move(temporary, path, true); break; }
+                catch (Exception ex) when (attempt < 8 && (ex is IOException or UnauthorizedAccessException) && (ex.HResult & 0xffff) is 5 or 32 or 33) { Thread.Sleep(25); }
+            }
         } finally {
             if (File.Exists(temporary)) File.Delete(temporary);
         }

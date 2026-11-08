@@ -26,6 +26,8 @@ Storloom uses .NET cryptography, Windows `winsqlite3.dll` for read-only SQLite q
 
 ## Keys and consistent snapshots
 
+QQ also has an explicit **Start QQ login capture** action. Exit daily QQ first, select its installed Tencent-signed QQ.exe, and log in to the new instance. Storloom verifies the matching wrapper.node signature, resolves the x64 key function from its string reference and PE runtime-function table, checks the loaded module path and code before setting a breakpoint, and accepts only a key authenticating the selected backup. It never starts this debugger as an automatic fallback. This follows the [QQDecrypt Windows method](https://github.com/QQBackup/QQDecrypt/blob/main/docs/decrypt/extract/NTQQ%20%28Windows%29.md), using an adapted MIT chatlog-keeper C# debugger with key logging removed. Upstream version verification is not a guarantee that Storloom capture has been validated on every client. Capture waits up to 90 seconds and runs in the isolated worker; cancellation or timeout ends the worker and its debugged instance.
+
 The GUI guides account selection -> verified raw backup -> readable export. Raw backup needs no key. After making the snapshot, you can reopen the client to read a key against the archived database.
 
 1. Choose an account directory you own. Automatic discovery checks known current-user locations; relocated data can be inspected manually. The size column reports the whole account directory, including media; partial scans are marked as a lower bound.

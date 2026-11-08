@@ -14,6 +14,18 @@ public sealed class RuleAndToolTests : IDisposable {
         return current?.FullName ?? throw new IOException("Missing repository fixture inputs.");
     }
     [Fact]
+    public async Task JsonReplacementSurvivesABriefReaderLockWithoutPublishingPartialData() {
+        string directory=Dir("atomic-json"),path=Path.Combine(directory,"state.json");JsonFiles.Write(path,new[]{1});
+        var held=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
+        Task write=Task.Run(()=>JsonFiles.Write(path,new[]{2,3}));
+        try {
+            Assert.True(SpinWait.SpinUntil(()=>Directory.GetFiles(directory,"*.tmp").Length>0,TimeSpan.FromSeconds(3)));
+            Assert.Equal(new[]{1},JsonFiles.Read<int[]>(path));await Task.Delay(60);Assert.False(write.IsCompleted);
+        } finally { held.Dispose(); }
+        await write;Assert.Equal(new[]{2,3},JsonFiles.Read<int[]>(path));Assert.Empty(Directory.GetFiles(directory,"*.tmp"));
+    }
+
+    [Fact]
     public void MixedSeparatorTraversalCannotEscapeAPlanRoot() {
         Assert.Throws<InvalidDataException>(() => PathPolicy.Normalize(root + "\\cache/../outside"));
         string canonical = PathPolicy.Normalize(root.Replace('\\', '/'));

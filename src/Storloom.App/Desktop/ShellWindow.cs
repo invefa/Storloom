@@ -54,6 +54,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         Item(file, "ImportRules", ImportRules); Item(file, "ReloadRules", () => { ReloadEngine(); RenderRules(); });
         file.Items.Add(new Separator()); Item(file, "SavePlan", SaveCleanupPlan); Item(file, "LoadPlan", LoadCleanupPlan);
         Item(file, "OpenChatBackup", OpenChatBackup); Item(file, "OpenReaderArchive", OpenReaderArchive);
+        Item(file, "ExportLog", ExportOperationLog);
         file.Items.Add(new Separator()); Item(file, "OpenData", () => OpenFolder(dataRoot)); Item(file, "HideToTray", HideToTray); Item(file, "Exit", RequestExit);
         var tools = new MenuItem { Header = L.T("ToolsMenu") }; Item(tools, "Preferences", () => ShowPreferences());
         var help = new MenuItem { Header = L.T("HelpMenu") }; Item(help, "QuickStart", () => ShowHelp());
@@ -99,6 +100,9 @@ public sealed partial class ShellWindow : ThemeWindow {
         }
         root.LayoutUpdated += (_, _) => ClampLog();
         operationView = new OperationPanel { Visibility = Visibility.Collapsed }; View.Add(root, operationView, 3);
+        operationView.DebugToggle.IsChecked = preferences.DebugLogging;
+        operationView.DebugLoggingChanged += enabled => Guard(() => { preferences = preferences with { DebugLogging = enabled }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences); });
+        operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
             double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 40;
             if (!expanded && logRow.ActualHeight > 80) preferences = preferences with { LogHeight = logRow.ActualHeight };
@@ -181,8 +185,13 @@ public sealed partial class ShellWindow : ThemeWindow {
         }; return button;
     }
     private void Guard(Action action) { try { action(); } catch (Exception ex) { Error(ex); } }
+    private void ExportOperationLog() {
+        var picker = new Microsoft.Win32.SaveFileDialog { Title = L.T("ExportLog"), Filter = "Text log|*.log|Text file|*.txt", FileName = "Storloom-log-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", AddExtension = true };
+        if (picker.ShowDialog(this) == true) operationView.ExportLog(picker.FileName);
+    }
     private void Error(Exception ex) {
         status.Text = ex.Message; operationView.AddLog(ex.Message);
+        operationView.AddException(ex);
         try { JsonFiles.Write(Path.Combine(dataRoot, "errors", $"error-{Guid.NewGuid():N}.json"), new { time = DateTimeOffset.UtcNow, error = ex.ToString() }); }
         catch (Exception failure) when (failure is IOException or UnauthorizedAccessException) { }
         Notice.Show(this, L.T("Error"), ex.Message);
@@ -205,7 +214,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         status.Visibility = Visibility.Collapsed; statusFooter.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Text = L.T("OperationStarting"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested; }
-        catch (OperationCanceledException) { status.Text = L.T("Cancelled"); }
+        catch (OperationCanceledException) { status.Text = L.T("Cancelled"); operationView.AddDiagnostic(new("operation.cancelled")); }
         catch (Exception ex) { Error(ex); }
         finally { operation = null; navigation.IsEnabled = menu.IsEnabled = true;
             foreach (var control in disabled) control.IsEnabled = true;

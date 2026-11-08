@@ -26,6 +26,8 @@ Storloom使用.NET密码学、Windows的`winsqlite3.dll`只读查询、ZstdSharp
 
 ## 密钥与一致性快照
 
+QQ也提供显式的“启动 QQ 登录获取”：先退出日常QQ，选择已安装、具有腾讯签名的QQ.exe，再在新建实例中登录。程序核对配套wrapper.node的签名，根据字符串引用与PE函数表定位x64取钥函数，检查实际加载路径和代码后才设置断点，仅接受能通过所选备份认证的候选，不会自动启动调试。这参考[QQDecrypt的Windows方案](https://github.com/QQBackup/QQDecrypt/blob/main/docs/decrypt/extract/NTQQ%20%28Windows%29.md)，调试器改编自MIT许可的chatlog-keeper，已移除密钥日志。上游验证过的版本不代表Storloom已验证所有客户端。登录等待上限90秒，取消或超时会结束独立辅助进程及其调试实例。
+
 界面按选择账号、核验原始备份、导出阅读版引导。原始备份无需密钥；快照完成后可重新登录客户端，用备份数据库验证读取到的密钥。
 
 1. 选择本人拥有的账号目录。自动查找检查当前用户的已知位置，转移的数据可手动指定。容量列统计整个账号及媒体，部分扫描标记为至少值。

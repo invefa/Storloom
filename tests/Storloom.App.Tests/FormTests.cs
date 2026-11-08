@@ -764,6 +764,7 @@ public sealed class FormTests {
             window.Show();Pump();var type=typeof(ShellWindow);void Set(string key,object value)=>type.GetField(key,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,value);
             Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));Set("activeManifest",backup.Manifest);Set("chatStep",2);
             window.Navigate("chats");type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();
+            Assert.Contains(Descendants(window).OfType<Button>(),b=>Equals(b.Content,L.T("ReadQQLogin")));
             Descendants(window).OfType<CheckBox>().Single(c=>Equals(c.Content,L.T("ManualKey"))).IsChecked=true;Pump();
             var secret=Descendants(window).OfType<PasswordBox>().Single();var label=Descendants(window).OfType<Label>().Single(l=>l.Target==secret);
             Assert.Equal(L.T("DatabaseKeyLabel"),label.Content);Assert.True(label.TranslatePoint(new Point(),window).X+label.ActualWidth<=secret.TranslatePoint(new Point(),window).X);
@@ -796,6 +797,39 @@ public sealed class FormTests {
             DateTime until=DateTime.UtcNow.AddSeconds(3);while(type.GetField("operation",flags)!.GetValue(window)!=null&&DateTime.UtcNow<until){Pump();Thread.Sleep(5);}
             Assert.Null(type.GetField("operation",flags)!.GetValue(window));Assert.False(button.IsEnabled);
         } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("zh-CN")]
+    public void DiagnosticLogsAreOptInAndExportMoreThanTheVisibleTail(string locale) => OnUi(() => {
+        L.SetLanguage(locale);Theme.Apply(new AppPreferences{ReduceMotion=true});string fixture=Fixture();
+        var panel=new OperationPanel();var window=new ThemeWindow("Log fixture",1040,500){ShowInTaskbar=false};window.Body.Children.Add(panel);
+        try {
+            window.Show();Pump();panel.Start();panel.AddLog("first-fixture-entry");
+            panel.AddDiagnostic(new("key.passive.exhausted",Candidates:10));
+            Assert.DoesNotContain("key.passive.exhausted",panel.Log.Text);
+            for(int i=0;i<900;i++)panel.AddLog("fixture-tail-"+i+new string('x',450));
+            Assert.DoesNotContain("first-fixture-entry",panel.Log.Text);
+            panel.DebugToggle.IsChecked=true;panel.AddDiagnostic(new("key.passive.scan",Bytes:123456,Processes:3,Regions:45,Candidates:6,ElapsedSeconds:7.5));
+            panel.AddDiagnostic(new("candidate=must-never-appear"));panel.AddException(new InvalidOperationException("private-input-must-never-appear"));
+            panel.ToggleExpanded();Assert.True(Descendants(panel).OfType<Button>().Single(b=>b.Name=="export_log").IsVisible);
+            string path=Path.Combine(fixture,"session.log");panel.ExportLog(path);string text=File.ReadAllText(path);
+            Assert.Contains("Storloom ",text);Assert.Contains("first-fixture-entry",text);Assert.Contains("scannedBytes=123456",text);Assert.Contains("candidates=6",text);
+            Assert.Contains("System.InvalidOperationException",text);Assert.DoesNotContain("must-never-appear",text);Assert.DoesNotContain("key.passive.exhausted",text);
+            panel.Start();panel.ExportLog(path);Assert.DoesNotContain("first-fixture-entry",File.ReadAllText(path));
+            Capture(window,"diagnostic-log-"+locale);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Fact]
+    public void DebugLoggingChoicePersistsAcrossShellRestarts() => OnUi(() => {
+        string fixture=Fixture();var first=new ShellWindow(fixture){ShowInTaskbar=false};
+        first.Show();Pump();Descendants(first).OfType<OperationPanel>().Single().DebugToggle.IsChecked=true;first.Close();
+        Assert.True(JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).DebugLogging);
+        var second=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {second.Show();Pump();Assert.True(Descendants(second).OfType<OperationPanel>().Single().DebugToggle.IsChecked);}
+        finally {second.Close();Directory.Delete(fixture,true);}
     });
 
     private static void Database(string path,string sql) {

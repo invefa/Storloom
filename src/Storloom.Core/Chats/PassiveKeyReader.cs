@@ -57,7 +57,7 @@ public static class PassiveKeyReader {
     }
 
     public static byte[] Read(ChatLocation location, TimeSpan? timeout = null,
-        CancellationToken cancellation = default) {
+        CancellationToken cancellation = default, IProgress<ChatDiagnostic>? diagnostics = null) {
         using var oracle = new FileStream(location.Database, FileMode.Open, FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
         byte[] prefix = new byte[Math.Min(oracle.Length, 5120)];
@@ -69,6 +69,13 @@ public static class PassiveKeyReader {
         // Root clients precede Chromium helpers; round-robin chunks keep every process progressing.
         var processes = names.SelectMany(Process.GetProcessesByName).OrderBy(CreationTime).ToArray();
         var scans = new List<MemoryScan>();
+        long scannedBytes = 0; int regionCount = 0, candidateCount = 0; double lastReport = -1;
+        void Report(string stage, bool force = false) {
+            if (diagnostics == null || !force && clock.Elapsed.TotalSeconds - lastReport < 1) return;
+            lastReport = clock.Elapsed.TotalSeconds;
+            diagnostics.Report(new(stage, scannedBytes, scans.Count, regionCount, candidateCount, lastReport));
+        }
+        Report("key.passive.start", true);
         try {
             foreach (var process in processes) {
                 cancellation.ThrowIfCancellationRequested();
@@ -79,12 +86,13 @@ public static class PassiveKeyReader {
                 while (address < 0x7fffffffffff && clock.Elapsed < limit) {
                     cancellation.ThrowIfCancellationRequested();
                     if (VirtualQueryEx(handle, (nint)address, out var region, (nuint)Marshal.SizeOf<MemoryRegion>()) == 0 || region.RegionSize == 0) break;
-                    if (region.State == 0x1000 && (region.Protect & 0x101) == 0 && (region.Protect & 0xee) != 0) scan.Regions.Add(region);
+                    if (region.State == 0x1000 && (region.Protect & 0x101) == 0 && (region.Protect & 0xee) != 0) { scan.Regions.Add(region); regionCount++; }
                     ulong next = region.BaseAddress + region.RegionSize;
                     if (next <= address) break;
                     address = next;
                 }
                 scan.Regions.Sort((left, right) => Priority(left).CompareTo(Priority(right)));
+                Report("key.passive.regions", true);
             }
             while (clock.Elapsed < limit && scans.Any(s => s.Index < s.Regions.Count)) {
                 foreach (var scan in scans) {
@@ -97,6 +105,7 @@ public static class PassiveKeyReader {
                     byte[] bytes = new byte[size];
                     try {
                         _ = ReadProcessMemory(scan.Handle, (nint)(region.BaseAddress + scan.Offset), bytes, (nuint)size, out nuint read);
+                        scannedBytes += (long)read; Report("key.passive.scan");
                         for (int i = 0; i < (int)read && clock.Elapsed < limit; i++) {
                             cancellation.ThrowIfCancellationRequested();
                             byte[]? candidate = null;
@@ -119,6 +128,7 @@ public static class PassiveKeyReader {
                 }
             }
             cancellation.ThrowIfCancellationRequested();
+            Report(clock.Elapsed >= limit ? "key.passive.timeout" : "key.passive.exhausted", true);
             throw new InvalidOperationException(L.T(scans.Count == 0 ? "KeyClientMissing" : location.Platform == ChatPlatform.WeChat ? "WeChatPassiveUnavailable" : "KeyNotFound"));
         } finally {
             foreach (var scan in scans) scan.Handle.Dispose();
@@ -127,7 +137,11 @@ public static class PassiveKeyReader {
 
         bool Verify(byte[] candidate) {
             string digest = Convert.ToHexString(SHA256.HashData(candidate));
-            return seen.Add(digest) && ChatCipher.Detect(prefix, candidate, location.Platform) != null;
+            if (!seen.Add(digest)) return false;
+            candidateCount++; Report("key.passive.verify");
+            bool accepted = ChatCipher.Detect(prefix, candidate, location.Platform) != null;
+            if (accepted) Report("key.passive.verified", true);
+            return accepted;
         }
     }
 
