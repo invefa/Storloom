@@ -11,6 +11,8 @@
 
 ## 当前实现
 
+QQ 账号发现、密钥验证和阅读版导出统一选择主聊天的 `nt_qq/nt_db/nt_msg.db`，不依赖文件系统枚举顺序。QQ 频道同名数据库使用独立密钥：原始备份保留它，主聊天阅读版不混入它，导出报告会列为未支持的数据库并标记阅读版不完整。
+
 Storloom使用.NET密码学、Windows的`winsqlite3.dll`只读查询、ZstdSharp.Port处理新版压缩消息、K4os.Compression.LZ4处理旧版压缩内容。适配的捕获组件隔离在`Chats/NativeCapture`，许可证见第三方声明。运行时不下载上游工具或执行下载脚本。
 
 | 范围 | 已实现 | 限制 |

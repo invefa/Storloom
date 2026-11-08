@@ -109,6 +109,10 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         Directory.CreateDirectory(destination); PathPolicy.AssertNoLinks(destination);
         string work = Path.Combine(destination, ".work-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(work);
         var issues = new System.Collections.Concurrent.ConcurrentBag<ScanIssue>();
+        if (platform == ChatPlatform.QQ)
+            foreach (string database in EnumerateDatabases(source, platform).Where(p => IsQQGuildDatabase(source, p)))
+                issues.Add(new("chat-export", Path.GetRelativePath(source, database),
+                    "QQ Guild uses a separate database key and is not included in this reading export. Its files remain in the raw backup."));
         var contacts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         int completed = 0; long messages = 0;
         var weights = new long[databases.Length]; var databaseBytes = databases.Select(p => new FileInfo(p).Length).ToArray();
@@ -119,7 +123,8 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         bool Allowed(string p) => verified == null || verified.ContainsKey(Path.GetRelativePath(source, p));
         try {
             // Metadata databases are small and read once before workers start.
-            foreach (string contact in FindMetadataDatabases(source).Where(Allowed)) {
+            foreach (string contact in FindMetadataDatabases(source).Where(Allowed)
+                .Where(p => platform != ChatPlatform.QQ || !IsQQGuildDatabase(source, p))) {
                 cancellation.ThrowIfCancellationRequested(); string plain = Path.Combine(work, Guid.NewGuid().ToString("N") + ".db");
                 try {
                     bool shifted = PrepareDatabase(contact, plain, secret, platform, cancellation);
@@ -258,6 +263,20 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
     }
 
     public static IEnumerable<string> FindDatabases(string root, ChatPlatform platform) {
+        // Main QQ and QQ Guild have identically named databases with independent keys.
+        // Filesystem traversal order must never decide which key we authenticate.
+        return EnumerateDatabases(root, platform)
+            .Where(p => platform != ChatPlatform.QQ || !IsQQGuildDatabase(root, p))
+            .OrderBy(p => platform == ChatPlatform.QQ && Path.GetRelativePath(root, p)
+                .Replace('\\', '/').Equals("nt_qq/nt_db/nt_msg.db", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(p => p, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsQQGuildDatabase(string root, string path) =>
+        Path.GetFileName(Path.TrimEndingDirectorySeparator(root)).Equals("QQGuild", StringComparison.OrdinalIgnoreCase) ||
+        Path.GetRelativePath(root, path).Split('\\', '/').Any(p => p.Equals("QQGuild", StringComparison.OrdinalIgnoreCase));
+
+    private static IEnumerable<string> EnumerateDatabases(string root, ChatPlatform platform) {
         var pending = new Stack<string>();
         pending.Push(root);
         while (pending.TryPop(out string? directory)) {

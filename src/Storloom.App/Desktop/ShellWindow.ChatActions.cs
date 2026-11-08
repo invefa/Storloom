@@ -39,8 +39,10 @@ public sealed partial class ShellWindow {
 
     private ChatLocation ArchiveAccount() {
         string archived = ArchiveDirectory(); var account = Account();
-        return account with { Directory = archived, Database = TransferService.Child(archived,
-            Path.GetRelativePath(account.Directory, account.Database)) };
+        string database = account.Platform == ChatPlatform.QQ
+            ? ChatExporter.FindDatabases(archived, account.Platform).FirstOrDefault() ?? throw new InvalidDataException("No supported QQ message database found in this archive.")
+            : TransferService.Child(archived, Path.GetRelativePath(account.Directory, account.Database));
+        return account with { Directory = archived, Database = database };
     }
 
     private bool NeedsKey() {

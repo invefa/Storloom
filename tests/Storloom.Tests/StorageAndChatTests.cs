@@ -31,6 +31,25 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Fact]
+    public void QqDiscoveryAndBackupExportSeparateGuildFromMainChat() {
+        string source = Dir("account");
+        string guild = FileIn(source, "QQGuild/nt_db/nt_msg.db", "separately encrypted guild fixture");
+        string main = Path.GetFullPath(Path.Combine(Dir("account/nt_qq/nt_db"), "nt_msg.db"));
+        CreateDatabase(main, "CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,'Fixture');");
+        Assert.Equal(main, Assert.Single(ChatExporter.FindDatabases(source, ChatPlatform.QQ)));
+        var location = Assert.Single(ChatDiscovery.Discover([source]));
+        Assert.Equal(source, location.Directory); Assert.Equal(main, location.Database);
+        Assert.Equal(2, location.AccountFiles);
+        var service = new TransferService();
+        var backup = service.Execute(service.Plan(source, Path.Combine(root, "raw")), Dir("journals"));
+        Assert.Equal(Path.Combine(backup.Destination, "nt_qq", "nt_db", "nt_msg.db"), Assert.Single(ChatExporter.FindDatabases(backup.Destination, ChatPlatform.QQ)));
+        var result = new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "reading"), ChatPlatform.QQ);
+        Assert.Equal(1, result.Messages); Assert.Equal(1, result.Databases); Assert.False(result.Complete);
+        Assert.Contains(result.Issues, issue => issue.Path == Path.GetRelativePath(source, guild) && issue.Reason.Contains("separate database key"));
+        Assert.True(File.Exists(guild)); Assert.True(File.Exists(Path.Combine(backup.Destination, Path.GetRelativePath(source, guild))));
+    }
+
+    [Fact]
     public void DiscoveryPreservesMediaAlongsideMessageDirectories() {
         string selected = Dir("selected-account");
         FileIn(selected, "db_storage/message/message_0.db"); FileIn(selected, "media/fixture.txt");

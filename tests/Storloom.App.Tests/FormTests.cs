@@ -782,6 +782,24 @@ public sealed class FormTests {
     });
 
     [Fact]
+    public void ArchivedQqKeyValidationCorrectsAStaleGuildSelection() => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");
+        string guild=Path.Combine(source,"QQGuild","nt_db","nt_msg.db"),main=Path.Combine(source,"nt_qq","nt_db","nt_msg.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(guild)!);Directory.CreateDirectory(Path.GetDirectoryName(main)!);
+        File.WriteAllBytes(guild,new byte[5120]);File.WriteAllBytes(main,new byte[5120]);
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        try {
+            var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            type.GetField("activeChat",flags)!.SetValue(window,new ChatLocation(ChatPlatform.QQ,source,"Fixture account",guild,5120));
+            type.GetField("activeManifest",flags)!.SetValue(window,backup.Manifest);
+            var archived=(ChatLocation)type.GetMethod("ArchiveAccount",flags)!.Invoke(window,null)!;
+            Assert.Equal(Path.Combine(backup.Destination,"nt_qq","nt_db","nt_msg.db"),archived.Database);
+            Assert.Equal(backup.Destination,archived.Directory);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Fact]
     public void OperationButtonRemainsCancellableAfterItsInputWasCleared() => OnUi(() => {
         string fixture=Fixture();var window=new ShellWindow(fixture){ShowInTaskbar=false};
         try {

@@ -11,6 +11,8 @@ Reviewed 2026-11-07 using upstream source and licenses. These are independent pr
 
 ## Current implementation
 
+QQ account discovery, key validation and reading export select the main `nt_qq/nt_db/nt_msg.db` independently of filesystem enumeration order. QQ Guild's identically named database uses a separate key: it remains in the raw backup, is excluded from the main-chat reader, and is recorded as an unsupported database in the export report. A reading export containing such a database is reported incomplete.
+
 Storloom uses .NET cryptography, Windows `winsqlite3.dll` for read-only SQLite queries, ZstdSharp.Port for modern compressed message bodies, and K4os.Compression.LZ4 for legacy compressed content. The adapted C# capture component is isolated under `Chats/NativeCapture`; its license is in the third-party notices. Runtime operation does not fetch upstream tools or execute downloaded scripts.
 
 | Area | Implemented | Limits |
