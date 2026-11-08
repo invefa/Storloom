@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '0.6.10',
+    [string] $Version = '0.6.11',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -11,6 +11,7 @@ $name = "Storloom-$Version-win-x64"
 $run = Join-Path $releaseRoot ($name + '-' + [guid]::NewGuid().ToString('N'))
 $package = Join-Path $run $name
 New-Item -ItemType Directory -Path $package -Force | Out-Null
+$silk = & (Join-Path $PSScriptRoot 'Build-Silk.ps1')
 $nugetRoot = (& $DotNet msbuild (Join-Path $repo 'src/Storloom.App/Storloom.App.csproj') -getProperty:NuGetPackageRoot -nologo).Trim()
 if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $nugetRoot -PathType Container)) {
     throw 'Cannot resolve the restored runtime license location.'
@@ -20,6 +21,7 @@ foreach ($entry in @(@('Storloom.App', $package), @('Storloom.Cli', (Join-Path $
         -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false `
         "-p:Version=$Version" -o $entry[1] --nologo
     if ($LASTEXITCODE -ne 0) { throw "Publish failed: $($entry[0])" }
+    Copy-Item -LiteralPath $silk.Binary -Destination (Join-Path $entry[1] 'storloom-silk.exe')
     $runtimeConfig = Get-ChildItem -LiteralPath $entry[1] -Filter 'Storloom*.runtimeconfig.json' -File | Select-Object -First 1
     $frameworks = (Get-Content -LiteralPath $runtimeConfig.FullName -Raw | ConvertFrom-Json).runtimeOptions.includedFrameworks
     foreach ($framework in $frameworks) {
@@ -58,6 +60,9 @@ foreach ($notice in @('LICENSE.md', 'ThirdPartyNotices.txt')) {
     Copy-Item -LiteralPath $licenseFile -Destination $wpfLicenseTarget
 }
 # Explicit public inputs only. Never copy data/, source workspaces, or prior artifacts.
+$silkLicenses = Join-Path $package 'licenses/SILK'
+New-Item -ItemType Directory -Path $silkLicenses -Force | Out-Null
+foreach ($notice in @('MIT.txt', 'Skype-SDK.txt')) { Copy-Item -LiteralPath (Join-Path $silk.Licenses $notice) -Destination $silkLicenses }
 foreach ($file in @('README.md', 'README.zh-CN.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $package
 }

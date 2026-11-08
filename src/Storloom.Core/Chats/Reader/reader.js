@@ -7,6 +7,11 @@
  const label = key => labels[key] || key;
  const contactNames = index.contactNames || {};
  const emojis=index.builtInEmoji || {};
+ const resourceMap=new Map(Object.entries(index.resourceMedia||{}).map(([key,value])=>[key.toLowerCase(),value]));
+ const mediaMatches=(keys,media)=>(keys||[]).some(key=>[media.Key,media.Name].some(value=>typeof value==='string'&&key.toLowerCase()===value.toLowerCase()));
+ const readerPrefs=(()=>{try{return JSON.parse(localStorage.getItem('storloom.reader.view'))||{};}catch{return {};}})();
+ let contextMode=false,returnPoints=[],restoreScroll=null,pinBottom=false;
+ function savePrefs(){try{localStorage.setItem('storloom.reader.view',JSON.stringify(readerPrefs));}catch{}}
  for (const chat of index.conversations) chat.name = index.conversationNames?.[chat.id] || (chat.name==='0'?label('ReaderUnknownConversation'):chat.name);
  const element = (tag, text, className) => {
   const node = document.createElement(tag);
@@ -17,7 +22,7 @@
  const text = (id, value) => { $(id).textContent = value; };
  document.documentElement.lang = index.language;
  document.title = labels.ChatArchive; text('archive-title', labels.ChatArchive);
- $('contacts-search').placeholder = labels.ReaderSearch; $('message-search').placeholder = labels.ReaderPageSearch;
+ $('contacts-search').placeholder = labels.ReaderSearch; $('message-search').placeholder = label('ReaderContentQuery');
  $('theme').title = labels.ReaderTheme; $('theme').setAttribute('aria-label', labels.ReaderTheme); text('theme', '◐');
  $('palette').title = label('ReaderPalette'); $('palette').setAttribute('aria-label', label('ReaderPalette'));
  for (const [value, name] of [['default','ReaderPaletteDefault'],['wechat','ReaderPaletteWeChat'],['qq','ReaderPaletteQQ']]) {
@@ -32,11 +37,14 @@
  try { applyPalette(localStorage.getItem('storloom.reader.palette')); } catch { applyPalette('default'); }
  $('palette').onchange = () => { applyPalette($('palette').value); try { localStorage.setItem('storloom.reader.palette', $('palette').value); } catch {} };
  text('previous', labels.ReaderPrevious); text('next', labels.ReaderNext);
+ for(const [id,key] of [['content-label','ReaderContent'],['back-results','ReaderBackResults'],['page-bottom','ReaderPageBottom'],['auto-bottom-label','ReaderAutoBottom'],['auto-last-label','ReaderAutoLast']])text(id,label(key));
+ $('sidebar-toggle').title=label('ReaderSidebar');$('sidebar-toggle').setAttribute('aria-label',label('ReaderSidebar'));
+ $('auto-bottom').checked=!!readerPrefs.autoBottom;$('auto-last').checked=!!readerPrefs.autoLast;
  for(const [id,key] of [['first','ReaderFirst'],['last','ReaderLast'],['jump-label','ReaderJumpPage'],['page-go','ReaderGo'],['filter-label','ReaderFilters'],['kind-label','ReaderMessageType'],['sender-label','ReaderSender'],['from-label','ReaderDateFrom'],['to-label','ReaderDateTo'],['self-label','ReaderOnlySelf'],['reset-filter','ReaderResetFilters'],['find-page','ReaderFindNextPage'],['stop-search','ReaderStopSearch']])text(id,label(key));
  $('kind-filter').append(new Option(label('ReaderAllTypes'),''));
  for(const kind of ['text','image','sticker','video','audio','file','reply','forward','system','poke','reaction','link','miniapp','contact','location','call','transfer','redpacket','music','channel','gift','markdown','buttons','wallet','unsupported','unparsed'])$('kind-filter').append(new Option(label('ReaderKind_'+kind),kind));
  text('chat-title', labels.ReaderSelect);
- text('notice', labels.ReaderNotice + (index.unresolvedMedia ? ' ' + label('ReaderUnresolved') + ' ' + index.unresolvedMedia : '') +
+ text('notice', labels.ReaderNotice + (index.resourceMedia && Object.keys(index.resourceMedia).length ? ' '+label('ReaderResourceRepairApplied') : index.unresolvedMedia ? ' ' + label('ReaderUnresolved') + ' ' + index.unresolvedMedia : '') +
   (index.unsupportedMessages ? ' | ' + label('ReaderUnsupportedCount') + ' ' + index.unsupportedMessages : ''));
  let dark = location.hash === '#dark' || (!location.hash && matchMedia('(prefers-color-scheme:dark)').matches);
  document.body.classList.toggle('dark', dark);
@@ -47,7 +55,7 @@
    if (!chat.name.toLocaleLowerCase().includes(term)) continue;
    const button = element('button'); button.title = chat.name; button.classList.toggle('active', current?.id === chat.id);
    button.append(element('strong', chat.name), element('small', chat.count + ' ' + labels.ReaderMessages));
-   button.onclick = () => { stopSearch(); current = chat; page = 0; $('message-search').value = ''; list(); load(); };
+   button.onclick = () => { stopSearch(); leaveContext();current = chat; page = readerPrefs.autoLast?Math.max(0,chat.pages-1):0; $('message-search').value = ''; list(); load(); };
    fragment.append(button);
   }
   $('conversations').replaceChildren(fragment);
@@ -71,19 +79,32 @@
   if (current?.id !== conversation || p !== page) return;
   messages = items; render();
   if (pendingJump?.conversation === conversation && pendingJump.page === p) { highlight(pendingJump.id); pendingJump = null; }
+  else if(restoreScroll!==null){$('messages').scrollTop=restoreScroll;restoreScroll=null;}
+  else if(readerPrefs.autoBottom&&!contextMode)scrollBottom();
  };
  window.receiveReferences = (conversation, map) => {
   referenceMaps.set(conversation, map); referenceLoads.get(conversation)?.(map); referenceLoads.delete(conversation);
  };
  function highlight(id) {
-  const target = $('msg-' + id); if (!target) return;
-  target.scrollIntoView({block:'center'}); target.classList.add('referenced');
-  setTimeout(() => target.classList.remove('referenced'), 1600);
+  pinBottom=false;const target = $('msg-' + id); if (!target) {actionStatus(label('ReaderReferenceMissing'));return;}
+  target.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'instant':'smooth'});target.classList.remove('referenced');void target.offsetWidth;target.classList.add('referenced');
+  setTimeout(() => target.classList.remove('referenced'), 2600);
  }
+ function scrollBottom(){pinBottom=true;$('messages').scrollTop=$('messages').scrollHeight;}
+ function leaveContext(){contextMode=false;returnPoints=[];restoreScroll=null;pendingJump=null;$('back-results').hidden=true;}
+ function showContext(id,targetPage=page){
+  stopSearch();returnPoints.push({conversation:current.id,page,scroll:$('messages').scrollTop,context:contextMode,filters:readFilters()});
+  contextMode=true;$('back-results').hidden=false;pinBottom=false;
+  if(targetPage===page){render();highlight(id);}else{page=targetPage;pendingJump={conversation:current.id,page,id};load();}
+ }
+ function readFilters(){return Object.fromEntries(['message-search','kind-filter','sender-filter','date-from','date-to','self-filter'].map(id=>[id,$(id).type==='checkbox'?$(id).checked:$(id).value]));}
+ $('back-results').onclick=()=>{stopSearch();const saved=returnPoints.pop();if(!saved)return;current=index.conversations.find(c=>c.id===saved.conversation);contextMode=saved.context;for(const [id,value] of Object.entries(saved.filters)){$(id).type==='checkbox'?$(id).checked=value:$(id).value=value;}$('back-results').hidden=returnPoints.length===0;restoreScroll=saved.scroll;pendingJump=null;if(page===saved.page){render();$('messages').scrollTop=restoreScroll;restoreScroll=null;}else{page=saved.page;list();load();}};
+ $('page-bottom').onclick=scrollBottom;$('auto-bottom').onchange=()=>{readerPrefs.autoBottom=$('auto-bottom').checked;savePrefs();if(readerPrefs.autoBottom)scrollBottom();};
+ $('auto-last').onchange=()=>{readerPrefs.autoLast=$('auto-last').checked;savePrefs();if(readerPrefs.autoLast&&current){leaveContext();go(current.pages-1);}};
  async function jump(reference, block) {
   const conversation = current.id;
   const local = messages.find(m => m.ServerId === reference || ('seq:' + m.Sequence) === reference);
-  if (local) { $('message-search').value = ''; render(); highlight(local.Id); return; }
+  if (local) { showContext(local.Id); return; }
   let map = referenceMaps.get(conversation);
   if (!map) map = await new Promise(resolve => {
    if (referenceLoads.has(conversation)) { resolve(null); return; }
@@ -94,10 +115,11 @@
   });
   if (current.id !== conversation) return;
   const target = map && Object.hasOwn(map, reference) ? map[reference] : null;
-  if (!target) { block.title = label('ReaderReferenceMissing'); block.append(element('small', label('ReaderReferenceMissing'))); return; }
-  $('message-search').value = ''; page = target.page; pendingJump = {conversation, ...target}; load();
+  if (!target) { actionStatus(label('ReaderReferenceMissing')); return; }
+  showContext(target.id,target.page);
  }
- const safeAsset = path => /^assets\/[a-f0-9]{64}\.(png|jpg|jpeg|gif|webp|bmp|mp4|webm|mp3|wav|ogg)$/.test(path);
+ const safeAsset = path => /^assets\/[a-f0-9]{64}\.(png|jpg|jpeg|gif|webp|bmp|mp4|webm|mp3|wav|ogg|m4a|pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv)$/.test(path);
+ const assetIdentity=media=>(media.Kind||'image')+':'+(media.Path||'').replace(/\.[a-z0-9]+$/i,'');
  function layoutReferences() {
   for (const slot of document.querySelectorAll('.quote-slot')) {
    const parent = document.body.classList.contains('palette-wechat') ? slot.closest('.content').querySelector('.reference-zone') : slot;
@@ -113,9 +135,10 @@
   const prefix = senderPrefix(m); return prefix && value.startsWith(prefix[0]) ? value.slice(prefix[0].length) : value;
  }
  function renderMedia(media, kind) {
+  if(media.Kind==='file'){const link=element('a',label('ReaderSaveFile'),'file-download');link.href=archiveBase+media.Path;link.download=media.Name||'file';link.onclick=e=>{if(hostAction({action:'save-file',path:media.Path,name:media.Name}))e.preventDefault();};return link;}
   const node = element(media.Kind === 'video' ? 'video' : media.Kind === 'audio' ? 'audio' : 'img');
   node.src = archiveBase + media.Path;
-  function fit(width, height) { if (width > 0 && height > 0) node.width = Math.max(1, Math.round(Math.min(width, 560, width * 420 / height))); }
+  function fit(width, height) { if (width > 0 && height > 0) node.width = Math.max(1, Math.round(Math.min(width, 560, width * 420 / height)));if(pinBottom)requestAnimationFrame(scrollBottom); }
   if (node.tagName === 'IMG') { node.alt = media.Name; node.loading = 'lazy'; node.onload = () => fit(node.naturalWidth, node.naturalHeight); }
   else { node.controls = true; node.preload = 'none'; if (node.tagName === 'VIDEO') node.onloadedmetadata = () => fit(node.videoWidth,node.videoHeight); }
   node.onerror = () => node.replaceWith(element('div', label('ReaderKind_' + kind) + ' · ' + label('ReaderCannotPlay'), 'placeholder'));
@@ -157,6 +180,7 @@
  }
  function protoFields(encoded){if(encoded.length>1024*1024)return [];const data=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0)),fields=wireFields(data),segments=fields.filter(f=>f.id===40800&&f.bytes);return (segments.length?segments.map(f=>wireFields(f.bytes)):[fields]).map(part=>{const extra=part.find(f=>f.id===48210&&f.bytes);if(extra)try{return [...part,...wireFields(extra.bytes)];}catch{}return part;});}
  function matches(m){
+  if(contextMode)return true;
   const parts=effectiveParts(m),sender=contactNames[m.Conversation+'/'+m.Sender]||contactNames[m.Sender]||m.SenderName||m.Sender||'';
   const query=$('message-search').value.toLocaleLowerCase(),author=$('sender-filter').value.toLocaleLowerCase(),kind=$('kind-filter').value;
   const searchable=[m.DisplayText||m.Text||'',sender,...parts.flatMap(p=>[p.Text,p.Title,p.Detail,p.ReferenceText])].join(' ').toLocaleLowerCase();
@@ -175,10 +199,13 @@
   finally{if(generation===searching){$('find-page').disabled=false;$('stop-search').hidden=true;}}
  };
  $('stop-search').onclick=()=>{stopSearch();text('filter-status','');};
- for(const id of ['kind-filter','sender-filter','date-from','date-to','self-filter'])$(id).oninput=()=>{stopSearch();render();};
- $('reset-filter').onclick=()=>{stopSearch();for(const id of ['message-search','kind-filter','sender-filter','date-from','date-to'])$(id).value='';$('self-filter').checked=false;text('filter-status','');render();};
- function inlineEmoji(platform,key,title){const path=emojis[platform+':'+key];if(!path||!safeAsset(path))return element('span',title||'['+label('ReaderKind_sticker')+']','inline-face');const img=element('img','','inline-face');img.src=archiveBase+path;img.alt=title||key;img.title=title||key;img.onerror=()=>img.replaceWith(element('span',img.alt,'inline-face'));return img;}
- function textWithEmoji(node,value,platform){if(platform!=='WeChat'){node.textContent=value;return;}let at=0;for(const match of value.matchAll(/\[[^\[\]\r\n]{1,32}\]/g)){node.append(document.createTextNode(value.slice(at,match.index)));node.append(emojis['WeChat:'+match[0]]?inlineEmoji('WeChat',match[0],match[0]):document.createTextNode(match[0]));at=match.index+match[0].length;}node.append(document.createTextNode(value.slice(at)));}
+ for(const id of ['kind-filter','sender-filter','date-from','date-to','self-filter'])$(id).oninput=()=>{stopSearch();leaveContext();render();};
+ $('reset-filter').onclick=()=>{stopSearch();leaveContext();for(const id of ['message-search','kind-filter','sender-filter','date-from','date-to'])$(id).value='';$('self-filter').checked=false;text('filter-status','');render();};
+ function emojiPath(platform,key){if(!key)return null;const name=String(key).trim().replace(/^\//,'').replace(/^\[(.*)\]$/,'$1');return emojis[platform+':'+key]||emojis[platform+':'+name]||emojis[platform+':/'+name]||emojis[platform+':['+name+']'];}
+ const emojiPatterns={};
+ for(const platform of ['QQ','WeChat']){const tokens=new Set();for(const key of Object.keys(emojis).filter(k=>k.startsWith(platform+':'))){let token=key.slice(platform.length+1);if(!token.startsWith('/')&&!token.startsWith('['))continue;const name=token.replace(/^\//,'').replace(/^\[(.*)\]$/,'$1');tokens.add('['+name+']');tokens.add('/'+name);}const escaped=Array.from(tokens).sort((a,b)=>b.length-a.length).map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));emojiPatterns[platform]=escaped.length?new RegExp(escaped.join('|'),'g'):null;}
+ function inlineEmoji(platform,key,title){const path=emojiPath(platform,key);if(!path||!safeAsset(path))return element('span',title||'['+label('ReaderKind_sticker')+']','inline-face');const img=element('img','','inline-face');img.src=archiveBase+path;img.alt=title||key;img.title=title||key;img.onerror=()=>img.replaceWith(element('span',img.alt,'inline-face'));return img;}
+ function textWithEmoji(node,value,platform){const pattern=emojiPatterns[platform];if(!pattern){node.textContent=value;return;}let at=0;for(const match of value.matchAll(pattern)){node.append(document.createTextNode(value.slice(at,match.index)));node.append(inlineEmoji(platform,match[0],match[0]));at=match.index+match[0].length;}node.append(document.createTextNode(value.slice(at)));}
  function sourceDisclosure(message) {
   const details = element('details', '', 'source'), summary = element('summary', label('ReaderSource'));
   details.append(summary);
@@ -218,12 +245,20 @@
   const preview=decode(data,0);return preview+(binary.length>data.length?'\n'+label('ReaderSourceTruncated'):'');
  }
  function render() {
-  const fragment = document.createDocumentFragment();let shownCount=0;
+  pinBottom=false;const fragment = document.createDocumentFragment();let shownCount=0;
+  text('filter-label',label(contextMode?'ReaderContextMode':'ReaderFilters'));
+  const hasFilters=Object.values(readFilters()).some(value=>value!==''&&value!==false);
   for (const m of messages) {
+   const repairedKeys=new Set(m.LocalMediaKeys||[]);
+   function collectResourceKeys(parts){for(const p of parts||[]){for(const key of p.MediaKeys||[])repairedKeys.add(key);for(const entry of p.Forwarded||[])collectResourceKeys(entry.Parts);}}
+   collectResourceKeys(m.Parts);
+   const mediaEntries=[...(m.Media||[])];
+   const repairedMessage=index.resourceMedia?.['message:'+m.Id];if(repairedMessage)mediaEntries.push(repairedMessage);
+   for(const key of repairedKeys){const resource=resourceMap.get(key.toLowerCase());if(resource&&!mediaEntries.some(item=>item.Path===resource.Path&&item.Key===resource.Key))mediaEntries.push(resource);}
    const displayName=contactNames[m.Conversation+'/'+m.Sender] || contactNames[m.Sender] || m.SenderName || m.Sender;
    if(!matches(m))continue;shownCount++;
    const parts=effectiveParts(m),system=parts.every(p=>['system','poke','reaction'].includes(p.Kind));
-   const face=p=>p.Inline||p.EmojiId!=null||p.Kind==='sticker'&&(/^#[0-9]+$/.test(p.Title||'')||/^\/[^\s]+$/.test(p.Title||''));
+   const face=p=>p.Inline||p.EmojiId!=null||p.Kind==='sticker'&&(/^#[0-9]+$/.test(p.Title||'')||/^\/[^\s]+$/.test(p.Title||'')||!!emojiPath(m.Platform,p.Title));
    const article = element('article', '', 'message' + (system ? ' system' : m.IsSelf ? ' self' : '')); if (m.Id) article.id = 'msg-' + m.Id;
    article.messageData=m;
    const avatar = element('div', displayName && displayName!=='0'?Array.from(displayName)[0]:'?', 'avatar');
@@ -231,17 +266,18 @@
    const sender=displayName && displayName!=='0'?displayName:label('ReaderUnknownSender');
    const time = element('div', (system ? '' : sender + '  ') + (m.Timestamp>0 && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : label('ReaderUnknownTime')), 'timestamp');
    const bubble = element('div', '', 'bubble'), referenceZone = element('div', '', 'reference-zone');
-   if(parts.length&&parts.every(p=>['image','video','sticker'].includes(p.Kind)&&!face(p))&&(m.Media||[]).some(media=>safeAsset(media.Path)))bubble.classList.add('visual-only');
+   if(parts.length&&parts.every(p=>['image','video','sticker'].includes(p.Kind)&&!face(p))&&mediaEntries.some(media=>safeAsset(media.Path)))bubble.classList.add('visual-only');
    const used = new Set(), reserved = new Set();
-   function reserve(items) { for (const p of items) { for (const key of p.MediaKeys || []) reserved.add(key); for (const entry of p.Forwarded || []) reserve(entry.Parts || []); } }
+   function reserve(items) { for (const p of items) { for (const key of p.MediaKeys || []) reserved.add(key.toLowerCase()); for (const entry of p.Forwarded || []) reserve(entry.Parts || []); } }
    reserve(parts);
    function partView(part, depth = 0) {
     const kind = part.Kind || 'unsupported', block = element('div', '', 'part kind-' + kind);
     if(face(part)){const inline=element('span','','part kind-face');inline.append(inlineEmoji(m.Platform,part.EmojiId??(part.Title||'').replace(/^#/,''),part.Title));return inline;}
-    const matched = kind === 'forward' ? [] : (m.Media || []).filter(media => safeAsset(media.Path) && (
-     part.MediaKeys?.includes(media.Key) || part.MediaKeys?.includes(media.Name) || (parts.length === 1 && depth === 0 && kind !== 'forward')));
+    const matched = kind === 'forward' ? [] : mediaEntries.filter(media => safeAsset(media.Path) && (
+     mediaMatches(part.MediaKeys,media) || (parts.length === 1 && depth === 0 && kind !== 'forward')));
     const candidates = matched.some(media => media.Quality !== 'thumbnail') ? matched.filter(media => media.Quality !== 'thumbnail') : matched;
     const visual=['image','video','sticker'].includes(kind)&&candidates.length>0;
+    if(visual&&candidates.every(media=>used.has(assetIdentity(media))))return document.createDocumentFragment();
     const rich = /<[^>]+>|&lt;\/?\w+/.test(part.Text || '');
     if (kind === 'reply') {
      const quote = element('blockquote', '', 'quote');
@@ -283,8 +319,8 @@
     }
     const shown = new Set();
     for (const media of candidates) {
-     if (shown.has(media.Path)) continue; shown.add(media.Path);
-     used.add(media.Path); block.append(renderMedia(media, kind));
+     if (shown.has(assetIdentity(media)) || depth===0&&used.has(assetIdentity(media))) continue; shown.add(assetIdentity(media));
+     used.add(assetIdentity(media)); block.append(renderMedia(media, kind));
      if (media.Quality === 'thumbnail') block.append(element('small', label('ReaderThumbnail')));
     }
     if (['image','video','audio','sticker','file'].includes(kind) && !candidates.length) block.append(element('div',
@@ -293,26 +329,38 @@
     return block;
    }
    for (const part of parts) bubble.append(partView(part));
-   for (const media of m.Media || []) {
-    if (safeAsset(media.Path) && !used.has(media.Path) && !reserved.has(media.Key) && !reserved.has(media.Name)) { used.add(media.Path); bubble.append(renderMedia(media, media.Kind)); }
+   for (const media of mediaEntries) {
+    if (safeAsset(media.Path) && !used.has(assetIdentity(media)) && !reserved.has((media.Key||'').toLowerCase()) && !reserved.has((media.Name||'').toLowerCase())) { used.add(assetIdentity(media)); bubble.append(renderMedia(media, media.Kind)); }
    }
-   content.append(time, bubble, referenceZone, sourceDisclosure(m)); if (!system) article.append(avatar); article.append(content); fragment.append(article);
+   content.append(time, bubble, referenceZone, sourceDisclosure(m));
+   if(hasFilters&&!contextMode){const context=element('button',label('ReaderShowContext'),'show-context');context.onclick=()=>showContext(m.Id);content.append(context);}
+   if (!system) article.append(avatar); article.append(content); fragment.append(article);
   }
   $('messages').replaceChildren(fragment); layoutReferences(); $('messages').scrollTop = 0;
   if(!shownCount)$('messages').append(element('div',label('ReaderNoPageMatches'),'empty-results'));
   $('messages').classList.remove('enter'); void $('messages').offsetWidth; $('messages').classList.add('enter');
  }
- $('contacts-search').oninput = list; $('message-search').oninput=()=>{stopSearch();render();};
+ $('contacts-search').oninput = list; $('message-search').oninput=()=>{stopSearch();leaveContext();render();};
  function go(n){if(!current)return;stopSearch();page=Math.max(0,Math.min(current.pages-1,n));load();}
  $('previous').onclick=()=>go(page-1);$('next').onclick=()=>go(page+1);$('first').onclick=()=>go(0);$('last').onclick=()=>{if(current)go(current.pages-1);};
  $('page-go').onclick=()=>{if(!current)return;const n=Number($('page-input').value);if(Number.isInteger(n)&&n>=1&&n<=current.pages)go(n-1);else $('page-input').reportValidity();};$('page-input').onkeydown=e=>{if(e.key==='Enter')$('page-go').click();};
  const preview=$('image-preview'),picture=$('preview-image'),stage=$('image-stage');let imagePath='',imageName='',scale=1,x=0,y=0,drag=null;
+ const split=$('sidebar-splitter');let sideDrag=null,windowDrag=null;
+ function sideWidth(value){return Math.max(180,Math.min(480,innerWidth-320,Number(value)||290));}
+ function applySidebar(){document.body.classList.toggle('sidebar-collapsed',!!readerPrefs.sidebarCollapsed);document.body.style.setProperty('--sidebar-width',sideWidth(readerPrefs.sidebarWidth)+'px');document.querySelector('aside').inert=!!readerPrefs.sidebarCollapsed;$('sidebar-toggle').setAttribute('aria-expanded',String(!readerPrefs.sidebarCollapsed));}
+ $('sidebar-toggle').onclick=()=>{readerPrefs.sidebarCollapsed=!readerPrefs.sidebarCollapsed;applySidebar();savePrefs();};
+ split.onpointerdown=e=>{if(e.button!==0)return;sideDrag={x:e.clientX,width:document.querySelector('aside').getBoundingClientRect().width};split.setPointerCapture(e.pointerId);e.preventDefault();};split.onpointermove=e=>{if(sideDrag){readerPrefs.sidebarWidth=sideWidth(sideDrag.width+e.clientX-sideDrag.x);applySidebar();}};split.onpointerup=()=>{sideDrag=null;savePrefs();};split.onpointercancel=()=>sideDrag=null;split.ondblclick=()=>{readerPrefs.sidebarWidth=290;applySidebar();savePrefs();};split.onkeydown=e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();readerPrefs.sidebarWidth=sideWidth((readerPrefs.sidebarWidth||290)+(e.key==='ArrowRight'?10:-10));applySidebar();savePrefs();}};applySidebar();
+ const imageHeader=$('image-window-header');
+ function centerPreview(){const width=Math.min(760,innerWidth-32),height=Math.min(560,innerHeight-40);Object.assign(preview.style,{width:width+'px',height:height+'px',left:Math.max(0,(innerWidth-width)/2)+'px',top:Math.max(0,(innerHeight-height)/2)+'px'});}
+ imageHeader.onpointerdown=e=>{if(e.button!==0||e.target.closest('button'))return;const box=preview.getBoundingClientRect();windowDrag={x:e.clientX,y:e.clientY,left:box.left,top:box.top};imageHeader.setPointerCapture(e.pointerId);e.preventDefault();};
+ imageHeader.onpointermove=e=>{if(!windowDrag)return;preview.style.left=Math.max(0,Math.min(innerWidth-preview.offsetWidth,windowDrag.left+e.clientX-windowDrag.x))+'px';preview.style.top=Math.max(0,Math.min(innerHeight-40,windowDrag.top+e.clientY-windowDrag.y))+'px';};imageHeader.onpointerup=()=>windowDrag=null;imageHeader.onpointercancel=()=>windowDrag=null;
+ new ResizeObserver(()=>{if(preview.open)fitImage();}).observe(stage);
  for(const [id,key] of [['image-previous','ReaderPreviousImage'],['image-next','ReaderNextImage'],['image-close','ReaderClose'],['zoom-fit','ReaderFitImage'],['image-save','ReaderSaveImage']])text(id,label(key));
  preview.setAttribute('aria-label',label('ReaderPreviewImage'));$('zoom-in').title=label('ReaderZoomIn');$('zoom-out').title=label('ReaderZoomOut');
  function transform(){picture.style.transform=`translate(${x}px,${y}px) scale(${scale})`;text('zoom-value',Math.round(scale*100)+'%');}
  function fitImage(){x=y=0;scale=Math.min(1,(stage.clientWidth-32)/Math.max(1,picture.naturalWidth),(stage.clientHeight-32)/Math.max(1,picture.naturalHeight));transform();}
- function imageList(){const seen=new Set();return Array.from(document.querySelectorAll('#messages img.previewable')).filter(img=>{if(seen.has(img.dataset.asset))return false;seen.add(img.dataset.asset);return true;});}
- function openImage(path,name){if(!safeAsset(path))return;imagePath=path;imageName=name||'image';picture.src=archiveBase+path;picture.alt=imageName;picture.onload=fitImage;if(!preview.open)preview.showModal();const list=imageList(),at=list.findIndex(img=>img.dataset.asset===path);text('image-title',imageName+(at>=0?' · '+(at+1)+' / '+list.length:''));$('image-previous').disabled=at<=0;$('image-next').disabled=at<0||at+1>=list.length;}
+ function imageList(){const seen=new Set();return Array.from(document.querySelectorAll('#messages img.previewable')).filter(img=>{const key=assetIdentity({Kind:'image',Path:img.dataset.asset});if(seen.has(key))return false;seen.add(key);return true;});}
+ function openImage(path,name){if(!safeAsset(path))return;imagePath=path;imageName=name||'image';picture.src=archiveBase+path;picture.alt=imageName;picture.onload=fitImage;if(!preview.open){centerPreview();preview.showModal();}const list=imageList(),at=list.findIndex(img=>img.dataset.asset===path);text('image-title',imageName+(at>=0?' · '+(at+1)+' / '+list.length:''));$('image-previous').disabled=at<=0;$('image-next').disabled=at<0||at+1>=list.length;}
  function changeImage(delta){const list=imageList(),at=list.findIndex(img=>img.dataset.asset===imagePath),next=list[at+delta];if(next)openImage(next.dataset.asset,next.alt);}
  function zoom(factor,cx=0,cy=0){const next=Math.max(.05,Math.min(20,scale*factor)),ratio=next/scale;x=cx-(cx-x)*ratio;y=cy-(cy-y)*ratio;scale=next;transform();}
  stage.addEventListener('wheel',e=>{e.preventDefault();const box=stage.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-box.left-box.width/2,e.clientY-box.top-box.height/2);},{passive:false});
@@ -335,6 +383,7 @@
   menu.hidden=false;menu.style.left=Math.min(e.clientX,innerWidth-menu.offsetWidth-8)+'px';menu.style.top=Math.min(e.clientY,innerHeight-menu.offsetHeight-8)+'px';menu.querySelector('button')?.focus();
  });
  document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target))hideMenu();});document.addEventListener('keydown',e=>{if(e.key==='Escape')hideMenu();if(!menu.hidden&&['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const buttons=Array.from(menu.querySelectorAll('button')),at=buttons.indexOf(document.activeElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length].focus();}});$('messages').addEventListener('scroll',hideMenu);
+ $('messages').addEventListener('wheel',()=>pinBottom=false,{passive:true});$('messages').addEventListener('pointerdown',()=>pinBottom=false);
  document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();$('message-search').focus();}if(e.altKey&&e.key==='ArrowLeft'){e.preventDefault();go(page-1);}if(e.altKey&&e.key==='ArrowRight'){e.preventDefault();go(page+1);}});
- list(); if (index.conversations.length) { current=index.conversations[0];try{const saved=JSON.parse(localStorage.getItem(positionKey));const found=index.conversations.find(c=>c.id===saved?.id);if(found){current=found;page=Math.max(0,Math.min(current.pages-1,Number(saved.page)||0));}}catch{}list();load(); }
+ list(); if (index.conversations.length) { current=index.conversations[0];try{const saved=JSON.parse(localStorage.getItem(positionKey));const found=index.conversations.find(c=>c.id===saved?.id);if(found){current=found;page=Math.max(0,Math.min(current.pages-1,Number(saved.page)||0));}}catch{}if(readerPrefs.autoLast)page=Math.max(0,current.pages-1);list();load(); }
 })();

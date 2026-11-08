@@ -6,8 +6,72 @@ using System.Text.Json.Nodes;
 namespace Storloom.Core.Chats;
 
 public static class ChatReaderRepair {
-    // Refresh presentation only. Messages, reference maps and media remain untouched.
-    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false) {
+    public static int RestoreResources(string directory, string source, CancellationToken cancellation = default,
+        IProgress<ScanProgress>? progress = null, bool includeLocalConfiguration = false) {
+        directory = PathPolicy.Normalize(directory); source = PathPolicy.Normalize(source);
+        PathPolicy.AssertNoLinks(directory); PathPolicy.AssertNoLinks(source);
+        var report = JsonFiles.Read<ChatExportResult>(Path.Combine(directory, "export-report.json"));
+        if (report.CanResume) throw new InvalidOperationException("Finish the interrupted export before repairing its resources.");
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var resources = new Dictionary<string, ChatMedia>(StringComparer.OrdinalIgnoreCase);
+        var reusable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        bool CanReuse(ChatMedia media) {
+            if (reusable.TryGetValue(media.Path, out bool valid)) return valid;
+            string path = TransferService.Child(directory, media.Path);
+            valid = media.Quality != "thumbnail" && media.Path.StartsWith("assets/", StringComparison.Ordinal) && File.Exists(path);
+            if (valid) {
+                PathPolicy.AssertNoLinks(path); using var stream = File.OpenRead(path);
+                valid = Convert.ToHexString(TransferService.Hash(stream, cancellation)).Equals(Path.GetFileNameWithoutExtension(path), StringComparison.OrdinalIgnoreCase);
+            }
+            reusable[media.Path] = valid; return valid;
+        }
+        string indexText = File.ReadAllText(Path.Combine(directory, "archive-index.js"));
+        if (!indexText.StartsWith("window.archiveIndex=", StringComparison.Ordinal)) throw new InvalidDataException("Unsupported reader index.");
+        var oldIndex = JsonNode.Parse(indexText["window.archiveIndex=".Length..].TrimEnd().TrimEnd(';'))!;
+        if (oldIndex["resourceMedia"]?.Deserialize<Dictionary<string, ChatMedia>>() is {} previous)
+            foreach (var pair in previous) if (CanReuse(pair.Value)) resources[pair.Key] = pair.Value;
+        void Collect(IEnumerable<MessagePart> parts) {
+            foreach (var part in parts) {
+                foreach (string key in part.MediaKeys ?? []) keys.Add(key);
+                foreach (var entry in part.Forwarded) Collect(entry.Parts);
+            }
+        }
+        foreach (string line in File.ReadLines(Path.Combine(directory, "messages.jsonl"))) {
+            cancellation.ThrowIfCancellationRequested();
+            var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid archived message.");
+            foreach (var media in message.Media) if (media.Key != null && CanReuse(media)) resources.TryAdd(media.Key, media);
+            Collect(message.Parts);
+        }
+        string stage = Path.Combine(directory, ".resource-repair-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stage);
+        try {
+            using (var resolver = new ChatArchiveWriter(source, stage, stage, [], null, cancellation,
+                Path.GetFileName(source).StartsWith("wxid_", StringComparison.OrdinalIgnoreCase) ? Path.GetFileName(source) : Directory.GetParent(source)!.Name, includeLocalConfiguration)) {
+                int done = 0;
+                foreach (string key in keys) {
+                    cancellation.ThrowIfCancellationRequested();
+                    ChatMedia? resource = resources.ContainsKey(key) ? null : resolver.ResolveMedia(key);
+                    if (resource != null) resources[key] = resource;
+                    progress?.Report(new("chat-resource-repair", ++done, 0, 0, Detail: null, TotalFiles: keys.Count));
+                }
+            }
+            string assets = Path.Combine(directory, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
+            foreach (string path in Directory.Exists(Path.Combine(stage, "assets")) ? Directory.EnumerateFiles(Path.Combine(stage, "assets")) : []) {
+                cancellation.ThrowIfCancellationRequested();
+                string target = Path.Combine(assets, Path.GetFileName(path)); PathPolicy.AssertNoLinks(path);
+                if (!File.Exists(target)) File.Move(path, target);
+                else {
+                    PathPolicy.AssertNoLinks(target);
+                    using var old = File.OpenRead(target); using var fresh = File.OpenRead(path);
+                    if (!SHA256.HashData(old).AsSpan().SequenceEqual(SHA256.HashData(fresh))) throw new InvalidDataException("Repaired asset conflicts with existing content.");
+                }
+            }
+            Refresh(directory, resourceMedia: resources);
+            return resources.Count;
+        } finally { PathPolicy.AssertNoLinks(stage); Directory.Delete(stage, true); }
+    }
+    // Refresh presentation and optional resource associations without rewriting messages or pages.
+    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false, IReadOnlyDictionary<string, ChatMedia>? resourceMedia = null) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
         string reportPath = Path.Combine(directory, "export-report.json");
         var report = JsonFiles.Read<ChatExportResult>(reportPath);
@@ -19,6 +83,16 @@ public static class ChatReaderRepair {
         string text = File.ReadAllText(indexPath); const string prefix = "window.archiveIndex=";
         if (!text.StartsWith(prefix, StringComparison.Ordinal) || !text.TrimEnd().EndsWith(';')) throw new InvalidDataException("Unsupported reader index.");
         var index = JsonNode.Parse(text[prefix.Length..].Trim().TrimEnd(';'))?.AsObject() ?? throw new InvalidDataException("Invalid reader index.");
+        if (resourceMedia != null) {
+            var resources = index["resourceMedia"] as JsonObject ?? new JsonObject();
+            foreach (var pair in resourceMedia) {
+                string asset = TransferService.Child(directory, pair.Value.Path);
+                if (!pair.Value.Path.StartsWith("assets/", StringComparison.Ordinal) || !File.Exists(asset)) throw new InvalidDataException("Invalid repaired resource.");
+                PathPolicy.AssertNoLinks(asset);
+                resources[pair.Key] = JsonSerializer.SerializeToNode(pair.Value);
+            }
+            index["resourceMedia"] = resources;
+        }
         if(emojiSource!=null){var emoji=new BuiltInEmoji(emojiSource,directory,includeInstalledEmoji);emoji.ExportAll();index["builtInEmoji"]=JsonSerializer.SerializeToNode(emoji.Exported);}
         string language = index["language"]?.GetValue<string>() ?? "en";
         if (language is not ("en" or "zh-CN")) throw new InvalidDataException("Unsupported reader language.");

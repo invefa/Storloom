@@ -27,18 +27,18 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
                         string? action=root.GetProperty("action").GetString();
                         if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)Clipboard.SetText(value);core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
-                        if(action!="save-image")return;
-                        string? path=root.GetProperty("path").GetString();string source=ResolveImagePath(directory,path);
+                        if(action is not ("save-image" or "save-file"))return;
+                        string? path=root.GetProperty("path").GetString();string source=action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
                         string name=Path.GetFileName(root.TryGetProperty("name",out var valueName)?valueName.GetString():null)??"image";
                         foreach(char invalid in Path.GetInvalidFileNameChars())name=name.Replace(invalid,'_');
                         string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
-                        var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T("ReaderSaveImage"),FileName=name,Filter="Image|*"+extension,AddExtension=true,DefaultExt=extension};
+                        var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T(action=="save-image"?"ReaderSaveImage":"ReaderSaveFile"),FileName=name,Filter="File|*"+extension,AddExtension=true,DefaultExt=extension};
                         if(picker.ShowDialog(this)!=true)return;
                         string target=PathPolicy.Normalize(picker.FileName);PathPolicy.AssertNoLinks(target);
                         if(target.Equals(source,StringComparison.OrdinalIgnoreCase))return;
                         if(File.Exists(target)&&NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared image destination cannot be overwritten.");
                         File.Copy(source,target,true);
-                        core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderImageSaved")}));
+                        core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
                     }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException){if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderSaveFailed")}));}
                 };
                 core.Settings.AreDefaultScriptDialogsEnabled = false; core.Settings.AreDevToolsEnabled = false; core.Settings.IsStatusBarEnabled = false;
@@ -65,6 +65,11 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T("ReaderRuntimeMissing") + "\n" + ex.Message));
             }
         };
+    }
+    private static string ResolveResourcePath(string directory,string? relative) {
+        if(relative==null||!System.Text.RegularExpressions.Regex.IsMatch(relative,"^assets/[a-f0-9]{64}\\.(pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv)$"))throw new InvalidDataException("Invalid archive resource.");
+        string path=TransferService.Child(directory,relative);PathPolicy.AssertNoLinks(path);
+        if(!File.Exists(path))throw new FileNotFoundException("Archive resource is missing.");return path;
     }
     internal static string ResolveImagePath(string directory,string? relative) {
         if(relative==null||!System.Text.RegularExpressions.Regex.IsMatch(relative,"^assets/[a-f0-9]{64}\\.(png|jpg|jpeg|gif|webp|bmp)$"))throw new InvalidDataException("Invalid archive image.");

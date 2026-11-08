@@ -15,6 +15,8 @@ public sealed class BuiltInEmoji {
     private readonly Dictionary<string,Resource> resources=new(StringComparer.Ordinal);
     private readonly Dictionary<string,string> exported=new(StringComparer.Ordinal);
     private readonly string destination;
+    private Regex? wechatTokens;
+    private bool tokensReady;
     public IReadOnlyDictionary<string,string> Exported => exported;
     public int CreatedFiles { get; private set; }
     public BuiltInEmoji(string source,string destination,bool includeInstalled=false) {
@@ -60,16 +62,23 @@ public sealed class BuiltInEmoji {
             void Aliases(JsonElement node) {
                 if(node.ValueKind==JsonValueKind.Array){foreach(var child in node.EnumerateArray())Aliases(child);}
                 if(node.ValueKind!=JsonValueKind.Object)return;
-                if(node.TryGetProperty("emojiId",out var id)&&node.TryGetProperty("describe",out var description)&&description.ValueKind==JsonValueKind.String && resources.TryGetValue("QQ:"+id.GetString(),out var resource))resources.TryAdd("QQ:"+description.GetString(),resource);
+                if(node.TryGetProperty("emojiId",out var id)&&node.TryGetProperty("describe",out var description)&&description.ValueKind==JsonValueKind.String && resources.TryGetValue("QQ:"+id.GetString(),out var resource)) {
+                    AddAliases("QQ",description.GetString()??"",resource);
+                }
                 foreach(var child in node.EnumerateObject())if(child.Value.ValueKind is JsonValueKind.Array or JsonValueKind.Object)Aliases(child.Value);
             }
             Aliases(json.RootElement);
         }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or JsonException){ }
     }
+    private void AddAliases(string platform,string value,Resource resource) {
+        string name=value.Trim().TrimStart('/').Trim('[',']');if(name.Length==0)return;
+        foreach(string alias in new[]{value,name,"/"+name,"["+name+"]"})resources.TryAdd(platform+":"+alias,resource);
+        tokensReady=false;
+    }
     internal void AddWeChat(Dictionary<string,byte[]> files) {
         if(files.TryGetValue("base-aliases.txt",out var aliases)) {
             string[] names=Encoding.UTF8.GetString(aliases).Split('|');for(int i=0;i<names.Length;i++) {
-                string file="expression_"+(i+1)+".png";if(files.TryGetValue(file,out var bytes)) resources.TryAdd("WeChat:["+names[i].TrimStart('/')+"]",new(()=>bytes,".png"));
+                string file="expression_"+(i+1)+".png";if(files.TryGetValue(file,out var bytes)) AddAliases("WeChat",names[i],new(()=>bytes,".png"));
             }
         }
         if(!files.TryGetValue("newemoji-config.xml",out var xml))return;
@@ -77,7 +86,7 @@ public sealed class BuiltInEmoji {
         foreach(var item in XDocument.Load(reader).Descendants("emoji")) {
             string? file=item.Element("fileName")?.Value;if(file==null || !files.TryGetValue(file,out var bytes))continue;
             foreach(var alias in item.Elements().Where(e=>e.Name.LocalName is "key" or "cn-value" or "qq-value" or "en-value" or "tw-value" or "th-value"))
-                resources.TryAdd("WeChat:"+alias.Value,new(()=>bytes,".png"));
+                AddAliases("WeChat",alias.Value,new(()=>bytes,".png"));
         }
     }
     private static byte[] ReadImage(string path){PathPolicy.AssertNoLinks(path);if(new FileInfo(path).Length>4*1024*1024)throw new InvalidDataException("Emoji exceeds limit.");return File.ReadAllBytes(path);}
@@ -96,9 +105,19 @@ public sealed class BuiltInEmoji {
     public void UseParts(string platform,IEnumerable<MessagePart> parts) {
         foreach(var part in parts){
             if(part.Inline || part.EmojiId!=null){Use(platform+":"+(part.EmojiId??part.Title.TrimStart('#')));if(part.Title!="")Use(platform+":"+part.Title);}
-            if(platform=="WeChat" && part.Text.Contains('['))foreach(Match match in Regex.Matches(part.Text,@"\[[^\[\]\r\n]{1,32}\]"))Use("WeChat:"+match.Value);
+            if(platform=="WeChat" && (part.Text.Contains('[')||part.Text.Contains('/'))) {
+                if(!tokensReady){var aliases=resources.Keys.Where(k=>k.StartsWith("WeChat:[",StringComparison.Ordinal)||k.StartsWith("WeChat:/",StringComparison.Ordinal)).Select(k=>k[7..]).OrderByDescending(k=>k.Length).Select(Regex.Escape).ToArray();wechatTokens=aliases.Length==0?null:new Regex(string.Join('|',aliases),RegexOptions.CultureInvariant,TimeSpan.FromSeconds(1));tokensReady=true;}
+                if(wechatTokens!=null)foreach(Match match in wechatTokens.Matches(part.Text))Use("WeChat:"+match.Value);
+            }
             if(part.Forwarded.Length>0)UseParts(platform,part.Forwarded.SelectMany(f=>f.Parts));
         }
+    }
+    internal MessagePart[] NormalizeParts(string platform,MessagePart[] parts) {
+        if(!parts.Any(p=>p.Forwarded.Length>0||p.Kind=="sticker"&&(p.MediaKeys?.Length??0)==0&&resources.ContainsKey(platform+":"+p.Title)))return parts;
+        return parts.Select(p=> {
+        if(p.Kind=="sticker" && (p.MediaKeys?.Length??0)==0 && resources.ContainsKey(platform+":"+p.Title))p=p with{Inline=true};
+        return p.Forwarded.Length==0?p:p with{Forwarded=p.Forwarded.Select(f=>f with{Parts=NormalizeParts(platform,f.Parts)}).ToArray()};
+        }).ToArray();
     }
     public void ExportAll(){foreach(string key in resources.Keys)Use(key);}
     internal void Restore(Dictionary<string,string>? previous){if(previous!=null)foreach(var pair in previous)exported[pair.Key]=pair.Value;}

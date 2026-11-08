@@ -36,7 +36,7 @@ internal static class CaptureWorker {
             process.StandardInput.Close();
             var errors = process.StandardError.ReadToEndAsync(cancellation);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-            timeout.CancelAfter(TimeSpan.FromMinutes(2));
+            timeout.CancelAfter(TimeSpan.FromMinutes(4));
             CaptureResponse? response = null;
             while (await process.StandardOutput.ReadLineAsync(timeout.Token) is string line) {
                 var frame = JsonSerializer.Deserialize<CaptureResponse>(line) ?? throw new InvalidDataException("Invalid capture worker frame.");

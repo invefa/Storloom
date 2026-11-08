@@ -78,7 +78,7 @@ public static class WeChatKeyCapture {
             FileShare.ReadWrite | FileShare.Delete)) input.ReadExactly(firstPage);
         cancellation.ThrowIfCancellationRequested();
         var extractor = new KeyExtractor(executable, rvas, firstPage,
-            marker => { if (marker == "CHATLOG_KEY_RECOVERY_CLIENT_OPEN_V1") diagnostics?.Report(new("wechat.capture.started", Processes: 1, ElapsedSeconds: clock.Elapsed.TotalSeconds)); }, _ => { }, 90);
+            marker => { if (marker == "CHATLOG_KEY_RECOVERY_CLIENT_OPEN_V1") diagnostics?.Report(new("wechat.capture.started", Processes: 1, ElapsedSeconds: clock.Elapsed.TotalSeconds)); }, _ => { }, 180);
         string found = extractor.ExtractKey();
         byte[] key = string.IsNullOrWhiteSpace(found) ? [] : Convert.FromHexString(found);
         if (cancellation.IsCancellationRequested) {

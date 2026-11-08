@@ -39,13 +39,15 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private readonly Dictionary<string, ChatMedia?> resolved = new(StringComparer.OrdinalIgnoreCase);
     private readonly WeChatImages images;
     private readonly BuiltInEmoji emoji;
+    private readonly WeChatVoices? voices;
     private long messageId;
     private bool adding;
     public int MediaFiles { get; private set; }
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null) {
+        this.voices = voices;
         this.pageParallelism = pageParallelism is >= 1 and <= 4 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination); work = PathPolicy.Normalize(work);
         this.source = source; this.destination = destination; this.work = work; this.contacts = contacts;
@@ -94,7 +96,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         IEnumerable<string> files = verified?.Keys ?? EnumerateMediaFiles(source);
         foreach (string relative in files) {
             cancellation.ThrowIfCancellationRequested();
-            if (!new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".dat", ".mp4", ".webm", ".mp3", ".wav", ".ogg", ".silk" }
+            if (!new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".dat", ".mp4", ".webm", ".mp3", ".wav", ".ogg", ".silk", ".m4a", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".7z", ".rar", ".txt", ".md", ".csv" }
                 .Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase) && !Regex.IsMatch(Path.GetFileName(relative), "^[a-fA-F0-9]{32}$")) continue;
             foreach (string key in new[] { Path.GetFileName(relative), Path.GetFileNameWithoutExtension(relative) }.Distinct(StringComparer.OrdinalIgnoreCase)) {
                 if (!media.TryGetValue(key, out var values)) media[key] = values = [];
@@ -124,6 +126,17 @@ internal sealed class ChatArchiveWriter : IDisposable {
             IsSelf = original.IsSelf || original.Sender == account || account.StartsWith(original.Sender + "_", StringComparison.Ordinal) };
         var attachments = new List<ChatMedia>();
         var parts = MessagePresentation.Parse(message);
+        if (parts.Any(p => p.Kind == "audio") && voices?.Resolve(message, cancellation) is byte[] wave) {
+            string voiceKey = "voice:" + WeChatVoices.Identity(message.Conversation, message.ServerId!);
+            string filename = Convert.ToHexString(SHA256.HashData(wave)).ToLowerInvariant() + ".wav";
+            string assets = Path.Combine(destination, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
+            string path = Path.Combine(assets, filename); if (File.Exists(path)) PathPolicy.AssertNoLinks(path);
+            if (!File.Exists(path)) { File.WriteAllBytes(path, wave); MediaFiles++; }
+            else { using var existing = File.OpenRead(path); if (!SHA256.HashData(existing).AsSpan().SequenceEqual(SHA256.HashData(wave))) throw new InvalidDataException("Exported voice changed."); }
+            resolved[voiceKey] = new("assets/" + filename, "audio", "voice.wav") { Key = voiceKey };
+            parts = parts.Select(p => p.Kind == "audio" ? p with { MediaKeys = [.. p.MediaKeys ?? [], voiceKey] } : p).ToArray();
+        }
+        parts = emoji.NormalizeParts(message.Platform,parts);
         int emojiBefore=emoji.CreatedFiles;emoji.UseParts(message.Platform,parts);MediaFiles+=emoji.CreatedFiles-emojiBefore;
         if (parts.Count(p => p.Kind is "image" or "video" or "audio" or "sticker") == 1 && message.LocalMediaKeys.Length > 0)
             parts = parts.Select(p => p.Kind is "image" or "video" or "audio" or "sticker" ? p with { MediaKeys = [.. p.MediaKeys ?? [], .. message.LocalMediaKeys] } : p).ToArray();
@@ -183,24 +196,32 @@ internal sealed class ChatArchiveWriter : IDisposable {
         checkpointTime = DateTime.UtcNow;
     }
     internal void SaveSafeProgress() { if (!adding) SaveProgress(); }
-    private ChatMedia? ResolveMedia(string key) {
+    internal ChatMedia? ResolveMedia(string key) {
         var candidates = new[] { key + "_h.dat", key + "_W.dat", key, key + ".dat", key + ".jpg", key + ".png", key + ".gif", key + ".webp", key + ".mp4", key + "_t.dat", key + "_t_W.dat", key + "_thumb.jpg" }
             .Where(media.ContainsKey).SelectMany(k => media[k]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (candidates.Length == 0) return null;
         // Prefer the full image over its thumbnail; never guess between ambiguous full-size files.
-        foreach (var group in candidates.GroupBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+        foreach (var group in candidates.GroupBy(p => Path.GetFileName(p) + "/" + Thumbnail(p), StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => Thumbnail(g.First()) ? 2 : Path.GetFileNameWithoutExtension(g.First()).EndsWith("_h", StringComparison.OrdinalIgnoreCase) ? 0 : 1)) {
-            if (group.Count() > 1 && (verified == null || group.Select(p => verified[p].Sha256).Distinct().Count() != 1)) continue;
+            if (group.Count() > 1) {
+                string Digest(string relative) {
+                    if (verified != null) return verified[relative].Sha256;
+                    string path = TransferService.Child(source, relative); PathPolicy.AssertNoLinks(path);
+                    using var input = File.OpenRead(path); return Convert.ToHexString(TransferService.Hash(input, cancellation));
+                }
+                if (group.Select(Digest).Distinct(StringComparer.OrdinalIgnoreCase).Take(2).Count() != 1) continue;
+            }
             var result = ResolveFile(key, group.First()); if (result != null) return result;
         }
         return null;
     }
-    private static bool Thumbnail(string path) => Regex.IsMatch(Path.GetFileNameWithoutExtension(path), "(_t|_t_W|_thumb)$", RegexOptions.IgnoreCase);
+    private static bool Thumbnail(string path) => Regex.IsMatch(Path.GetFileNameWithoutExtension(path), "(_t|_t_W|_thumb)$", RegexOptions.IgnoreCase) ||
+        path.Replace('\\', '/').Split('/').Any(segment => segment.Equals("Thumb", StringComparison.OrdinalIgnoreCase) || segment.Equals("ThumbStore", StringComparison.OrdinalIgnoreCase));
     private ChatMedia? ResolveFile(string key, string relative) {
         string path = TransferService.Child(source, relative); PathPolicy.AssertNoLinks(path);
         if (Path.GetExtension(path).Equals(".silk", StringComparison.OrdinalIgnoreCase)) return null;
         string originalExtension = Path.GetExtension(path).ToLowerInvariant();
-        if (originalExtension is ".mp4" or ".webm" or ".mp3" or ".wav" or ".ogg") return CopyStreaming(key, relative, path, originalExtension);
+        if (originalExtension is not (".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp" or ".dat" or "")) return CopyStreaming(key, relative, path, originalExtension);
         using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (input.Length > 128 * 1024 * 1024) return null;
         var data = new byte[(int)input.Length]; input.ReadExactly(data);
@@ -211,6 +232,12 @@ internal sealed class ChatArchiveWriter : IDisposable {
             byte[]? decoded = images.Decode(data, out extension); if (decoded == null) return null; data = decoded;
         } else if (extension is ".mp4" or ".webm") kind = "video";
         else if (extension is ".mp3" or ".wav" or ".ogg") kind = "audio";
+        if(kind=="image")extension=WeChatImages.Format(data)??extension;
+        if (extension == ".wxgf") {
+            byte[]? converted = WeChatAnimation.Convert(data, cancellation);
+            if (converted == null) return null;
+            data = converted; extension = ".gif";
+        }
         string assets = Path.Combine(destination, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
         string filename = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant() + extension;
         string target = Path.Combine(assets, filename);
@@ -235,7 +262,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             string filename = digest.ToLowerInvariant() + extension, target = Path.Combine(assets, filename);
             if (!File.Exists(target)) { File.Move(temporary, target); MediaFiles++; }
             else { PathPolicy.AssertNoLinks(target); using var existing = File.OpenRead(target); if (Convert.ToHexString(TransferService.Hash(existing, cancellation)) != digest) throw new InvalidDataException("Exported media changed; resume refused."); }
-            return new("assets/" + filename, extension is ".mp4" or ".webm" ? "video" : "audio", Path.GetFileName(relative)) { Key = key };
+            return new("assets/" + filename, extension is ".mp4" or ".webm" ? "video" : extension is ".mp3" or ".wav" or ".ogg" or ".m4a" ? "audio" : "file", Path.GetFileName(relative)) { Key = key };
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public void Finish(IProgress<ScanProgress>? progress) {

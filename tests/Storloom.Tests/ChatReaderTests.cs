@@ -142,6 +142,62 @@ public sealed class ChatReaderTests : IDisposable {
         Assert.Equal("system",messages[0].Parts[0].Kind);Assert.Equal("Alex invited Sam",messages[0].Parts[0].Text);Assert.Equal("Group card",messages[1].SenderName);
         Assert.Equal("Embedded text",Assert.Single(messages[1].Parts[0].Forwarded).Parts[0].Text);
     }
+    [Fact]
+    public void AccountSpecificEmoticonCachesDecryptDuringExportAndResourceRepairLeavesMessagesUntouched() {
+        string source=Path.Combine(root,"wxid_fixture_device");Directory.CreateDirectory(source);
+        const string id="0123456789abcdef0123456789abcdef";
+        string config=Path.Combine(source,"kvcomm");Directory.CreateDirectory(config);File.WriteAllText(Path.Combine(config,"key_12345_fixture.statistic"),"");
+        byte[] key=MD5.HashData(Encoding.UTF8.GetBytes("12345wxid_fixtureEMOTICON"));
+        using(var aes=Aes.Create()){aes.Key=key;File.WriteAllBytes(Path.Combine(source,id),aes.EncryptCbc(Png,key,PaddingMode.PKCS7));}
+        string duplicate=Path.Combine(source,"cache/Persist");Directory.CreateDirectory(duplicate);File.Copy(Path.Combine(source,id),Path.Combine(duplicate,id));
+        CryptographicOperations.ZeroMemory(key);
+        Database(Path.Combine(source,"message_0.db"),$"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(47,1700000000,'fixture','<msg><emoji md5=\"{id}\"/></msg>');");
+        var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"raw")),Path.Combine(root,"journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.WeChat);
+        var message=JsonSerializer.Deserialize<ChatMessage>(File.ReadLines(Path.Combine(result.Directory,"messages.jsonl")).Single())!;
+        Assert.Equal(Png,File.ReadAllBytes(Path.Combine(result.Directory,Assert.Single(message.Media).Path)));
+        string messages=Path.Combine(result.Directory,"messages.jsonl"), page=Directory.GetFiles(Path.Combine(result.Directory,"conversations"),"*-0.js").Single();
+        byte[] messageBefore=File.ReadAllBytes(messages),pageBefore=File.ReadAllBytes(page);
+        File.Delete(Path.Combine(result.Directory, message.Media[0].Path));
+        Assert.Equal(1,ChatReaderRepair.RestoreResources(result.Directory,source));
+        Assert.Equal(Png,File.ReadAllBytes(Path.Combine(result.Directory,message.Media[0].Path)));
+        Assert.Equal(messageBefore,File.ReadAllBytes(messages));Assert.Equal(pageBefore,File.ReadAllBytes(page));
+        Assert.Contains("resourceMedia",File.ReadAllText(Path.Combine(result.Directory,"archive-index.js")));
+    }
+    [Fact]
+    public void DocumentAttachmentsAreIndexedAndCopiedAsFiles() {
+        string source=Path.Combine(root,"documents");Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"fixture.pdf"),"%PDF-fixture");
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(49,1700000000,'fixture','[attachment] fixture.pdf');");
+        var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"raw")),Path.Combine(root,"journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.WeChat);
+        var message=JsonSerializer.Deserialize<ChatMessage>(File.ReadLines(Path.Combine(result.Directory,"messages.jsonl")).Single())!;
+        Assert.Equal("file",Assert.Single(message.Media).Kind);Assert.Equal("%PDF-fixture",File.ReadAllText(Path.Combine(result.Directory,message.Media[0].Path)));
+    }
+    [Fact]
+    public void VoiceDatabaseMatchesConversationAndUnsignedServerIdWithoutGuessingAnotherChat() {
+        string source=Path.Combine(root,"voices");Directory.CreateDirectory(source);
+        byte[] wave=Convert.FromHexString("524946462600000057415645666D74201000000001000100C05D000080BB00000200100064617461020000000000");
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,MsgSvrID);INSERT INTO MSG VALUES(34,1700000000,'fixture','<msg><voicemsg voicelength=\"1000\"/></msg>',-1),(34,1700000000,'another','<msg><voicemsg/></msg>',-1);");
+        Database(Path.Combine(source,"media_0.db"),"CREATE TABLE Name2Id(user_name TEXT);INSERT INTO Name2Id VALUES('fixture');CREATE TABLE VoiceInfo(chat_name_id,svr_id,voice_data);"+$"INSERT INTO VoiceInfo VALUES(1,-1,X'{Convert.ToHexString(wave)}');");
+        var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"raw")),Path.Combine(root,"journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.WeChat);
+        Assert.Empty(result.Issues); Assert.Equal(2, result.Messages);
+        var messages=File.ReadLines(Path.Combine(result.Directory,"messages.jsonl")).Select(l=>JsonSerializer.Deserialize<ChatMessage>(l)!).ToArray();
+        Assert.Equal("audio",Assert.Single(messages[0].Media).Kind);Assert.Equal(wave,File.ReadAllBytes(Path.Combine(result.Directory,messages[0].Media[0].Path)));
+        Assert.Empty(messages[1].Media);Assert.Equal(1,result.UnresolvedMedia);
+    }
+    [Fact]
+    public void EmojiAliasesShareResourcesAndBecomeInlineForBothPlatforms() {
+        string source=Path.Combine(root,"emoji"),destination=Path.Combine(root,"reader");Directory.CreateDirectory(source);Directory.CreateDirectory(destination);
+        string qq=Path.Combine(source,"nt_qq/nt_data/Emoji/BaseEmojiSyastems/EmojiSystermResource");Directory.CreateDirectory(qq);
+        File.WriteAllBytes(Path.Combine(qq,"75.png"),Png);File.WriteAllText(Path.Combine(qq,"default_config.json"),"[{\"emojiId\":\"75\",\"describe\":\"/斜眼笑\"}]");
+        var emoji=new BuiltInEmoji(source,destination);emoji.AddWeChat(new(){["base-aliases.txt"]=Encoding.UTF8.GetBytes("[斜眼笑]"),["expression_1.png"]=Png});
+        foreach(string platform in new[]{"QQ","WeChat"}) {
+            string? resource=emoji.Use(platform+":/斜眼笑");Assert.NotNull(resource);Assert.Equal(resource,emoji.Use(platform+":[斜眼笑]"));
+            Assert.True(Assert.Single(emoji.NormalizeParts(platform,[new("sticker",Title:"[斜眼笑]")])).Inline);
+        }
+        emoji.UseParts("WeChat",[new("text","/斜眼笑 [斜眼笑]")]);Assert.Contains("WeChat:/斜眼笑",emoji.Exported.Keys);
+    }
     private static void Database(string path, string sql) {
         Assert.Equal(0, sqlite3_open_v2(path, out nint db, 6, 0));
         try { Assert.Equal(0, sqlite3_exec(db, sql, 0, 0, 0)); } finally { sqlite3_close_v2(db); }

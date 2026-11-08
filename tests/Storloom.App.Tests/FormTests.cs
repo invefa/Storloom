@@ -495,7 +495,7 @@ public sealed class FormTests {
             Assert.Equal("4",Query("document.querySelectorAll('.message').length"));
             Assert.Contains("Quoted friend",Query("document.querySelector('blockquote').textContent"));
             Assert.Equal("1",Query("document.querySelectorAll('.kind-transfer').length"));
-            Assert.Equal("0",Query("document.querySelectorAll('details[open]').length"));
+            Assert.Equal("0",Query("document.querySelectorAll('details.source[open]').length"));
             Assert.Equal("0",Query("document.querySelectorAll('pre').length"));
             Assert.Equal("1",Query("document.querySelectorAll('.kind-image .placeholder').length"));
             Assert.False(core.Settings.AreHostObjectsAllowed);Assert.True(core.Settings.IsWebMessageEnabled);Assert.False(core.Settings.AreDefaultContextMenusEnabled);
@@ -615,17 +615,27 @@ public sealed class FormTests {
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}var core=window.Browser.CoreWebView2!;string Query(string s)=>Wait(core.ExecuteScriptAsync(s));
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="300"){Pump();Thread.Sleep(10);}
             Assert.Equal("300",Query("document.querySelectorAll('.message').length"));
+            Assert.Equal("true",Query("document.querySelector('#filter-panel').contains(document.querySelector('#message-search'))"));
+            Query("document.querySelector('#sidebar-toggle').click();true");Assert.Equal("true",Query("document.body.classList.contains('sidebar-collapsed')"));
+            Query("document.querySelector('#sidebar-toggle').click();true");Assert.Equal("false",Query("document.body.classList.contains('sidebar-collapsed')"));
+            Assert.Equal("true",Query("!!document.querySelector('#page-bottom')&&!!document.querySelector('#auto-last')&&!!document.querySelector('#auto-bottom')"));
             Query("document.querySelector('#last').click();true");while(DateTime.UtcNow<until&&Query("document.querySelector('#page').textContent")!="\"2 / 2\""){Pump();Thread.Sleep(10);}Assert.Contains("2 / 2",Query("document.querySelector('#page').textContent"));
             Query("document.querySelector('#first').click();true");while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="300"){Pump();Thread.Sleep(10);}
             Query("document.querySelector('#message-search').value='Unique';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();true");
             while(DateTime.UtcNow<until&&!Query("document.querySelector('#messages').textContent").Contains("Unique last-page fixture")){Pump();Thread.Sleep(10);}Assert.Contains("Unique last-page fixture",Query("document.querySelector('#messages').textContent"));
+            Query("document.querySelector('.show-context').click();true");Assert.Equal("false",Query("document.querySelector('#back-results').hidden"));Assert.Equal("1",Query("document.querySelectorAll('.referenced').length"));
+            Query("document.querySelector('#back-results').click();true");Assert.Equal("true",Query("document.querySelector('#back-results').hidden"));Assert.Equal("\"Unique\"",Query("document.querySelector('#message-search').value"));
             Query("document.querySelector('#reset-filter').click();true");
-            string items=System.Text.Json.JsonSerializer.Serialize(new[]{new ChatMessage("QQ","direct:fixture","fixture",1700000000,2,""){Parts=[new("text","Hi "),new("sticker",Title:"#75"){Inline=true,EmojiId="75"},new("text"," friend")]},new ChatMessage("QQ","direct:fixture","fixture",1700000001,2,""){Parts=[new("image",Title:"internal-name.png",MediaKeys:["fixture"])],Media=[new(image,"image","internal-name.png"){Key="fixture"}]}});
+            string items=System.Text.Json.JsonSerializer.Serialize(new[]{new ChatMessage("QQ","direct:fixture","fixture",1700000000,2,""){Parts=[new("text","Hi "),new("sticker",Title:"#75"){Inline=true,EmojiId="75"},new("text"," friend")]},new ChatMessage("QQ","direct:fixture","fixture",1700000001,2,""){Parts=[new("image",Title:"internal-name.png",MediaKeys:["FIXTURE"]),new("image",MediaKeys:["duplicate"])],Media=[new(image,"image","internal-name.png"){Key="fixture"},new(image.Replace(".png",".gif"),"image","internal-name.gif"){Key="duplicate"}]}});
             Query("window.receivePage(window.archiveIndex.conversations[0].id,1,"+items+");true");
             Assert.Equal("1",Query("document.querySelectorAll('.kind-face').length"));Assert.Equal("true",Query("(()=>{const p=document.querySelectorAll('.message:first-child .message-text,.message:first-child .kind-face');return Math.abs(p[0].getBoundingClientRect().top-p[1].getBoundingClientRect().top)<8})()"));
             Assert.Equal("1",Query("document.querySelectorAll('.visual-only').length"));Assert.Equal("0",Query("document.querySelectorAll('.visual-only .kind-title,.visual-only strong').length"));
+            Assert.Equal("1",Query("document.querySelectorAll('img.previewable').length"));
             Query("document.querySelector('#kind-filter').value='image';document.querySelector('#kind-filter').dispatchEvent(new Event('input'));true");Assert.Equal("1",Query("document.querySelectorAll('.message').length"));
             Query("document.querySelector('img.previewable').click();true");Assert.Equal("true",Query("document.querySelector('#image-preview').open"));
+            Assert.Equal("both",Query("getComputedStyle(document.querySelector('#image-preview')).resize").Trim('"'));
+            Assert.Equal("true",Query("document.querySelector('#image-preview').getBoundingClientRect().width<=780"));
+            Assert.Equal("true",Query("document.querySelector('#image-previous').parentElement===document.querySelector('#image-next').parentElement"));
             Query("document.querySelector('#image-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:-200,clientX:200,clientY:200,cancelable:true}));true");Assert.DoesNotContain("100%",Query("document.querySelector('#zoom-value').textContent"));
             Query("document.querySelector('#zoom-original').click();true");Assert.Contains("100%",Query("document.querySelector('#zoom-value').textContent"));
             Query("document.querySelector('#preview-image').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));true");Assert.Equal("false",Query("document.querySelector('#reader-menu').hidden"));Assert.Contains("Save image",Query("document.querySelector('#reader-menu').textContent"));
