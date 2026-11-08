@@ -89,6 +89,7 @@ public sealed class MessagePresentationTests {
         Assert.Equal("Fixture text",parts[0].Text);Assert.Contains("fixture.png",parts[1].MediaKeys!);
         Assert.Equal("Quoted text",parts[2].ReferenceText);Assert.Equal("/smile",parts[3].Title);
         Assert.Equal("unparsed",Assert.Single(QQMessageParser.Parse([0xff,0xff],2)).Kind);
+        Assert.StartsWith("Fixture text",ChatExporter.DecodeProto(payload));
     }
     [Theory]
     [InlineData(3,"file")][InlineData(4,"audio")][InlineData(5,"video")][InlineData(8,"system")]

@@ -17,7 +17,9 @@ Legacy WeChat `CompressContent` can contain LZ4 blocks; the decoder is bounded t
 
 Supported V1/V2 image containers now decode offline when a validated key is available. WxAM/HEVC images, resource-index-only references, SILK voice, unknown schemas and unsupported structured fields still need future adapters. A card/placeholder does not mean that every field has been parsed. `unsupportedMessages` and `unresolvedMedia` prevent a fully readable result from being falsely claimed. Raw backup verification and source preservation remain unchanged.
 
-Existing reading copies are not rewritten automatically. The desktop preview supplies its current interface and missing translated UI labels without modifying archive files. Re-export a verified raw backup for new parsing or an updated standalone HTML reader; source clients and originals are not required when the backup and necessary key are available.
+Existing reading copies are not rewritten automatically. The desktop preview supplies its current interface and missing translated UI labels without modifying archive files. A presentation refresh can replace the reader and index, retaining rollback copies while leaving JSONL, conversation pages, references and assets unchanged. Optional contact metadata resolves existing identifiers without re-exporting messages. New parsing that changes stored message parts still requires re-exporting a verified raw backup.
+
+Version 0.6.9 reads NTQQ profile and group metadata, including remarks and group-specific cards. Consecutive text and mention segments render inline while explicit newlines remain intact. Missing senders, timestamps and empty records have explicit labels instead of invented epoch dates or invisible bubbles. Expanded QQ source includes a bounded protobuf field preview and the complete original Base64 payload; unknown fields are not assigned guessed meanings. Message search also matches resolved sender names and displayed text segments.
 
 ## Research references
 

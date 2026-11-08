@@ -116,8 +116,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
         original = MessagePresentation.ResolveSenderPrefix(original);
         string peer = original.Conversation.StartsWith("direct:") ? original.Conversation[7..] :
             original.Conversation.StartsWith("group:") ? original.Conversation[6..] : original.Conversation;
-        string name = contacts.GetValueOrDefault(peer, peer);
-        var message = original with { Id = "m" + (messageId + 1), ConversationName = name, SenderName = contacts.GetValueOrDefault(original.Sender, original.SenderName ?? original.Sender),
+        string name = contacts.GetValueOrDefault(original.Conversation, contacts.GetValueOrDefault(peer, original.ConversationName ?? peer));
+        var message = original with { Id = "m" + (messageId + 1), ConversationName = name, SenderName = contacts.GetValueOrDefault(original.Conversation + "/" + original.Sender, contacts.GetValueOrDefault(original.Sender, original.SenderName ?? original.Sender)),
             IsSelf = original.IsSelf || original.Sender == account || account.StartsWith(original.Sender + "_", StringComparison.Ordinal) };
         var attachments = new List<ChatMedia>();
         var parts = MessagePresentation.Parse(message);

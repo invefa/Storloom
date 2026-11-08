@@ -381,6 +381,30 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Fact]
+    public void QqNumericMetadataProvidesRemarksGroupNamesAndScopedCards() {
+        string source=Dir("account"),metadata=Dir("account/nt_qq/nt_db");
+        CreateDatabase(Path.Combine(metadata,"profile_info.db"),"CREATE TABLE profile_info_v6(\"1002\",\"1000\",\"20002\",\"20009\");INSERT INTO profile_info_v6 VALUES(123,'fixture_uid','Nickname','Remark');");
+        CreateDatabase(Path.Combine(metadata,"group_info.db"),"CREATE TABLE group_list(\"60001\",\"60007\");INSERT INTO group_list VALUES(456,'Fixture group');CREATE TABLE group_member3(\"60001\",\"1002\",\"1000\",\"20002\");INSERT INTO group_member3 VALUES(456,123,'fixture_uid','Group card');");
+        var contacts=ChatExporter.ReadContactNames(source,ChatPlatform.QQ,null);
+        Assert.Equal("Remark",contacts["123"]);Assert.Equal("Remark",contacts["fixture_uid"]);
+        Assert.Equal("Fixture group",contacts["group:456"]);Assert.Equal("Group card",contacts["group:456/123"]);
+        Assert.False(contacts.ContainsKey("456"));
+    }
+
+    [Fact]
+    public void ReaderRepairChangesOnlyPresentationAndKeepsRollbackCopies() {
+        string source=Dir("account");CreateDatabase(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(123,2,1,'fixture');");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(root,"raw")),Dir("journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.QQ);
+        var files=Directory.GetFiles(result.Directory,"*",SearchOption.AllDirectories).Where(p=>Path.GetFileName(p)=="messages.jsonl"||p.Contains("\\conversations\\")).ToDictionary(p=>p,p=>SHA256.HashData(File.ReadAllBytes(p)));
+        string oldIndex=File.ReadAllText(Path.Combine(result.Directory,"archive-index.js"));
+        string rollback=ChatReaderRepair.Refresh(result.Directory,new Dictionary<string,string>{{"123","Fixture display name"}});
+        Assert.Equal(oldIndex,File.ReadAllText(Path.Combine(rollback,"archive-index.js")));
+        Assert.Contains("Fixture display name",File.ReadAllText(Path.Combine(result.Directory,"archive-index.js")));
+        foreach(var file in files)Assert.Equal(file.Value,SHA256.HashData(File.ReadAllBytes(file.Key)));
+    }
+
+    [Fact]
     public void ResumeRefusesAnOldExportFolderWithoutCreatingFiles() {
         string source=Dir("account");CreateDatabase(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");");
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(root,"raw")),Dir("journals"));

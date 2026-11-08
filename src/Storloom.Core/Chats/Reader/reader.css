@@ -43,3 +43,4 @@ body.palette-qq.dark{--canvas:#202020;--surface:#383838;--sidebar:#191919;--ink:
 @media(max-width:720px){.bubble,.reference-zone{max-width:95%}}
 
 nav strong{line-height:20px}nav small{display:block;line-height:16px}
+.bubble>.kind-text{display:inline;margin:0;padding:0;border:0}.bubble>.kind-text+.kind-text{margin:0;padding:0;border:0}

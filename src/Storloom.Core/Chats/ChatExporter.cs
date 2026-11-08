@@ -271,13 +271,30 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 string name = Path.GetFileName(path);
                 if ((attributes & FileAttributes.Directory) != 0) {
                     if (!new[] { "attach", "FileStorage", "image", "video", "pic", "cache" }.Contains(name, StringComparer.OrdinalIgnoreCase)) pending.Push(path);
-                } else if (new[] { "contact.db", "MicroMsg.db", "nt_contact.db" }.Contains(name, StringComparer.OrdinalIgnoreCase)) yield return path;
+                } else if (new[] { "contact.db", "MicroMsg.db", "nt_contact.db", "profile_info.db", "group_info.db" }.Contains(name, StringComparer.OrdinalIgnoreCase)) yield return path;
             }
         }
     }
     private static void ReadContacts(SqliteReader reader, Dictionary<string, string> contacts, CancellationToken cancellation) {
         foreach (var row in reader.Query("SELECT name FROM sqlite_master WHERE type='table'", cancellation).ToArray()) {
             string table = row[0]?.ToString() ?? "";
+            if (table is "profile_info_v6" or "group_member3" or "group_list" or "group_detail_info_ver1") {
+                var numeric = Columns(reader, table);
+                string NumericExpr(string column) => numeric.Contains(column) ? SqliteReader.Identifier(column) : "NULL";
+                bool group = table is "group_list" or "group_detail_info_ver1", member = table == "group_member3";
+                string numericId = group ? "60001" : "1002"; if (!numeric.Contains(numericId)) continue;
+                string numericSql = "SELECT " + string.Join(',', new[] { numericId, "1000", group ? "60007" : "20002", "20009", "60001" }.Select(NumericExpr)) + " FROM " + SqliteReader.Identifier(table);
+                foreach (var value in reader.Query(numericSql, cancellation)) {
+                    string key = value[0]?.ToString() ?? "", uid = value[1]?.ToString() ?? "";
+                    string name = (group || member ? value[2] : value[3])?.ToString()?.Trim() ?? "";
+                    if (name == "") name = value[2]?.ToString()?.Trim() ?? "";
+                    if (key is "" or "0" || name == "") continue;
+                    string prefix = group ? "group:" : member ? "group:" + value[4] + "/" : "";
+                    contacts[prefix + key] = name;
+                    if (!group && uid != "") contacts[prefix + uid] = name;
+                }
+                continue;
+            }
             if (!new[] { "contact", "rcontact", "friend", "friends" }.Contains(table, StringComparer.OrdinalIgnoreCase)) continue;
             var columns = Columns(reader, table);
             string? Pick(params string[] names) => names.FirstOrDefault(columns.Contains);
@@ -291,6 +308,20 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 if (key != "") contacts[key] = name;
             }
         }
+    }
+
+    public static Dictionary<string, string> ReadContactNames(string source, ChatPlatform platform, byte[]? secret, CancellationToken cancellation = default) {
+        source = PathPolicy.Normalize(source); PathPolicy.AssertNoLinks(source);
+        string work = Directory.CreateTempSubdirectory("storloom-contacts-").FullName;
+        var contacts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try {
+            foreach (string path in FindMetadataDatabases(source).Where(p => platform != ChatPlatform.QQ || !IsQQGuildDatabase(source, p))) {
+                cancellation.ThrowIfCancellationRequested(); string plain = Path.Combine(work, Guid.NewGuid().ToString("N") + ".db");
+                try { bool shifted = PrepareDatabase(path, plain, secret, platform, cancellation); using var reader = new SqliteReader(plain, shifted); ReadContacts(reader, contacts, cancellation); }
+                finally { DeletePlain(plain); }
+            }
+            return contacts;
+        } finally { Directory.Delete(work, true); }
     }
 
     public static IEnumerable<string> FindDatabases(string root, ChatPlatform platform) {
@@ -453,12 +484,12 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                         byte[] content = data.AsSpan(offset, length).ToArray(); offset += length;
                         if (field == 45101) parts.Add(Encoding.UTF8.GetString(content));
                         else if (field == 45402) parts.Add("[attachment] " + Encoding.UTF8.GetString(content));
-                        else if (field < 40000 || field == 47423) Parse(content, depth + 1);
+                        else if (field < 40000 || field is 40800 or 47423) Parse(content, depth + 1);
                     } else break;
                 }
             } catch (Exception ex) when (ex is InvalidDataException or OverflowException) { }
         }
         Parse(bytes, 0);
-        return parts.Count > 0 ? string.Join("\n", parts) : "[unparsed message; original payload retained in JSONL]";
+        return parts.Count > 0 ? string.Concat(parts) : "[unparsed message; original payload retained in JSONL]";
     }
 }

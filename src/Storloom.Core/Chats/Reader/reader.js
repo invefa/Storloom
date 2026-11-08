@@ -5,6 +5,8 @@
  let current = null, page = 0, messages = [], request = 0, pendingJump = null;
  const referenceMaps = new Map(), referenceLoads = new Map();
  const label = key => labels[key] || key;
+ const contactNames = index.contactNames || {};
+ for (const chat of index.conversations) chat.name = index.conversationNames?.[chat.id] || (chat.name==='0'?label('ReaderUnknownConversation'):chat.name);
  const element = (tag, text, className) => {
   const node = document.createElement(tag);
   if (text) node.textContent = text;
@@ -124,7 +126,14 @@
   // Large source nodes are built only when explicitly requested.
   details.addEventListener('toggle', () => {
    if (!details.open || details.dataset.loaded) return;
-   details.dataset.loaded = 'true'; const source = element('div', '', 'source-bubble'); details.append(source); source.append(element('pre', message.Text || ''));
+   details.dataset.loaded = 'true'; const source = element('div', '', 'source-bubble'); details.append(source);
+   const decodedText=(message.Text || '').startsWith('[unparsed message')?(message.Parts || []).filter(p=>['text','reply','system'].includes(p.Kind)).map(p=>p.Text || '').join(''):message.Text || '';
+   if(decodedText) source.append(element('pre',decodedText));
+   source.append(element('pre', JSON.stringify({platform:message.Platform,type:message.Type,sender:message.Sender,timestamp:message.Timestamp,serverId:message.ServerId,sequence:message.Sequence},null,2)));
+   if (message.Platform === 'QQ' && message.RawBase64) {
+    try { source.append(element('h4',label('ReaderDecodedSource')),element('pre',describeProto(message.RawBase64))); }
+    catch { source.append(element('small',label('ReaderCannotDecodeSource'))); }
+   }
    if (message.SourceText) source.append(element('h4', label('ReaderDatabaseText')), element('pre', message.SourceText));
    for (const [name, value] of [['RawBase64',message.RawBase64],['ExtraRawBase64',message.ExtraRawBase64]]) {
     if (value) source.append(element('h4', name), element('pre', value));
@@ -132,15 +141,34 @@
   });
   return details;
  }
+ function describeProto(encoded) {
+  const binary=atob(encoded), data=Uint8Array.from(binary.slice(0,262144),c=>c.charCodeAt(0));
+  let fields=0;
+  function decode(bytes,depth) {
+   let offset=0; const lines=[];
+   function number(){let value=0n;for(let shift=0n;shift<70n && offset<bytes.length;shift+=7n){const b=bytes[offset++];value|=BigInt(b&127)<<shift;if(!(b&128))return value;}throw Error('varint');}
+   while(offset<bytes.length && ++fields<2000){const tag=number(), id=Number(tag>>3n), wire=Number(tag&7n);if(!id)throw Error('tag');
+    if(wire===0){lines.push(id+': '+number());continue;}
+    let size=wire===2?Number(number()):wire===1?8:wire===5?4:-1;if(size<0||offset+size>bytes.length)throw Error('size');
+    const value=bytes.subarray(offset,offset+size);offset+=size;
+    if(wire===2 && depth<6 && [40800,47423,47710,40900].includes(id)){try{lines.push(id+': {\n'+decode(value,depth+1).split('\n').map(l=>'  '+l).join('\n')+'\n}');continue;}catch{}}
+    try{const text=new TextDecoder('utf-8',{fatal:true}).decode(value);if(!/[\u0000-\u0008\u000e-\u001f]/.test(text)){lines.push(id+': '+JSON.stringify(text));continue;}}catch{}
+    lines.push(id+': ['+size+' bytes] '+Array.from(value.subarray(0,64),b=>b.toString(16).padStart(2,'0')).join('')+(size>64?'…':''));
+   } return lines.join('\n');
+  }
+  const preview=decode(data,0);return preview+(binary.length>data.length?'\n'+label('ReaderSourceTruncated'):'');
+ }
  function render() {
   const fragment = document.createDocumentFragment(), term = $('message-search').value.toLocaleLowerCase();
   for (const m of messages) {
-   if (term && !m.Text.toLocaleLowerCase().includes(term) && !(m.SenderName || m.Sender).toLocaleLowerCase().includes(term)) continue;
+   const displayName=contactNames[m.Conversation+'/'+m.Sender] || contactNames[m.Sender] || m.SenderName || m.Sender;
+   if (term && !(m.Text || '').toLocaleLowerCase().includes(term) && !displayName.toLocaleLowerCase().includes(term) && !(m.Parts || []).some(p=>(p.Text || '').toLocaleLowerCase().includes(term))) continue;
    const parts = m.Parts?.length ? m.Parts : legacyParts(m), system = parts.every(p => p.Kind === 'system');
    const article = element('article', '', 'message' + (system ? ' system' : m.IsSelf ? ' self' : '')); if (m.Id) article.id = 'msg-' + m.Id;
-   const avatar = element('div', Array.from(m.SenderName || m.Sender || '?')[0], 'avatar');
+   const avatar = element('div', displayName && displayName!=='0'?Array.from(displayName)[0]:'?', 'avatar');
    const content = element('div', '', 'content'), date = new Date(m.Timestamp * 1000);
-   const time = element('div', (system ? '' : (m.SenderName || m.Sender) + '  ') + (Number.isNaN(date.valueOf()) ? m.Timestamp : date.toLocaleString()), 'timestamp');
+   const sender=displayName && displayName!=='0'?displayName:label('ReaderUnknownSender');
+   const time = element('div', (system ? '' : sender + '  ') + (m.Timestamp>0 && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : label('ReaderUnknownTime')), 'timestamp');
    const bubble = element('div', '', 'bubble'), referenceZone = element('div', '', 'reference-zone');
    const used = new Set(), reserved = new Set();
    function reserve(items) { for (const p of items) { for (const key of p.MediaKeys || []) reserved.add(key); for (const entry of p.Forwarded || []) reserve(entry.Parts || []); } }
@@ -150,7 +178,7 @@
     const rich = /<[^>]+>|&lt;\/?\w+/.test(part.Text || '');
     if (kind === 'reply') {
      const quote = element('blockquote', '', 'quote');
-     if (part.ReferenceSender) quote.append(element('span', part.ReferenceSender + ': ', 'quote-sender'));
+     if (part.ReferenceSender) quote.append(element('span', (contactNames[m.Conversation+'/'+part.ReferenceSender] || contactNames[part.ReferenceSender] || part.ReferenceSender) + ': ', 'quote-sender'));
      quote.append(element('span', part.ReferenceText || (part.ReferenceKind && part.ReferenceKind !== 'text' ? label('ReaderKind_' + part.ReferenceKind) : label('ReaderReferenceMissing')), 'quote-text'));
      if (part.ReferenceId) { quote.tabIndex = 0; quote.setAttribute('role', 'button'); quote.title = label('ReaderJumpReference');
       quote.onclick = () => jump(part.ReferenceId, quote); quote.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(part.ReferenceId, quote); } }; }
@@ -162,7 +190,9 @@
      if (part.Title) block.append(element('strong', part.Title));
     }
     if (kind === 'markdown') block.append(element('div', label('ReaderKind_markdown'), 'kind-title'));
-    if (part.Text && !rich) block.append(element('div', depth === 0 ? visibleText(m,part.Text) : part.Text, 'message-text'));
+    if (part.Text && (!rich || ['text','system','markdown'].includes(kind))) block.append(element('span', depth === 0 ? visibleText(m,part.Text) : part.Text, 'message-text'));
+    if (kind==='system' && !part.Text && !part.Title) block.append(element('span',label('ReaderEmptySystem'),'card-detail'));
+    if (kind==='text' && !part.Text) block.append(element('span',label('ReaderEmptyMessage'),'card-detail'));
     if (part.Detail) block.append(element('div', part.Detail, 'card-detail'));
     if (kind === 'forward' && !part.Forwarded?.length) block.append(element('div', label('ReaderForwardMissing'), 'placeholder'));
     if (depth < 4 && part.Forwarded?.length) {

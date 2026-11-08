@@ -577,6 +577,34 @@ public sealed class FormTests {
         }
     });
     [Fact]
+    public void RefreshedReaderShowsInlineMentionsNamesDecodedSourceAndUnknownTimes() => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);L.SetLanguage("en");
+        byte[] V(ulong n){var bytes=new List<byte>();do{byte b=(byte)(n&127);n>>=7;bytes.Add((byte)(b|(n>0?128:0)));}while(n>0);return bytes.ToArray();}
+        byte[] B(int field,byte[] value)=>[..V((ulong)(field*8+2)),..V((ulong)value.Length),..value];
+        byte[] Part(string value)=>B(40800,[..V(45002*8),1,..B(45101,System.Text.Encoding.UTF8.GetBytes(value))]);
+        byte[] mixed=[..Part("@Alex"),..Part(" hello")],system=B(40800,[..V(45002*8),8]);
+        Database(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\",\"40011\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,X'"+Convert.ToHexString(mixed)+"',1);INSERT INTO c2c_msg_table VALUES(1,0,0,X'"+Convert.ToHexString(system)+"',5);");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.QQ);
+        ChatReaderRepair.Refresh(export.Directory,new Dictionary<string,string>{{"1","Fixture friend"},{"2","Fixture sender"}});
+        var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        try {
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
+            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="2"){Pump();Thread.Sleep(10);}
+            Assert.Contains("Fixture friend",Query("document.querySelector('#chat-title').textContent"));
+            Assert.Contains("Fixture sender",Query("document.querySelector('.message:not(.system) .timestamp').textContent"));
+            Assert.Equal("true",Query("(()=>{let p=document.querySelectorAll('.message:not(.system) .message-text');return Math.abs(p[0].getBoundingClientRect().top-p[1].getBoundingClientRect().top)<1})()"));
+            Assert.DoesNotContain("1970",Query("document.querySelector('#messages').textContent"));
+            Assert.Contains("Time unavailable",Query("document.querySelector('.system').textContent"));
+            Query("document.querySelector('.message:not(.system) details').open=true;true");
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.source-bubble').length")!="1"){Pump();Thread.Sleep(10);}
+            Assert.Contains("45101",Query("document.querySelector('.source-bubble').textContent"));
+            Assert.Contains("@Alex",Query("document.querySelector('.source-bubble').textContent"));
+        } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+
+    [Fact]
     public void ReaderJumpsAcrossPagesAndKeepsSystemAndSourceContentOutsideOrdinaryBubbles() => OnUi(() => {
         string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,MsgSvrID);"+
