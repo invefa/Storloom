@@ -18,6 +18,7 @@ public sealed partial class ShellWindow {
     private Button chatNext = null!;
     private TextBox? backupInput;
     private PasswordBox? keyInput;
+    private bool verifyChatBackup = true;
     private string? activeManifest, readingDirectory, exportReport;
     private bool readingComplete;
     private void BuildChats() {
@@ -77,7 +78,7 @@ public sealed partial class ShellWindow {
         browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
         chatContent.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = View.Stack(View.Text(L.T("BackupStepTitle"), 23), View.Text(L.T("BackupStepLead"), color: "Muted"),
-                ChatField("AccountFolderLabel", View.Input(account.Directory, true)), ChatField("BackupTo", destination)) });
+                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination)) });
         chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat, true));
         if (verifiedBackups.TryGetValue(account.Directory, out string? previous) && File.Exists(previous))
             chatFooter.Children.Add(Button("UsePreviousBackup", () => { activeManifest = previous; _ = ArchiveDirectory(); chatStep = 2; RenderChatStage(); }));
@@ -86,18 +87,25 @@ public sealed partial class ShellWindow {
     private void BuildChatExport() {
         bool encrypted = NeedsKey();
         var stack = View.Stack(View.Text(L.T("ExportStepTitle"), 23), View.Text(L.T("ExportStepLead"), color: "Muted"),
-            ChatField("RawBackupLabel", View.Input(ArchiveDirectory(), true)), View.Text(L.T(!encrypted ? "PlainStep" : capturedKey != null ? "KeyReady" : "EncryptedStep")));
+            View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)), View.Text(L.T(!encrypted ? "PlainStep" : capturedKey != null ? "KeyReady" : Account().Platform == ChatPlatform.WeChat ? "WeChatKeyMethodsHelp" : "EncryptedStep")));
         chatContent.Children.Add(new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         if (encrypted) {
-            var methods = View.Row(AsyncButton("ReadPassive", CapturePassive));
-            if (Account().Platform == ChatPlatform.WeChat) methods.Children.Add(AsyncButton("ReadWeChatLogin", CaptureActive));
+            var methods = View.Row();
+            if (Account().Platform == ChatPlatform.WeChat) methods.Children.Add(AsyncButton("ReadWeChatLogin", CaptureActive, true));
+            methods.Children.Add(AsyncButton("ReadPassive", CapturePassive));
             stack.Children.Add(methods);
             var manual = new CheckBox { Content = L.T("ManualKey"), Margin = new Thickness(0, 16, 0, 8) };
-            keyInput = new PasswordBox { Visibility = Visibility.Collapsed, MaxWidth = 600, HorizontalAlignment = HorizontalAlignment.Stretch };
-            manual.Checked += (_, _) => { keyInput.Visibility = Visibility.Visible; UpdateExportEnabled(encrypted); };
-            manual.Unchecked += (_, _) => { keyInput.Clear(); keyInput.Visibility = Visibility.Collapsed; UpdateExportEnabled(encrypted); };
-            keyInput.PasswordChanged += (_, _) => UpdateExportEnabled(encrypted); stack.Children.Add(manual); stack.Children.Add(keyInput);
+            keyInput = View.SecretInput(); keyInput.Name = "database_key";
+            var manualFields = View.Stack(View.Field("DatabaseKeyLabel", keyInput), View.Text(L.T(Account().Platform == ChatPlatform.QQ ? "QQDatabaseKeyHelp" : "WeChatDatabaseKeyHelp"), color: "Muted"));
+            manualFields.Visibility = Visibility.Collapsed; keyInput.Visibility = Visibility.Collapsed;
+            manual.Checked += (_, _) => { manualFields.Visibility = keyInput.Visibility = Visibility.Visible; UpdateExportEnabled(encrypted); };
+            manual.Unchecked += (_, _) => { keyInput.Clear(); manualFields.Visibility = keyInput.Visibility = Visibility.Collapsed; UpdateExportEnabled(encrypted); };
+            keyInput.PasswordChanged += (_, _) => UpdateExportEnabled(encrypted); stack.Children.Add(manual); stack.Children.Add(manualFields);
         }
+        var verify = new CheckBox { Content = L.T("VerifyBackupBeforeExport"), IsChecked = verifyChatBackup, Margin = new Thickness(0, 12, 0, 4) };
+        verify.Checked += (_, _) => verifyChatBackup = true;
+        verify.Unchecked += (_, _) => verifyChatBackup = false;
+        stack.Children.Add(verify); stack.Children.Add(View.Text(L.T("VerifyBackupHelp"), color: "Muted"));
         chatNext = AsyncButton("ExportReading", ExportChat, true); chatNext.Name = "chat_export"; chatNext.IsEnabled = !encrypted || capturedKey != null;
         chatFooter.Children.Add(chatNext); chatFooter.Children.Add(Button("FinishRawOnly", () => {
             chatStep = 3; readingDirectory = exportReport = null; SetCapturedKey(null); RenderChatStage();
@@ -107,8 +115,8 @@ public sealed partial class ShellWindow {
         (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password));
     private void BuildChatFinished() {
         var stack = View.Stack(View.Text(L.T("ArchiveFinished"), 23),
-            View.Text(L.T(readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), ChatField("RawBackupLabel", View.Input(ArchiveDirectory(), true)));
-        if (readingDirectory != null) stack.Children.Add(ChatField("ReadingCopyLabel", View.Input(readingDirectory, true)));
+            View.Text(L.T(readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)));
+        if (readingDirectory != null) stack.Children.Add(View.Field("ReadingCopyLabel", View.Input(readingDirectory, true)));
         if (exportReport != null && File.Exists(exportReport)) {
             var report = JsonFiles.Read<ChatExportResult>(exportReport); var coverage = View.Text(L.T("ReadingCoverage", report.Contacts, report.MediaFiles, report.UnresolvedMedia, report.UnsupportedMessages), color: "Muted");
             coverage.Margin = new Thickness(0, 4, 0, 0); stack.Children.Add(coverage);
@@ -118,11 +126,5 @@ public sealed partial class ShellWindow {
         chatFooter.Children.Add(Button("OpenBackup", () => OpenFolder(ArchiveDirectory())));
         if (readingDirectory != null) chatFooter.Children.Add(Button("OpenReading", () => new ChatReaderWindow(readingDirectory, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog()));
         if (exportReport != null) chatFooter.Children.Add(Button("OpenReport", () => OpenFile(exportReport)));
-    }
-    private static Grid ChatField(string key, FrameworkElement control) {
-        var row = new Grid { Margin = new Thickness(0, 4, 0, 8) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) }); row.ColumnDefinitions.Add(new ColumnDefinition());
-        var label = new Label { Content = L.T(key), Target = control, Padding = new Thickness(0), Margin = new Thickness(0, 0, 12, 0), VerticalContentAlignment = VerticalAlignment.Center };
-        label.SetResourceReference(Control.ForegroundProperty, "Ink"); row.Children.Add(label); View.Add(row, control, 0, 1); return row;
     }
 }

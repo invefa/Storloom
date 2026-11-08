@@ -29,14 +29,31 @@
    </Grid>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
- <Style TargetType="TextBox">
-  <Setter Property="local:ControlFeedback.Enabled" Value="True"/>
-  <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="CaretBrush" Value="{DynamicResource Ink}"/>
-  <Setter Property="SelectionBrush" Value="{DynamicResource TextSelection}"/><Setter Property="SelectionTextBrush" Value="{DynamicResource SelectedText}"/><Setter Property="SelectionOpacity" Value="1"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/>
+ <Style x:Key="EditorBase" TargetType="Control">
+  <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/>
+  <Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/>
   <Setter Property="Padding" Value="9,4"/><Setter Property="MinHeight" Value="32"/><Setter Property="VerticalContentAlignment" Value="Center"/>
-  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox"><Border x:Name="frame" CornerRadius="3" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}"><ScrollViewer x:Name="PART_ContentHost" Style="{StaticResource EditorScrollViewer}"/></Border><ControlTemplate.Triggers><MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsKeyboardFocused" Value="False"/><Condition Property="AcceptsReturn" Value="False"/><Condition Property="IsReadOnly" Value="False"/></MultiTrigger.Conditions><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></MultiTrigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+  <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control">
+   <Border x:Name="frame" CornerRadius="3" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
+    <ScrollViewer x:Name="PART_ContentHost" Style="{StaticResource EditorScrollViewer}"/>
+   </Border>
+   <ControlTemplate.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="frame" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
+    <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="frame" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate></Setter.Value></Setter>
  </Style>
- <Style TargetType="PasswordBox" BasedOn="{StaticResource {x:Type PasswordBox}}"><Setter Property="SelectionBrush" Value="{DynamicResource TextSelection}"/><Setter Property="SelectionTextBrush" Value="{DynamicResource SelectedText}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="Padding" Value="9,7"/><Setter Property="MinHeight" Value="34"/></Style>
+ <Style TargetType="TextBox" BasedOn="{StaticResource EditorBase}">
+  <Setter Property="local:ControlFeedback.Enabled" Value="True"/>
+  <Setter Property="CaretBrush" Value="{DynamicResource Ink}"/>
+  <Setter Property="SelectionBrush" Value="{DynamicResource TextSelection}"/><Setter Property="SelectionTextBrush" Value="{DynamicResource SelectedText}"/><Setter Property="SelectionOpacity" Value="1"/>
+ </Style>
+ <Style TargetType="PasswordBox" BasedOn="{StaticResource EditorBase}">
+  <Setter Property="CaretBrush" Value="{DynamicResource Ink}"/>
+  <Setter Property="SelectionBrush" Value="{DynamicResource TextSelection}"/><Setter Property="SelectionTextBrush" Value="{DynamicResource SelectedText}"/><Setter Property="SelectionOpacity" Value="1"/>
+ </Style>
  <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="Margin" Value="0,6,12,6"/></Style>
  <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="9,5"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
  <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">

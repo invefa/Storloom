@@ -1,4 +1,4 @@
-using System.ComponentModel;
+using Storloom.Core.Localization;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -66,60 +66,89 @@ public static class PassiveKeyReader {
         var clock = Stopwatch.StartNew();
         TimeSpan limit = timeout ?? TimeSpan.FromSeconds(45);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (string name in names) {
-            foreach (var process in Process.GetProcessesByName(name)) {
-                using (process) {
-                    using var handle = OpenProcess(0x0410, false, process.Id);
-                    if (handle.IsInvalid || !SameUser(handle)) continue;
-                    ulong address = 0;
-                    while (address < 0x7fffffffffff && clock.Elapsed < limit) {
-                        cancellation.ThrowIfCancellationRequested();
-                        if (VirtualQueryEx(handle, (nint)address, out var region,
-                            (nuint)Marshal.SizeOf<MemoryRegion>()) == 0 || region.RegionSize == 0) break;
-                        if (region.State == 0x1000 && (region.Protect & 0x101) == 0 &&
-                            (region.Protect & 0xee) != 0) {
-                            for (ulong offset = 0; offset < region.RegionSize && clock.Elapsed < limit;
-                                offset += 1024 * 1024) {
-                                cancellation.ThrowIfCancellationRequested();
-                                int size = (int)Math.Min(1024 * 1024 + 256UL, region.RegionSize - offset);
-                                byte[] bytes = new byte[size];
-                                try {
-                                    if (!ReadProcessMemory(handle, (nint)(region.BaseAddress + offset), bytes,
-                                        (nuint)size, out nuint read) || read == 0) continue;
-                                    for (int i = 0; i < (int)read && clock.Elapsed < limit; i++) {
-                                        int count = 0;
-                                        if (location.Platform == ChatPlatform.WeChat && i + 66 < (int)read &&
-                                            bytes[i] == 'x' && bytes[i + 1] == '\'') {
-                                            count = 64;
-                                            if (!bytes.AsSpan(i + 2, count).ToArray().All(IsHex)) continue;
-                                            byte[] candidate = Convert.FromHexString(System.Text.Encoding.ASCII.GetString(bytes, i + 2, 64));
-                                            if (Verify(candidate)) return candidate;
-                                            CryptographicOperations.ZeroMemory(candidate);
-                                        } else if (location.Platform == ChatPlatform.QQ && (i == 0 || bytes[i - 1] == 0)) {
-                                            while (i + count < (int)read && bytes[i + count] is >= 0x20 and <= 0x7e && count <= 32) count++;
-                                            if (count is not (16 or 32) || i + count >= (int)read || bytes[i + count] != 0) continue;
-                                            byte[] candidate = bytes.AsSpan(i, count).ToArray();
-                                            if (Verify(candidate)) return candidate;
-                                            CryptographicOperations.ZeroMemory(candidate);
-                                            i += count;
-                                        }
-                                    }
-                                } finally { CryptographicOperations.ZeroMemory(bytes); }
+        // Root clients precede Chromium helpers; round-robin chunks keep every process progressing.
+        var processes = names.SelectMany(Process.GetProcessesByName).OrderBy(CreationTime).ToArray();
+        var scans = new List<MemoryScan>();
+        try {
+            foreach (var process in processes) {
+                cancellation.ThrowIfCancellationRequested();
+                var handle = OpenProcess(0x0410, false, process.Id);
+                if (handle.IsInvalid || !SameUser(handle)) { handle.Dispose(); continue; }
+                var scan = new MemoryScan(handle); scans.Add(scan);
+                ulong address = 0;
+                while (address < 0x7fffffffffff && clock.Elapsed < limit) {
+                    cancellation.ThrowIfCancellationRequested();
+                    if (VirtualQueryEx(handle, (nint)address, out var region, (nuint)Marshal.SizeOf<MemoryRegion>()) == 0 || region.RegionSize == 0) break;
+                    if (region.State == 0x1000 && (region.Protect & 0x101) == 0 && (region.Protect & 0xee) != 0) scan.Regions.Add(region);
+                    ulong next = region.BaseAddress + region.RegionSize;
+                    if (next <= address) break;
+                    address = next;
+                }
+                scan.Regions.Sort((left, right) => Priority(left).CompareTo(Priority(right)));
+            }
+            while (clock.Elapsed < limit && scans.Any(s => s.Index < s.Regions.Count)) {
+                foreach (var scan in scans) {
+                    cancellation.ThrowIfCancellationRequested();
+                    if (clock.Elapsed >= limit) break;
+                    if (scan.Index >= scan.Regions.Count) continue;
+                    var region = scan.Regions[scan.Index];
+                    const ulong chunk = 1024 * 1024;
+                    int size = (int)Math.Min(chunk + 256, region.RegionSize - scan.Offset);
+                    byte[] bytes = new byte[size];
+                    try {
+                        _ = ReadProcessMemory(scan.Handle, (nint)(region.BaseAddress + scan.Offset), bytes, (nuint)size, out nuint read);
+                        for (int i = 0; i < (int)read && clock.Elapsed < limit; i++) {
+                            cancellation.ThrowIfCancellationRequested();
+                            byte[]? candidate = null;
+                            if (location.Platform == ChatPlatform.WeChat && i + 66 < (int)read && bytes[i] == 'x' && bytes[i + 1] == '\'') {
+                                if (!bytes.AsSpan(i + 2, 64).ToArray().All(IsHex)) continue;
+                                candidate = Convert.FromHexString(System.Text.Encoding.ASCII.GetString(bytes, i + 2, 64));
+                            } else if (location.Platform == ChatPlatform.QQ) {
+                                int count = QqCandidateLength(bytes.AsSpan(0, (int)read), i);
+                                if (count == 0) continue;
+                                candidate = bytes.AsSpan(i, count).ToArray(); i += count;
                             }
+                            if (candidate == null) continue;
+                            bool accepted = false;
+                            try { accepted = Verify(candidate); if (accepted) return candidate; }
+                            finally { if (!accepted) CryptographicOperations.ZeroMemory(candidate); }
                         }
-                        ulong next = region.BaseAddress + region.RegionSize;
-                        if (next <= address) break;
-                        address = next;
-                    }
+                    } finally { CryptographicOperations.ZeroMemory(bytes); }
+                    scan.Offset += chunk;
+                    if (scan.Offset >= region.RegionSize) { scan.Offset = 0; scan.Index++; }
                 }
             }
+            cancellation.ThrowIfCancellationRequested();
+            throw new InvalidOperationException(L.T(scans.Count == 0 ? "KeyClientMissing" : location.Platform == ChatPlatform.WeChat ? "WeChatPassiveUnavailable" : "KeyNotFound"));
+        } finally {
+            foreach (var scan in scans) scan.Handle.Dispose();
+            foreach (var process in processes) process.Dispose();
         }
-        throw new InvalidOperationException("No HMAC-verified key was found. Newer clients may need an externally obtained key. No debugger fallback is run automatically.");
 
         bool Verify(byte[] candidate) {
             string digest = Convert.ToHexString(SHA256.HashData(candidate));
             return seen.Add(digest) && ChatCipher.Detect(prefix, candidate, location.Platform) != null;
         }
+    }
+
+    private sealed class MemoryScan(SafeProcessHandle handle) {
+        public SafeProcessHandle Handle { get; } = handle;
+        public List<MemoryRegion> Regions { get; } = [];
+        public int Index;
+        public ulong Offset;
+    }
+    private static int Priority(MemoryRegion region) => region.Type == 0x20000 ? ((region.Protect & 0xcc) != 0 ? 0 : 1) : 2;
+
+    private static DateTime CreationTime(Process process) {
+        try { return process.StartTime; } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return DateTime.MaxValue; }
+    }
+
+    internal static int QqCandidateLength(ReadOnlySpan<byte> bytes, int start) {
+        static bool Printable(byte value) => value is >= 0x20 and <= 0x7e;
+        if (start < 0 || start >= bytes.Length || (start > 0 && Printable(bytes[start - 1]))) return 0;
+        int count = 0;
+        while (start + count < bytes.Length && count <= 32 && Printable(bytes[start + count])) count++;
+        return count is 16 or 32 && start + count < bytes.Length && bytes[start + count] == 0 ? count : 0;
     }
 
     private static bool IsHex(byte value) => value is >= (byte)'0' and <= (byte)'9' or

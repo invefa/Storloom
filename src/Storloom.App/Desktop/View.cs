@@ -3,6 +3,7 @@ using Wpf.Ui.Controls;
 using Button = System.Windows.Controls.Button;
 using TextBlock = System.Windows.Controls.TextBlock;
 using TextBox = System.Windows.Controls.TextBox;
+using PasswordBox = System.Windows.Controls.PasswordBox;
 using DataGrid = System.Windows.Controls.DataGrid;
 
 namespace Storloom.App;
@@ -13,6 +14,13 @@ internal static class View {
         text.SetResourceReference(TextBlock.ForegroundProperty, color); return text;
     }
     public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 32, VerticalAlignment = VerticalAlignment.Center };
+    public static PasswordBox SecretInput() => new() { MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
+    public static Grid Field(string key, FrameworkElement control, double labelWidth = 112) {
+        var row = new Grid { Margin = new Thickness(0, 4, 0, 8) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(labelWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition());
+        var label = new Label { Content = L.T(key), Target = control, Padding = new Thickness(0), Margin = new Thickness(0, 0, 12, 0), VerticalContentAlignment = VerticalAlignment.Center };
+        label.SetResourceReference(Control.ForegroundProperty, "Ink"); row.Children.Add(label); Add(row, control, 0, 1); return row;
+    }
     public static StackPanel Stack(params UIElement[] elements) {
         var stack = new StackPanel(); foreach (var element in elements) stack.Children.Add(element); return stack;
     }
@@ -148,7 +156,7 @@ internal static class Notice {
         var actions = View.Row(cancel); actions.HorizontalAlignment = HorizontalAlignment.Right;
         if (confirm) actions.Children.Add(View.Button("ConfirmExecute", () => window.DialogResult = true, true));
         ((Button)actions.Children[^1]).Margin = new Thickness(0);
-        var footer = new Border { Child = actions, Padding = new Thickness(16, 12, 16, 12) }; footer.SetResourceReference(Border.BackgroundProperty, "Surface");
+        var footer = new Border { Child = actions, Padding = new Thickness(16, 12, 16, 12) }; footer.SetResourceReference(Border.BackgroundProperty, "Canvas");
         View.Add(grid, footer, 1); window.Body.Children.Add(grid); window.Loaded += (_, _) => cancel.Focus(); return window.ShowDialog() == true;
     }
 }

@@ -32,6 +32,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
     public int Parallelism { get; init; }
     public Dictionary<string, double> PhaseSeconds { get; init; } = [];
     public long VerifiedBackupBytes { get; init; }
+    public bool BackupReverified { get; init; }
 }
 
 public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false) {
@@ -43,7 +44,8 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
 
     public ChatExportResult ExportVerifiedBackup(string manifestPath, string destination,
         ChatPlatform platform, byte[]? secret = null, IProgress<ScanProgress>? progress = null,
-        CancellationToken cancellation = default) {
+        CancellationToken cancellation = default, bool verifyBackup = true) {
+        cancellation.ThrowIfCancellationRequested();
         var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
         var verificationClock = System.Diagnostics.Stopwatch.StartNew();
         if (manifest.Version != 1 || manifest.State is not ("Verified" or "Completed" or
@@ -61,23 +63,38 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 throw new InvalidDataException("Backup receipts do not match the planned files.");
             string path = TransferService.Child(manifest.Plan.Destination, entry.RelativePath);
             PathPolicy.AssertNoLinks(path);
-            using var input = File.OpenRead(path);
-            if (input.Length != entry.Bytes || Convert.ToHexString(TransferService.Hash(input, cancellation, count => { verifiedBytes += count;
-                progress?.Report(new("chat-verify", verifiedFiles, verifiedBytes, totalBytes, manifest.Receipts.Count, entry.RelativePath)); })) != entry.Sha256)
-                throw new InvalidDataException("The archived copy changed since verification.");
-            verifiedFiles++;
+            if (new FileInfo(path).Length != entry.Bytes) throw new InvalidDataException("The archived copy changed since verification.");
         }
         foreach (string database in FindDatabases(manifest.Plan.Destination, platform))
             foreach (string file in new[] { database, database + "-wal", database + "-shm" }.Where(File.Exists))
                 if (!received.Contains(Path.GetRelativePath(manifest.Plan.Destination, file)))
                     throw new InvalidDataException("An unverified message database or WAL was added to the archive.");
+        // Fail on an incorrect key before reading/hash-checking potentially many GB of attachments.
+        foreach (string database in FindDatabases(manifest.Plan.Destination, platform)) {
+            cancellation.ThrowIfCancellationRequested();
+            using var input = File.OpenRead(database);
+            byte[] prefix = new byte[Math.Min(input.Length, 5120)]; input.ReadExactly(prefix);
+            bool plain = prefix.AsSpan().StartsWith("SQLite format 3\0"u8) ||
+                (platform == ChatPlatform.QQ && prefix.Length >= 1040 && prefix.AsSpan(1024).StartsWith("SQLite format 3\0"u8));
+            if (!plain && (secret == null || ChatCipher.Detect(prefix, secret, platform) == null))
+                throw new CryptographicException(L.T("DatabaseKeyMismatch"));
+        }
+        if (verifyBackup) foreach (var entry in manifest.Receipts) {
+            cancellation.ThrowIfCancellationRequested();
+            using var input = File.OpenRead(TransferService.Child(manifest.Plan.Destination, entry.RelativePath));
+            if (input.Length != entry.Bytes || Convert.ToHexString(TransferService.Hash(input, cancellation, count => {
+                verifiedBytes += count;
+                progress?.Report(new("chat-verify", verifiedFiles, verifiedBytes, totalBytes, manifest.Receipts.Count, entry.RelativePath));
+            })) != entry.Sha256) throw new InvalidDataException("The archived copy changed since verification.");
+            verifiedFiles++;
+        }
         return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false,
-            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds);
+            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup);
     }
 
     private ChatExportResult ExportCore(string source, string destination, ChatPlatform platform,
         byte[]? secret, IProgress<ScanProgress>? progress, CancellationToken cancellation,
-        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0) {
+        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination);
         if (PathPolicy.Under(destination, source) || PathPolicy.Under(source, destination) ||
@@ -178,7 +195,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             Contacts = contacts.Count, MediaFiles = archive?.MediaFiles ?? 0, UnresolvedMedia = archive?.UnresolvedMedia ?? 0,
             UnsupportedMessages = archive?.UnsupportedMessages ?? 0,
             ElapsedSeconds = clock.Elapsed.TotalSeconds + verificationSeconds, Parallelism = parallelism,
-            VerifiedBackupBytes = verified?.Values.Sum(e => e.Bytes) ?? 0,
+            BackupReverified = backupReverified, VerifiedBackupBytes = backupReverified ? verified?.Values.Sum(e => e.Bytes) ?? 0 : 0,
             PhaseSeconds = new() { ["backupVerification"] = verificationSeconds, ["databaseProcessing"] = databaseSeconds,
                 ["readerIndex"] = readerStarted > 0 ? clock.Elapsed.TotalSeconds - readerStarted : 0 } };
         JsonFiles.Write(Path.Combine(destination, "export-report.json"), result); return result;

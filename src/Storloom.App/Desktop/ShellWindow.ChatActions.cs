@@ -97,13 +97,18 @@ public sealed partial class ShellWindow {
         try {
             if (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password)) {
                 if (key != null) CryptographicOperations.ZeroMemory(key);
-                key = account.Platform == ChatPlatform.QQ ? Encoding.ASCII.GetBytes(keyInput.Password) : Convert.FromHexString(keyInput.Password.Trim());
+                string text = keyInput.Password;
+                bool valid = account.Platform == ChatPlatform.QQ
+                    ? text.Length is 16 or 32 && text.All(c => c is >= ' ' and <= '~')
+                    : text.Trim().Length == 64 && text.Trim().All(Uri.IsHexDigit);
+                if (!valid) throw new InvalidOperationException(L.T("KeyFormatInvalid"));
+                key = account.Platform == ChatPlatform.QQ ? Encoding.ASCII.GetBytes(text) : Convert.FromHexString(text.Trim());
             }
             if (NeedsKey() && key == null) throw new InvalidOperationException(L.T("ExportKeyMissing"));
             keyInput?.Clear();
             await Run(async token => {
                 var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true).ExportVerifiedBackup(
-                    activeManifest!, target, account.Platform, key, progress, token));
+                    activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup));
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 chatStep = 3; SetCapturedKey(null); RenderChatStage();
                 status.Text = L.T("ExportDone", result.Messages, result.Databases, L.T(result.Complete ? "Complete" : "Incomplete"), exportReport);

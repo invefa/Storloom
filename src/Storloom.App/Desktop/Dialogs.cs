@@ -12,11 +12,11 @@ internal sealed class PreferencesWindow : ThemeWindow {
         var layout = View.Grid(View.Fill, View.Auto); layout.Margin = new Thickness(24); Body.Children.Add(layout);
         var tabs = new TabControl(); View.Add(layout, tabs, 0);
         var fields = new Grid { Margin = new Thickness(18) };
-        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) }); fields.ColumnDefinitions.Add(new ColumnDefinition { Width = View.Fill });
         int row = 0;
-        void Field(string key, UIElement element) { fields.RowDefinitions.Add(new RowDefinition { Height = View.Auto });
-            var label = View.Text(L.T(key)); label.Margin = new Thickness(0); View.Add(fields, label, row); if (element is FrameworkElement e) e.Margin = new Thickness(0, 6, 0, 6);
-            View.Add(fields, element, row++, 1); }
+        void Field(string key, FrameworkElement element) {
+            fields.RowDefinitions.Add(new RowDefinition { Height = View.Auto });
+            View.Add(fields, View.Field(key, element, 160), row++);
+        }
         ComboBox Options(string[] values, int index) { var combo = new ComboBox(); foreach (string value in values) combo.Items.Add(value); combo.SelectedIndex = index; return combo; }
         var language = Options(["English", "简体中文"], preferences.Language == "en" ? 0 : 1); Field("LanguageLabel", language);
         var themes = Options([L.T("ThemeLight"), L.T("ThemeDark")], (int)preferences.Theme); Field("ThemeLabel", themes);

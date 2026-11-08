@@ -373,5 +373,16 @@
   "NoticeAccept": "OK",
   "AccountFolderLabel": "Account folder",
   "RawBackupLabel": "Raw backup",
-  "ReaderForwardExpand": "Show remaining {0} messages"
+  "ReaderForwardExpand": "Show remaining {0} messages",
+  "DatabaseKeyLabel": "Database key",
+  "QQDatabaseKeyHelp": "The QQ chat database encryption key, not your QQ login password. Enter the original 16 or 32 printable ASCII characters. It must authenticate the selected backup; the key is never saved.",
+  "WeChatDatabaseKeyHelp": "The WeChat chat database encryption key, not your login password. Enter 64 hexadecimal characters. The key is never saved.",
+  "KeyClientMissing": "No accessible client process was found. Open the client, log in to the account matching this backup, and retry. If the client is elevated, run Storloom at the same permission level.",
+  "KeyNotFound": "No database key matching this backup was found in the running client. Confirm the selected account is logged in and open a conversation, then retry. This client version may not retain a supported key in memory; an already opened client does not guarantee key recovery.",
+  "KeyFormatInvalid": "Invalid database key format. QQ requires 16 or 32 printable ASCII characters; WeChat requires 64 hexadecimal characters.",
+  "DatabaseKeyMismatch": "The database key does not match this backup, or the database format is unsupported. Use the chat database encryption key, not your login password.",
+  "VerifyBackupBeforeExport": "Recheck every backup file before exporting (recommended)",
+  "VerifyBackupHelp": "On: compare every file with the original backup SHA-256 receipt. Off: skip this full recheck to save time; later file changes may go undetected. Backup structure, file sizes and database authentication are still checked. The export report records this choice.",
+  "WeChatKeyMethodsHelp": "For newer WeChat clients, use login capture. Read from logged-in client is a best-effort, read-only search and may not find a retained key. Login capture asks you to close the daily client and log in to a separate debugger-managed instance.",
+  "WeChatPassiveUnavailable": "No key matching this backup was found by read-only search. Some WeChat versions do not retain a supported key representation after login. Use Start WeChat login capture, or enter a database key obtained separately. No debugger was started automatically."
 }

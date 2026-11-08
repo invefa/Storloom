@@ -193,6 +193,8 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operation != null) return;
         using var source = new CancellationTokenSource(); operation = source;
         navigation.IsEnabled = menu.IsEnabled = false;
+        bool previousEnabled = operationButton?.IsEnabled ?? true;
+        if (operationButton != null) operationButton.IsEnabled = true;
         var disabled = Controls(pageHost).Where(c => c != operationButton && c.IsEnabled && c is System.Windows.Controls.Button or TextBox or ComboBox or CheckBox or PasswordBox or DataGrid).ToArray();
         foreach (var control in disabled) control.IsEnabled = false;
         object? previousContent = operationButton?.Content;
@@ -207,7 +209,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         catch (Exception ex) { Error(ex); }
         finally { operation = null; navigation.IsEnabled = menu.IsEnabled = true;
             foreach (var control in disabled) control.IsEnabled = true;
-            if (operationButton != null) operationButton.Content = previousContent;
+            if (operationButton != null) { operationButton.Content = previousContent; operationButton.IsEnabled = previousEnabled; }
             cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
         if (exitAfterOperation) _ = Dispatcher.BeginInvoke(new Action(Close));
     }

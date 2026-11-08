@@ -663,6 +663,9 @@ public sealed class FormTests {
                     Assert.InRange(dialog.ActualWidth,340,520);Assert.InRange(dialog.ActualHeight,130,owner.ActualHeight*.9+.1);
                     var caption=Descendants(dialog).OfType<Wpf.Ui.Controls.TitleBar>().Single();Assert.False(caption.ShowMaximize);Assert.False(caption.ShowMinimize);
                     if(!longText){shortHeight=dialog.ActualHeight;Assert.True(shortHeight<280);}else Assert.True(dialog.ActualHeight>shortHeight);
+                    var footer=Descendants(dialog).OfType<Border>().Single(b=>b.Child is WrapPanel);
+                    Assert.Equal(((SolidColorBrush)Application.Current.Resources["Canvas"]).Color,((SolidColorBrush)footer.Background).Color);
+                    Assert.Equal(((SolidColorBrush)Application.Current.Resources["Surface"]).Color,((SolidColorBrush)caption.Background).Color);
                     Capture((FrameworkElement)dialog,"compact-notice-"+locale+"-"+longText);dialog.DialogResult=false;
                 }));
                 string message=longText?string.Join("\n",Enumerable.Repeat(L.T("ConfirmBackgroundTask"),12)):L.T("ConfirmBackgroundTask");
@@ -748,6 +751,53 @@ public sealed class FormTests {
             }
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void ManualDatabaseKeyUsesTheSharedEditorPaletteAndLeftLabel(AppTheme theme) => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);
+        File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language="zh-CN",Theme=theme,ReduceMotion=true});
+        var window=new ShellWindow(data){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();var type=typeof(ShellWindow);void Set(string key,object value)=>type.GetField(key,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,value);
+            Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));Set("activeManifest",backup.Manifest);Set("chatStep",2);
+            window.Navigate("chats");type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();
+            Descendants(window).OfType<CheckBox>().Single(c=>Equals(c.Content,L.T("ManualKey"))).IsChecked=true;Pump();
+            var secret=Descendants(window).OfType<PasswordBox>().Single();var label=Descendants(window).OfType<Label>().Single(l=>l.Target==secret);
+            Assert.Equal(L.T("DatabaseKeyLabel"),label.Content);Assert.True(label.TranslatePoint(new Point(),window).X+label.ActualWidth<=secret.TranslatePoint(new Point(),window).X);
+            var plain=Descendants(window).OfType<TextBox>().First(t=>t.IsVisible);Assert.Same(plain.Template,secret.Template);
+            secret.Password="fixture-key-1234!";
+            foreach(bool focus in new[]{true,false}) {
+                if(focus)secret.Focus();else plain.Focus();Pump();
+                var frame=Descendants(secret).OfType<Border>().Single(b=>b.Name=="frame");
+                Assert.Equal(((SolidColorBrush)Application.Current.Resources["Surface"]).Color,((SolidColorBrush)frame.Background).Color);
+                Assert.Equal(((SolidColorBrush)Application.Current.Resources["Ink"]).Color,((SolidColorBrush)secret.Foreground).Color);
+                Capture(window,"manual-key-"+theme+"-"+focus);
+            }
+            Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("QQDatabaseKeyHelp"));
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Fact]
+    public void OperationButtonRemainsCancellableAfterItsInputWasCleared() => OnUi(() => {
+        string fixture=Fixture();var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try {
+            window.Show();Pump();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            Button? button=null;
+            Func<Task> action=()=>{
+                button!.IsEnabled=false;
+                return (Task)type.GetMethod("Run",flags)!.Invoke(window,new object[]{(Func<CancellationToken,Task>)(token=>Task.Delay(Timeout.Infinite,token))})!;
+            };
+            button=(Button)type.GetMethod("AsyncButton",flags)!.Invoke(window,new object[]{"ExportReading",action,true})!;
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.True(button.IsEnabled);Assert.Equal(L.T("Cancel"),button.Content);
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DateTime until=DateTime.UtcNow.AddSeconds(3);while(type.GetField("operation",flags)!.GetValue(window)!=null&&DateTime.UtcNow<until){Pump();Thread.Sleep(5);}
+            Assert.Null(type.GetField("operation",flags)!.GetValue(window));Assert.False(button.IsEnabled);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
     private static void Database(string path,string sql) {
         Assert.Equal(0,sqlite3_open_v2(path,out nint db,6,0));try{Assert.Equal(0,sqlite3_exec(db,sql,0,0,0));}finally{sqlite3_close_v2(db);}
     }

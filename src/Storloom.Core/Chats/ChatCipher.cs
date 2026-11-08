@@ -30,16 +30,20 @@ public static class ChatCipher {
                             HashAlgorithmName.SHA512, 4000, false));
                     }
         }
-        foreach (var parameters in candidates) {
-            if (prefix.Length < parameters.Wrapper + PageSize) continue;
-            byte[] page = prefix.Slice(parameters.Wrapper, PageSize).ToArray();
-            byte[] key = Derive(secret, page.AsSpan(0, 16), parameters);
-            try {
-                _ = DecryptPage(page, key, page.AsSpan(0, 16), 1, parameters);
-                return parameters;
-            } catch (CryptographicException) { }
-            finally { CryptographicOperations.ZeroMemory(key); }
-        }
+        var derived = new Dictionary<(int, HashAlgorithmName, int, bool), byte[]>();
+        try {
+            foreach (var parameters in candidates) {
+                if (prefix.Length < parameters.Wrapper + PageSize) continue;
+                var page = prefix.Slice(parameters.Wrapper, PageSize);
+                var identity = (parameters.Wrapper, parameters.Kdf, parameters.Iterations, parameters.RawKey);
+                if (!derived.TryGetValue(identity, out byte[]? key)) {
+                    key = Derive(secret, page[..16], parameters); derived.Add(identity, key);
+                }
+                try { _ = DecryptPage(page, key, page[..16], 1, parameters); return parameters; }
+                catch (CryptographicException) { }
+            }
+        } finally { foreach (byte[] key in derived.Values) CryptographicOperations.ZeroMemory(key); }
+
         return null;
     }
 

@@ -133,6 +133,58 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Theory]
+    [InlineData(16)]
+    [InlineData(32)]
+    public void QqCandidateAllowsNonzeroHeapMetadataButRejectsSubstrings(int length) {
+        byte[] bytes = [0xff, .. Encoding.ASCII.GetBytes(new string('K', length)), 0];
+        Assert.Equal(length, PassiveKeyReader.QqCandidateLength(bytes, 1));
+        Assert.Equal(0, PassiveKeyReader.QqCandidateLength(bytes, 2));
+        bytes[0] = (byte)'x'; Assert.Equal(0, PassiveKeyReader.QqCandidateLength(bytes, 1));
+        bytes[0] = 0; bytes[^1] = 1; Assert.Equal(0, PassiveKeyReader.QqCandidateLength(bytes, 1));
+    }
+
+    [Fact]
+    public void IncorrectKeyFailsBeforeHashingAttachmentsOrCreatingAnExport() {
+        string source = Dir("encrypted");
+        var parameters = new CipherParameters(1024, 48, HashAlgorithmName.SHA512, HashAlgorithmName.SHA1, 4000, false);
+        byte[] secret = Encoding.ASCII.GetBytes("fixture-key-1234!");
+        byte[] salt = Enumerable.Range(1, 16).Select(i => (byte)i).ToArray();
+        byte[] page = EncryptPage(new byte[4096], secret, salt, 1, parameters);
+        File.WriteAllBytes(Path.Combine(source, "nt_msg.db"), new byte[1024].Concat(page).ToArray());
+        FileIn(source, "attachment.txt", "original");
+        var service = new TransferService(); var backup = service.Execute(service.Plan(source, Path.Combine(root, "raw")), Dir("journals"));
+        File.WriteAllText(Path.Combine(backup.Destination, "attachment.txt"), "modified");
+        var progress = new InlineProgress(_ => throw new Exception("Hashing must not start"));
+        Assert.Throws<CryptographicException>(() => new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "reading"), ChatPlatform.QQ, Encoding.ASCII.GetBytes("wrong-key-123456!"), progress));
+        Assert.False(Directory.Exists(Path.Combine(root, "reading")));
+    }
+
+    [Fact]
+    public void OptionalRecheckStillChecksStructureAndRecordsItsChoiceAndCanCancel() {
+        string source = Dir("account");
+        CreateDatabase(Path.Combine(source, "nt_msg.db"), "CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,'Fixture');");
+        FileIn(source, "unused.txt", "original");
+        var service = new TransferService(); var backup = service.Execute(service.Plan(source, Path.Combine(root, "raw")), Dir("journals"));
+        File.WriteAllText(Path.Combine(backup.Destination, "unused.txt"), "modified");
+        Assert.Throws<InvalidDataException>(() => new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "strict"), ChatPlatform.QQ));
+        var result = new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "fast"), ChatPlatform.QQ, verifyBackup: false);
+        Assert.Equal(1, result.Messages); Assert.False(result.BackupReverified); Assert.Equal(0, result.VerifiedBackupBytes);
+        var report = JsonFiles.Read<ChatExportResult>(Path.Combine(result.Directory, "export-report.json"));
+        Assert.False(report.BackupReverified); Assert.Equal(0, report.VerifiedBackupBytes);
+        File.WriteAllText(Path.Combine(backup.Destination, "unused.txt"), "original");
+        var strict = new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "strict"), ChatPlatform.QQ);
+        Assert.True(strict.BackupReverified); Assert.True(strict.VerifiedBackupBytes > 0);
+        Assert.True(JsonFiles.Read<ChatExportResult>(Path.Combine(strict.Directory, "export-report.json")).BackupReverified);
+        using var cancellation = new CancellationTokenSource();
+        Assert.Throws<OperationCanceledException>(() => new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "cancelled"), ChatPlatform.QQ,
+            progress: new InlineProgress(_ => cancellation.Cancel()), cancellation: cancellation.Token));
+        Assert.False(Directory.Exists(Path.Combine(root, "cancelled")));
+        File.AppendAllText(Path.Combine(backup.Destination, "unused.txt"), "longer");
+        Assert.Throws<InvalidDataException>(() => new ChatExporter().ExportVerifiedBackup(backup.Manifest, Path.Combine(root, "bad-size"), ChatPlatform.QQ, verifyBackup: false));
+    }
+    private sealed class InlineProgress(Action<ScanProgress> action) : IProgress<ScanProgress> { public void Report(ScanProgress value) => action(value); }
+
+    [Theory]
     [InlineData(ChatPlatform.WeChat, true, 0, 80)]
     [InlineData(ChatPlatform.WeChat, false, 0, 80)]
     [InlineData(ChatPlatform.QQ, false, 1024, 48)]
