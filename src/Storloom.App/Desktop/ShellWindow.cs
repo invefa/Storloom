@@ -12,6 +12,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private CleanupEngine engine = null!;
     private CleanupPlan? cleanupPlan;
     private CancellationTokenSource? operation;
+    private bool operationIncomplete;
     private byte[]? capturedKey;
     private readonly Dictionary<string, Grid> pages = [];
     private readonly Dictionary<string, string> verifiedBackups = new(StringComparer.OrdinalIgnoreCase);
@@ -200,7 +201,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private IProgress<ScanProgress> Progress() => new ProgressRelay(Dispatcher, value => { if (operation != null) operationView.Report(value); });
     private async Task Run(Func<CancellationToken, Task> work) {
         if (operation != null) return;
-        using var source = new CancellationTokenSource(); operation = source;
+        using var source = new CancellationTokenSource(); operation = source; operationIncomplete = false;
         navigation.IsEnabled = menu.IsEnabled = false;
         bool previousEnabled = operationButton?.IsEnabled ?? true;
         if (operationButton != null) operationButton.IsEnabled = true;
@@ -213,7 +214,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView.Start(); cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Visibility = Visibility.Collapsed; statusFooter.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Text = L.T("OperationStarting"); bool complete = false;
-        try { await work(source.Token); complete = !source.IsCancellationRequested; }
+        try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete; }
         catch (OperationCanceledException) { status.Text = L.T("Cancelled"); operationView.AddDiagnostic(new("operation.cancelled")); }
         catch (Exception ex) { Error(ex); }
         finally { operation = null; navigation.IsEnabled = menu.IsEnabled = true;

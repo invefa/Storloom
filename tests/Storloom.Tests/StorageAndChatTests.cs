@@ -387,6 +387,55 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Fact]
+    public void QqPreallocatedZeroTailUsesAuthenticatedSqliteSizeAndExportsMessages() {
+        byte[] secret=Encoding.ASCII.GetBytes("fixture-key-1234!"),salt=Enumerable.Range(1,16).Select(i=>(byte)i).ToArray();
+        var parameters=new CipherParameters(1024,48,HashAlgorithmName.SHA1,HashAlgorithmName.SHA1,4000,false);
+        string plain=Path.Combine(root,"plain.db");
+        CreateDatabase(plain,"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,'Fixture');",48);
+        byte[] data=File.ReadAllBytes(plain);
+        string account=Dir("account"),encrypted=Path.Combine(account,"nt_msg.db");
+        using(var output=File.Create(encrypted)) {
+            output.Write(new byte[1024]);
+            for(int offset=0;offset<data.Length;offset+=4096)output.Write(EncryptPage(data.AsSpan(offset,4096).ToArray(),secret,salt,(uint)(offset/4096+1),parameters));
+            output.Write(new byte[4096*4]);
+        }
+        var result=new ChatExporter().Export(account,Path.Combine(root,"reading"),ChatPlatform.QQ,secret);
+        Assert.True(result.Complete);Assert.Equal(1,result.Databases);Assert.Equal(1,result.Messages);
+        Assert.Equal(1024+data.Length+4096*4,new FileInfo(encrypted).Length);
+    }
+
+    [Theory]
+    [InlineData("active-zero")]
+    [InlineData("nonzero-tail")]
+    [InlineData("stale-size")]
+    [InlineData("missing-size")]
+    [InlineData("truncated")]
+    [InlineData("unwrapped")]
+    [InlineData("cancel")]
+    public void QqZeroTailSupportNeverBypassesActivePageAuthentication(string damage) {
+        byte[] secret=Encoding.ASCII.GetBytes("fixture-key-1234!"),salt=Enumerable.Range(1,16).Select(i=>(byte)i).ToArray();
+        int wrapper=damage=="unwrapped"?0:1024;
+        var parameters=new CipherParameters(wrapper,48,HashAlgorithmName.SHA1,HashAlgorithmName.SHA1,4000,false);
+        byte[] first=new byte[4096];"SQLite format 3\0"u8.CopyTo(first);
+        BinaryPrimitives.WriteUInt16BigEndian(first.AsSpan(16),4096);
+        BinaryPrimitives.WriteUInt32BigEndian(first.AsSpan(24),7);
+        BinaryPrimitives.WriteUInt32BigEndian(first.AsSpan(28),damage=="missing-size"?0u:damage=="truncated"?3u:damage=="active-zero"?2u:1u);
+        BinaryPrimitives.WriteUInt32BigEndian(first.AsSpan(92),damage=="stale-size"?6u:7u);
+        string source=Path.Combine(root,"cipher.db"),target=Path.Combine(root,"decrypted.db");
+        using(var output=File.Create(source)) {
+            output.Write(new byte[wrapper]);output.Write(EncryptPage(first,secret,salt,1,parameters));
+            byte[] tail=new byte[4096*(damage=="cancel"?300:1)];if(damage=="nonzero-tail")tail[42]=1;output.Write(tail);
+        }
+        using var cancellation=new CancellationTokenSource();
+        var progress=new ImmediateProgress(_=>cancellation.Cancel());
+        Action decrypt=()=>ChatCipher.DecryptDatabase(source,target,secret,ChatPlatform.QQ,cancellation.Token,progress);
+        if(damage=="cancel")Assert.Throws<OperationCanceledException>(decrypt);
+        else if(damage=="truncated")Assert.Throws<InvalidDataException>(decrypt);
+        else Assert.Throws<CryptographicException>(decrypt);
+        Assert.False(File.Exists(target));Assert.True(File.Exists(source));
+    }
+
+    [Fact]
     public void QqLockPageExceptionIsLimitedToTheExactWrappedZeroPage() {
         byte[] zero = new byte[4096];
         Assert.True(ChatCipher.IsQqLockPlaceholder(zero, 262144, 1024, ChatPlatform.QQ));

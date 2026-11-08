@@ -782,6 +782,31 @@ public sealed class FormTests {
     });
 
     [Fact]
+    public void FailedReadingExportShowsErrorsAndDoesNotOfferAnEmptyReader() => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);
+        File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        string reading=Path.Combine(fixture,"reading");Directory.CreateDirectory(reading);
+        string report=Path.Combine(reading,"export-report.json");
+        JsonFiles.Write(report,new ChatExportResult(reading,0,0,[new("chat-export","nt_msg.db","Fixture page authentication failed")],false));
+        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        try {
+            window.Show();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            void Set(string name,object value)=>type.GetField(name,flags)!.SetValue(window,value);
+            Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));
+            Set("activeManifest",backup.Manifest);Set("readingDirectory",reading);Set("exportReport",report);Set("chatStep",3);
+            window.Navigate("chats");type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();
+            Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("ReadingFailedTitle"));
+            Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text=="Fixture page authentication failed");
+            Assert.DoesNotContain(Descendants(window).OfType<Button>(),b=>b.IsVisible&&Equals(b.Content,L.T("OpenReading")));
+            var run=(Task)type.GetMethod("Run",flags)!.Invoke(window,new object[]{(Func<CancellationToken,Task>)(_=>{Set("operationIncomplete",true);return Task.CompletedTask;})})!;
+            Wait(AsResult(run));
+            string log=Descendants(window).OfType<OperationPanel>().Single().Log.Text;
+            Assert.Contains("Operation stopped.",log);Assert.DoesNotContain("Operation completed.",log);
+        } finally {window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Fact]
     public void ArchivedQqKeyValidationCorrectsAStaleGuildSelection() => OnUi(() => {
         string fixture=Fixture(),source=Path.Combine(fixture,"account");
         string guild=Path.Combine(source,"QQGuild","nt_db","nt_msg.db"),main=Path.Combine(source,"nt_qq","nt_db","nt_msg.db");

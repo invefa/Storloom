@@ -120,12 +120,26 @@ public static class ChatCipher {
             using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.ReadWrite);
             using var decoder = new PageDecryptor(key, salt, parameters);
             byte[] plainPage = new byte[PageSize];
+            decoder.Decrypt(page, 1, plainPage);
+            // NTQQ may preallocate zero-filled space after its logical SQLite database.
+            // Trust only the authenticated, current page-one size (SQLite file format 1.3.7).
+            uint logicalPages = 0;
+            if (platform == ChatPlatform.QQ && parameters.Wrapper == 1024 &&
+                BinaryPrimitives.ReadUInt16BigEndian(plainPage.AsSpan(16)) == PageSize &&
+                BinaryPrimitives.ReadUInt32BigEndian(plainPage.AsSpan(24)) == BinaryPrimitives.ReadUInt32BigEndian(plainPage.AsSpan(92))) {
+                logicalPages = BinaryPrimitives.ReadUInt32BigEndian(plainPage.AsSpan(28));
+                if ((long)logicalPages * PageSize > input.Length - parameters.Wrapper)
+                    throw new InvalidDataException("The database is shorter than its authenticated page count.");
+            }
             uint number = 1;
             while (true) {
                 cancellation.ThrowIfCancellationRequested();
-                if (IsQqLockPlaceholder(page, number, parameters.Wrapper, platform)) {
+                if (logicalPages > 0 && number > logicalPages) {
+                    if (page.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
+                        throw new CryptographicException($"Nonzero data beyond the authenticated database size: {number}");
+                } else if (IsQqLockPlaceholder(page, number, parameters.Wrapper, platform)) {
                     output.Write(page); shiftedLockPage = true;
-                } else { decoder.Decrypt(page, number, plainPage); output.Write(plainPage); }
+                } else { if (number != 1) decoder.Decrypt(page, number, plainPage); output.Write(plainPage); }
                 number++;
                 if (number % 256 == 0 || input.Position == input.Length)
                     progress?.Report(new("chat-decrypt", 0, input.Position, input.Length, Detail: Path.GetFileName(source)));

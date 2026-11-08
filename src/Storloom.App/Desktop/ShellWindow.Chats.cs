@@ -114,17 +114,20 @@ public sealed partial class ShellWindow {
     private void UpdateExportEnabled(bool encrypted) => chatNext.IsEnabled = !encrypted || capturedKey != null ||
         (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password));
     private void BuildChatFinished() {
-        var stack = View.Stack(View.Text(L.T("ArchiveFinished"), 23),
-            View.Text(L.T(readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)));
+        var report = exportReport != null && File.Exists(exportReport) ? JsonFiles.Read<ChatExportResult>(exportReport) : null;
+        bool failed = report is { Databases: 0 };
+        var stack = View.Stack(View.Text(L.T(failed ? "ReadingFailedTitle" : report is { Complete: false } ? "ReadingPartialTitle" : "ArchiveFinished"), 23),
+            View.Text(L.T(failed ? "ReadingFailed" : readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)));
         if (readingDirectory != null) stack.Children.Add(View.Field("ReadingCopyLabel", View.Input(readingDirectory, true)));
-        if (exportReport != null && File.Exists(exportReport)) {
-            var report = JsonFiles.Read<ChatExportResult>(exportReport); var coverage = View.Text(L.T("ReadingCoverage", report.Contacts, report.MediaFiles, report.UnresolvedMedia, report.UnsupportedMessages), color: "Muted");
+        if (report != null) {
+            var coverage = View.Text(L.T("ReadingCoverage", report.Contacts, report.MediaFiles, report.UnresolvedMedia, report.UnsupportedMessages), color: "Muted");
             coverage.Margin = new Thickness(0, 4, 0, 0); stack.Children.Add(coverage);
+            foreach (var issue in report.Issues.Take(5)) stack.Children.Add(View.Text(issue.Reason, color: "Muted"));
         }
         chatContent.Children.Add(new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         chatFooter.Children.Add(Button("NewChatArchive", () => { chatStep = 0; activeChat = null; activeManifest = null; SetCapturedKey(null); RenderChatStage(); }, true));
         chatFooter.Children.Add(Button("OpenBackup", () => OpenFolder(ArchiveDirectory())));
-        if (readingDirectory != null) chatFooter.Children.Add(Button("OpenReading", () => new ChatReaderWindow(readingDirectory, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog()));
+        if (readingDirectory != null && !failed) chatFooter.Children.Add(Button("OpenReading", () => new ChatReaderWindow(readingDirectory, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog()));
         if (exportReport != null) chatFooter.Children.Add(Button("OpenReport", () => OpenFile(exportReport)));
     }
 }

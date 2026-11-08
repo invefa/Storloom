@@ -115,6 +115,8 @@ public sealed partial class ShellWindow {
                 var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true).ExportVerifiedBackup(
                     activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup));
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
+                operationIncomplete = !result.Complete;
+                foreach (var issue in result.Issues) operationView.AddLog($"[{issue.RuleId}] {issue.Path}: {issue.Reason}");
                 chatStep = 3; SetCapturedKey(null); RenderChatStage();
                 status.Text = L.T("ExportDone", result.Messages, result.Databases, L.T(result.Complete ? "Complete" : "Incomplete"), exportReport);
             });

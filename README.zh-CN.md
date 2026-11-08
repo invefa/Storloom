@@ -55,7 +55,7 @@ Windows上安装.NET 10 SDK。版本在.NET 10范围内滚动选择。也可使�
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.6.5
+./scripts/Publish.ps1 -Version 0.6.6
 ```
 
 脚本按白名单打包程序、规则、文档和许可证，检查本机路径，生成ZIP和SHA-256，不复制私有数据或测试夹具。CI在Windows执行构建和测试，打包工作流只生成产物，不自动创建GitHub Release。图标源为SVG，`scripts/Build-Icon.ps1`可生成Windows多尺寸ICO。
