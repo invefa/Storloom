@@ -12,7 +12,7 @@ A theme file overrides any subset of these colors with six-digit `#RRGGBB` strin
   "Surface": "#ffffff",
   "Sidebar": "#eeeeee",
   "Ink": "#242424",
-  "Muted": "#686868",
+  "Muted": "#5d5d5d",
   "Line": "#dddddd",
   "Accent": "#252525",
   "OnAccent": "#ffffff",
@@ -20,7 +20,9 @@ A theme file overrides any subset of these colors with six-digit `#RRGGBB` strin
   "Hover": "#e8e8e8",
   "Danger": "#4b4b4b",
   "TextSelection": "#aaaaaa",
-  "SelectedText": "#202020"
+  "SelectedText": "#202020",
+  "AccentText": "#252525",
+  "ControlBorder": "#888888"
 }
 ```
 
@@ -33,3 +35,5 @@ Navigation changes immediately and menus open without popup animation. Multiline
 Sidebar transitions keep icon positions fixed. The log divider is constrained to the visible window and reserves room for the current page. Long unwrapped logs have separate horizontal and vertical scrollbars. Enable Close button → Hide to the notification area in Preferences to keep tasks running with the window hidden; the tray menu restores the window or exits. Exiting during a task requires confirmation and waits for cancellation to finish.
 
 Confirmation and information notices use compact, non-resizable windows sized to their content, with a bounded scrolling message area for lengthy details and actions at the bottom right. Chat backup and result forms label account, raw-backup and reading-copy paths on the left with consistent row spacing. Custom scrollbar tracks and thumbs share the same minimum-size metrics so long documents do not clip the thumb at either end.
+
+Built-in palettes separate accent fills from accent-colored text and control outlines. Text pairs are checked at a contrast ratio of at least 4.5, with input outlines at least 3 against their surfaces. Primary-button press feedback moves the background away from its foreground color. Reader checks cover Default, WeChat and QQ in light/dark modes, including secondary text in sent-message bubbles and placeholders on their own backgrounds. Custom overrides remain user-defined; the built-in contrast checks do not certify arbitrary custom palettes.

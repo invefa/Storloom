@@ -53,7 +53,10 @@ public static class ControlFeedback {
             double amount = (bool)control.GetValue(PressedProperty) ? .18 : .08;
             var ink = Color("Ink");
             // Filled buttons need a visible state change while preserving foreground contrast.
-            if (color == Color("Accent")) ink = Colors.White;
+            if (color == Color("Accent")) {
+                var foreground = Color("OnAccent");
+                ink = foreground.R * 299 + foreground.G * 587 + foreground.B * 114 >= 128000 ? Colors.Black : Colors.White;
+            }
             color = System.Windows.Media.Color.FromRgb((byte)(color.R + (ink.R - color.R) * amount),
                 (byte)(color.G + (ink.G - color.G) * amount), (byte)(color.B + (ink.B - color.B) * amount));
         }

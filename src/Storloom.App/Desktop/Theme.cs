@@ -8,7 +8,7 @@ namespace Storloom.App;
 public static class Theme {
     public static AppTheme Current { get; private set; }
     public static bool ReduceMotion { get; private set; }
-    private static readonly string[] names = ["Canvas", "Surface", "Sidebar", "Ink", "Muted", "Line", "Accent", "OnAccent", "Selection", "Hover", "Danger", "TextSelection", "SelectedText"];
+    private static readonly string[] names = ["Canvas", "Surface", "Sidebar", "Ink", "Muted", "Line", "Accent", "OnAccent", "Selection", "Hover", "Danger", "TextSelection", "SelectedText", "AccentText", "ControlBorder"];
     public static void Apply(AppPreferences preferences) {
         Current = preferences.Theme; ReduceMotion = preferences.ReduceMotion;
         var resources = Application.Current.Resources;
@@ -24,8 +24,8 @@ public static class Theme {
         ApplicationThemeManager.Apply(Current == AppTheme.OneDark ? ApplicationTheme.Dark : ApplicationTheme.Light,
             Wpf.Ui.Controls.WindowBackdropType.None, false);
         string[] colors = Current == AppTheme.OneDark ?
-            ["#23272e", "#282c34", "#1e2227", "#abb2bf", "#9098a7", "#3b414d", "#4d78cc", "#ffffff", "#34445d", "#303640", "#e06c75", "#4e658a", "#ffffff"] :
-            ["#f6f6f6", "#ffffff", "#eeeeee", "#242424", "#686868", "#dddddd", "#252525", "#ffffff", "#dddddd", "#e8e8e8", "#4b4b4b", "#aaaaaa", "#202020"];
+            ["#23272e", "#282c34", "#1e2227", "#c4ccd8", "#aeb8c8", "#3b414d", "#426bb7", "#ffffff", "#34445d", "#303640", "#ef8d96", "#4e658a", "#ffffff", "#a5c2ff", "#7c8799"] :
+            ["#f6f6f6", "#ffffff", "#eeeeee", "#242424", "#5d5d5d", "#dddddd", "#252525", "#ffffff", "#dddddd", "#e8e8e8", "#4b4b4b", "#aaaaaa", "#202020", "#252525", "#888888"];
         var palette = names.Zip(colors).ToDictionary(pair => pair.First, pair => (Color)ColorConverter.ConvertFromString(pair.Second));
         if (!string.IsNullOrWhiteSpace(preferences.CustomThemeFile)) {
             foreach (var pair in ReadCustom(preferences.CustomThemeFile)) palette[pair.Key] = pair.Value;
@@ -44,8 +44,10 @@ public static class Theme {
         Map("Selection", "ControlFillColorTertiary", "SubtleFillColorTertiary", "AccentFillColorSecondary");
         Map("Ink", "TextFillColorPrimary", "ControlStrongFillColorDefault");
         Map("Muted", "TextFillColorSecondary", "TextFillColorTertiary", "TextFillColorDisabled", "TextPlaceholderColor");
-        Map("Line", "ControlStrokeColorDefault", "ControlStrokeColorSecondary", "SurfaceStrokeColorDefault", "DividerStrokeColorDefault", "CardStrokeColorDefault", "CardStrokeColorDefaultSolid");
-        Map("Accent", "SystemAccentColor", "SystemAccentColorPrimary", "SystemAccentColorSecondary", "SystemAccentColorTertiary", "AccentFillColorDefault", "AccentTextFillColorPrimary", "AccentTextFillColorSecondary", "KeyboardFocusBorderColor", "FocusStrokeColorOuter");
+        Map("Line", "SurfaceStrokeColorDefault", "DividerStrokeColorDefault", "CardStrokeColorDefault", "CardStrokeColorDefaultSolid");
+        Map("ControlBorder", "ControlStrokeColorDefault", "ControlStrokeColorSecondary");
+        Map("Accent", "SystemAccentColor", "SystemAccentColorPrimary", "SystemAccentColorSecondary", "SystemAccentColorTertiary", "AccentFillColorDefault");
+        Map("AccentText", "AccentTextFillColorPrimary", "AccentTextFillColorSecondary", "KeyboardFocusBorderColor", "FocusStrokeColorOuter");
         Map("OnAccent", "TextOnAccentFillColorPrimary", "TextOnAccentFillColorSecondary", "TextOnAccentFillColorSelectedText");
         resources["ApplicationBackgroundBrush"] = resources["Canvas"];
         resources["ApplicationForegroundBrush"] = resources["Ink"];

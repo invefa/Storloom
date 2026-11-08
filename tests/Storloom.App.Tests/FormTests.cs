@@ -716,12 +716,15 @@ public sealed class FormTests {
             Assert.Equal("8",Query("document.querySelector('.bubble img')?.naturalWidth"));
             Assert.Equal(locale=="en"?"WeChat":"微信",System.Text.Json.JsonSerializer.Deserialize<string>(Query("document.querySelector('option[value=wechat]').textContent")));
             Assert.Equal("\"6px 10px\"",Query("getComputedStyle(document.querySelector('.bubble')).padding"));
-            foreach(var entry in new[]{("wechat","rgb(249, 249, 249)","rgb(30, 30, 30)"),("qq","rgb(244, 244, 244)","rgb(32, 32, 32)")}) {
+            Query("(()=>{const bubble=document.querySelector('.self .bubble');for(const cls of ['kind-title','card-detail','placeholder']){const text=document.createElement('div');text.className=cls;text.textContent='Unreadable-message palette fixture';bubble.append(text);}})()");
+            foreach(var entry in new[]{("default","rgb(247, 247, 245)","rgb(35, 39, 46)"),("wechat","rgb(249, 249, 249)","rgb(30, 30, 30)"),("qq","rgb(244, 244, 244)","rgb(32, 32, 32)")}) {
                 Query("document.getElementById('palette').value='"+entry.Item1+"';document.getElementById('palette').dispatchEvent(new Event('change'));true");
                 foreach(bool dark in new[]{false,true}) {
                     Query("document.body.classList.toggle('dark',"+(dark?"true":"false")+");true");
                     Assert.Equal(System.Text.Json.JsonSerializer.Serialize(dark?entry.Item3:entry.Item2),Query("getComputedStyle(document.body).backgroundColor"));
                     Assert.Equal("true",Query("document.querySelector('aside header').scrollWidth<=document.querySelector('aside header').clientWidth"));
+                    string contrastFailures=Query("(()=>{const rgb=s=>(s.match(/[0-9.]+/g)||[]).map(Number),lum=c=>{const v=c.slice(0,3).map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4});return .2126*v[0]+.7152*v[1]+.0722*v[2]},fail=[];for(const el of document.querySelectorAll('.timestamp,#notice,nav small,.source summary,input:not([type=checkbox]),select,.bubble,.kind-title,.card-detail,.placeholder,.avatar,#filter-label')){let node=el,bg;while(node){bg=rgb(getComputedStyle(node).backgroundColor);if(bg.length===3||bg[3]>0)break;node=node.parentElement;}if(!node)continue;const a=lum(rgb(getComputedStyle(el).color)),b=lum(bg),ratio=(Math.max(a,b)+.05)/(Math.min(a,b)+.05);if(ratio<4.5)fail.push({element:el.className||el.id,ratio});}return fail;})()");
+                    Assert.True(contrastFailures=="[]",entry.Item1+" dark="+dark+": "+contrastFailures);
                     Wait(AsResult(Task.Delay(150)));using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
                     DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
                     File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-"+entry.Item1+"-"+(dark?"dark":"light")+"-"+locale+".png"),stream.ToArray());
@@ -996,6 +999,31 @@ public sealed class FormTests {
         finally {second.Close();Directory.Delete(fixture,true);}
     });
 
+    [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.OneDark)]
+    public void NativePaletteKeepsTextControlsAndPressedPrimaryActionsReadable(AppTheme theme) => OnUi(() => {
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        Color ColorOf(string key)=>((SolidColorBrush)Theme.Brush(key)).Color;
+        foreach(string background in new[]{"Canvas","Surface","Sidebar","Selection","Hover"})
+            foreach(string foreground in new[]{"Ink","Muted","AccentText"})
+                Assert.True(Contrast(ColorOf(foreground),ColorOf(background))>=4.5,$"{theme} {foreground}/{background}");
+        foreach(var pair in new[]{("OnAccent","Accent"),("SelectedText","TextSelection"),("Danger","Surface"),("Danger","Canvas")})
+            Assert.True(Contrast(ColorOf(pair.Item1),ColorOf(pair.Item2))>=4.5,$"{theme} {pair}");
+        Assert.True(Contrast(ColorOf("ControlBorder"),ColorOf("Surface"))>=3);
+        var button=new Button{Style=(Style)Application.Current.Resources["PrimaryButton"],Content="Primary fixture"};
+        var window=new ThemeWindow("Palette fixture",600,350){ShowInTaskbar=false};window.Body.Children.Add(button);
+        try {
+            window.Show();Pump();var pressed=(DependencyProperty)typeof(ControlFeedback).GetField("PressedProperty",BindingFlags.NonPublic|BindingFlags.Static)!.GetValue(null)!;
+            button.SetValue(pressed,true);ControlFeedback.Refresh(button);
+            var frame=(Border)button.Template.FindName("frame",button);
+            Assert.True(Contrast(((SolidColorBrush)button.Foreground).Color,((SolidColorBrush)frame.Background).Color)>=4.5);
+        }finally{window.Close();Theme.Apply(new AppPreferences{ReduceMotion=true});}
+    });
+    private static double Contrast(Color foreground,Color background) {
+        static double Luminance(Color c) {static double Linear(byte channel){double x=channel/255d;return x<=.04045?x/12.92:Math.Pow((x+.055)/1.055,2.4);}return .2126*Linear(c.R)+.7152*Linear(c.G)+.0722*Linear(c.B);}
+        double a=Luminance(foreground),b=Luminance(background);return (Math.Max(a,b)+.05)/(Math.Min(a,b)+.05);
+    }
     private static void Database(string path,string sql) {
         Assert.Equal(0,sqlite3_open_v2(path,out nint db,6,0));try{Assert.Equal(0,sqlite3_exec(db,sql,0,0,0));}finally{sqlite3_close_v2(db);}
     }

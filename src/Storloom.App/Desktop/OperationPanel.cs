@@ -43,7 +43,7 @@ public sealed class OperationPanel : Grid {
         state.TextTrimming = TextTrimming.CharacterEllipsis; state.TextWrapping = TextWrapping.NoWrap;
         state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
         row.Children.Add(state); View.Add(this, row, 0); View.Add(this, progress, 1); View.Add(this, Log, 2);
-        progress.SetResourceReference(Control.ForegroundProperty, "Accent"); progress.SetResourceReference(Control.BackgroundProperty, "Line");
+        progress.SetResourceReference(Control.ForegroundProperty, "AccentText"); progress.SetResourceReference(Control.BackgroundProperty, "Line");
         progress.SetResourceReference(FrameworkElement.StyleProperty, "OperationProgress");
         FollowToggle.Checked += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { if (Follow) Log.ScrollToEnd(); }));
         Log.PreviewMouseWheel += (_, _) => PauseFollowing();
