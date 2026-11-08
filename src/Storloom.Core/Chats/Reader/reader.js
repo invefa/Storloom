@@ -78,24 +78,32 @@
   const key=conversation+':'+p;if(pageLoads.has(key)){pageLoads.get(key)(items);pageLoads.delete(key);return;}
   if (current?.id !== conversation || p !== page) return;
   messages = items; render();
-  if (pendingJump?.conversation === conversation && pendingJump.page === p) { highlight(pendingJump.id); pendingJump = null; }
+  if (pendingJump?.conversation === conversation && pendingJump.page === p) { highlight(pendingJump.id,false); pendingJump = null; }
   else if(restoreScroll!==null){$('messages').scrollTop=restoreScroll;restoreScroll=null;}
   else if(readerPrefs.autoBottom&&!contextMode)scrollBottom();
  };
  window.receiveReferences = (conversation, map) => {
   referenceMaps.set(conversation, map); referenceLoads.get(conversation)?.(map); referenceLoads.delete(conversation);
  };
- function highlight(id) {
+ function highlight(id,animate=true) {
   pinBottom=false;const target = $('msg-' + id); if (!target) {actionStatus(label('ReaderReferenceMissing'));return;}
-  target.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'instant':'smooth'});target.classList.remove('referenced');void target.offsetWidth;target.classList.add('referenced');
+  target.scrollIntoView({block:'center',behavior:animate&&!matchMedia('(prefers-reduced-motion:reduce)').matches?'smooth':'instant'});target.classList.remove('referenced');void target.offsetWidth;target.classList.add('referenced');
   setTimeout(() => target.classList.remove('referenced'), 2600);
  }
  function scrollBottom(){pinBottom=true;$('messages').scrollTop=$('messages').scrollHeight;}
  function leaveContext(){contextMode=false;returnPoints=[];restoreScroll=null;pendingJump=null;$('back-results').hidden=true;}
- function showContext(id,targetPage=page){
+ function showContext(id,targetPage=page,origin=null){
+  const pane=$('messages'),scroll=pane.scrollTop;
+  const anchor=origin?.closest('.message')||Array.from(pane.children).find(node=>node.getBoundingClientRect().bottom>pane.getBoundingClientRect().top);
+  const anchorId=anchor?.id,anchorTop=anchor?.getBoundingClientRect().top;
+  const needsRender=!contextMode&&Object.values(readFilters()).some(value=>value!==''&&value!==false);
   stopSearch();returnPoints.push({conversation:current.id,page,scroll:$('messages').scrollTop,context:contextMode,filters:readFilters()});
   contextMode=true;$('back-results').hidden=false;pinBottom=false;
-  if(targetPage===page){render();highlight(id);}else{page=targetPage;pendingJump={conversation:current.id,page,id};load();}
+  if(targetPage===page){
+   if(needsRender){render();pane.scrollTop=scroll;}
+   const restored=anchorId&&$(anchorId);if(restored)pane.scrollTop+=restored.getBoundingClientRect().top-anchorTop;
+   text('filter-label',label('ReaderContextMode'));highlight(id);
+  }else{page=targetPage;pendingJump={conversation:current.id,page,id};load();}
  }
  function readFilters(){return Object.fromEntries(['message-search','kind-filter','sender-filter','date-from','date-to','self-filter'].map(id=>[id,$(id).type==='checkbox'?$(id).checked:$(id).value]));}
  $('back-results').onclick=()=>{stopSearch();const saved=returnPoints.pop();if(!saved)return;current=index.conversations.find(c=>c.id===saved.conversation);contextMode=saved.context;for(const [id,value] of Object.entries(saved.filters)){$(id).type==='checkbox'?$(id).checked=value:$(id).value=value;}$('back-results').hidden=returnPoints.length===0;restoreScroll=saved.scroll;pendingJump=null;if(page===saved.page){render();$('messages').scrollTop=restoreScroll;restoreScroll=null;}else{page=saved.page;list();load();}};
@@ -104,7 +112,7 @@
  async function jump(reference, block) {
   const conversation = current.id;
   const local = messages.find(m => m.ServerId === reference || ('seq:' + m.Sequence) === reference);
-  if (local) { showContext(local.Id); return; }
+  if (local) { showContext(local.Id,page,block); return; }
   let map = referenceMaps.get(conversation);
   if (!map) map = await new Promise(resolve => {
    if (referenceLoads.has(conversation)) { resolve(null); return; }
@@ -333,7 +341,7 @@
     if (safeAsset(media.Path) && !used.has(assetIdentity(media)) && !reserved.has((media.Key||'').toLowerCase()) && !reserved.has((media.Name||'').toLowerCase())) { used.add(assetIdentity(media)); bubble.append(renderMedia(media, media.Kind)); }
    }
    content.append(time, bubble, referenceZone, sourceDisclosure(m));
-   if(hasFilters&&!contextMode){const context=element('button',label('ReaderShowContext'),'show-context');context.onclick=()=>showContext(m.Id);content.append(context);}
+   if(hasFilters&&!contextMode){const context=element('button',label('ReaderShowContext'),'show-context');context.onclick=()=>showContext(m.Id,page,context);content.append(context);}
    if (!system) article.append(avatar); article.append(content); fragment.append(article);
   }
   $('messages').replaceChildren(fragment); layoutReferences(); $('messages').scrollTop = 0;

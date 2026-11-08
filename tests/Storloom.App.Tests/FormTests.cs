@@ -666,7 +666,7 @@ public sealed class FormTests {
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent,MsgSvrID);"+
             "INSERT INTO MSG VALUES(10000,1700000000,'fixture','Alex invited Sam',100);"+
             "INSERT INTO MSG VALUES(1,1700000001,'fixture','Original target',101);"+
-            "WITH RECURSIVE seq(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM seq WHERE x<299) INSERT INTO MSG SELECT 1,1700000001+x,'fixture','Filler text',101+x FROM seq;"+
+            "WITH RECURSIVE seq(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM seq WHERE x<299) INSERT INTO MSG SELECT CASE WHEN x=250 THEN 49 ELSE 1 END,1700000001+x,'fixture',CASE WHEN x=250 THEN '<msg><appmsg><type>57</type><title>Same-page reply</title><refermsg><svrid>101</svrid><content>Original target</content><type>1</type></refermsg></appmsg></msg>' ELSE 'Filler text' END,101+x FROM seq;"+
             "INSERT INTO MSG VALUES(49,1700000401,'fixture','<msg><appmsg><type>57</type><title>Cross-page reply</title><refermsg><svrid>101</svrid><displayname>Alex</displayname><content>Original target</content><type>1</type></refermsg></appmsg></msg>',900);"+
             "INSERT INTO MSG VALUES(49,1700000402,'fixture','<msg><appmsg><type>19</type><recorditem>&lt;recordinfo&gt;&lt;datalist&gt;&lt;dataitem datatype=\"1\"&gt;&lt;sourcename&gt;Sam&lt;/sourcename&gt;&lt;datadesc&gt;Forwarded fixture&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/datalist&gt;&lt;/recordinfo&gt;</recorditem></appmsg></msg>',901);");
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
@@ -677,10 +677,16 @@ public sealed class FormTests {
             var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
             void Until(string expression,string expected){while(DateTime.UtcNow<until&&Query(expression)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(expression));}
             Until("document.querySelectorAll('.message.system').length","1");Assert.Equal("0",Query("document.querySelectorAll('.system .avatar').length"));
+            Query("window.readerOriginalScrollIntoView=Element.prototype.scrollIntoView;Element.prototype.scrollIntoView=function(options){window.readerJumpStart=document.querySelector('#messages').scrollTop;window.readerJumpAnchorTop=window.readerOrigin.getBoundingClientRect().top;window.readerJumpBehavior=options.behavior;return window.readerOriginalScrollIntoView.call(this,options);};window.readerOrigin=document.querySelector('blockquote').closest('.message');document.querySelector('#messages').scrollTop=window.readerOrigin.offsetTop-100;window.readerOriginTop=window.readerOrigin.getBoundingClientRect().top;true");
+            double start=double.Parse(Query("document.querySelector('#messages').scrollTop"),System.Globalization.CultureInfo.InvariantCulture);Assert.True(start>1000);
+            Query("document.querySelector('blockquote').click();true");Until("document.querySelectorAll('.referenced').length","1");
+            Assert.True(double.Parse(Query("window.readerJumpStart"),System.Globalization.CultureInfo.InvariantCulture)>1000);Assert.Equal(Query("window.readerOriginTop"),Query("window.readerJumpAnchorTop"));Assert.Equal("true",Query("window.readerOrigin.isConnected"));
+            Query("document.querySelector('#back-results').click();true");
             Assert.Equal("0",Query("document.querySelectorAll('.bubble .source').length"));Query("document.getElementById('next').click();true");
             Until("document.querySelectorAll('.forwarded').length","1");Assert.Contains("Forwarded fixture",Query("document.querySelector('.forwarded').textContent"));
             Query("document.querySelector('blockquote').click();true");Until("document.querySelectorAll('.referenced').length","1");
             Assert.Contains("Original target",Query("document.querySelector('.referenced .bubble').textContent"));Assert.Contains("1 / 2",Query("document.getElementById('page').textContent"));
+            Assert.Equal("\"instant\"",Query("window.readerJumpBehavior"));Query("Element.prototype.scrollIntoView=window.readerOriginalScrollIntoView;true");
             Assert.Equal("0",Query("document.querySelectorAll('pre').length"));Query("document.querySelector('.referenced details').open=true;true");
             Until("document.querySelectorAll('.source-bubble').length","1");Assert.Equal("0",Query("document.querySelectorAll('.bubble details').length"));
             using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
