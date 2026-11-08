@@ -55,7 +55,7 @@ Install .NET 10 SDK on Windows. The baseline rolls forward within .NET 10 featur
 ```powershell
 dotnet build Storloom.sln -c Release
 dotnet test Storloom.sln -c Release
-./scripts/Publish.ps1 -Version 0.6.7
+./scripts/Publish.ps1 -Version 0.6.8
 ```
 
 The package script copies only public binaries, rules, documentation, and notices into a fresh directory, audits local identity paths, and emits ZIP/SHA-256. It never copies `data/` or test fixtures. CI builds/tests on Windows; the packaging workflow creates artifacts without publishing a GitHub Release. The icon source is SVG; `scripts/Build-Icon.ps1` regenerates the multi-size Windows ICO.

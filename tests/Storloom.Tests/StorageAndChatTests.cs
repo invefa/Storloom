@@ -415,6 +415,39 @@ public sealed class StorageAndChatTests : IDisposable {
     }
 
     [Theory]
+    [InlineData(300,true)]
+    [InlineData(4501,true)]
+    [InlineData(300,false)]
+    [InlineData(4501,false)]
+    public void ReaderPaginationPreservesStableTimestampOrderForOrderedAndShuffledConversations(int count,bool ordered) {
+        string source=Dir("source"),target=Dir("reading"),work=Dir("reading/work");
+        var expected=Enumerable.Range(0,count).Select(i=>(Time:(long)(ordered?i/2:(count-i)/2),Id:"m"+(i+1))).ToArray();
+        using(var writer=new ChatArchiveWriter(source,target,work,new(),null,default,"fixture",resumable:true)) {
+            foreach(var item in expected)writer.Add(new("QQ","group:fixture","fixture",item.Time,1,"fixture"));
+            writer.Finish(null);
+        }
+        var actual=Directory.GetFiles(Path.Combine(target,"conversations"),"*.js").Where(p=>!p.EndsWith("-refs.js"))
+            .OrderBy(p=>int.Parse(Path.GetFileNameWithoutExtension(p).Split('-')[1])).SelectMany(path=>{
+                string text=File.ReadAllText(path);return System.Text.Json.JsonSerializer.Deserialize<ChatMessage[]>(text[(text.IndexOf(",[",StringComparison.Ordinal)+1)..^2])!;
+            }).Select(m=>(m.Timestamp,m.Id)).ToArray();
+        Assert.Equal(expected.OrderBy(m=>m.Time).Select(m=>(m.Time,(string?)m.Id)),actual);
+    }
+
+    [Fact]
+    public void ReaderResumesCheckpointsWithoutTheNewOrderingMetadata() {
+        string source=Dir("source"),target=Dir("reading"),work=Dir("reading/work");
+        using(var writer=new ChatArchiveWriter(source,target,work,new(),null,default,"fixture",resumable:true)) {
+            writer.Add(new("QQ","group:fixture","fixture",20,1,"later"));writer.Add(new("QQ","group:fixture","fixture",10,1,"earlier"));writer.SaveProgress();
+        }
+        string checkpoint=Path.Combine(work,"reader-progress.json");var node=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(checkpoint))!;
+        foreach(var item in node["conversations"]!.AsArray()){item!.AsObject().Remove("ordered");item.AsObject().Remove("lastTimestamp");}
+        File.WriteAllText(checkpoint,node.ToJsonString());
+        using(var writer=new ChatArchiveWriter(source,target,work,new(),null,default,"fixture",resumable:true))writer.Finish(null);
+        string page=File.ReadAllText(Directory.GetFiles(Path.Combine(target,"conversations"),"*-0.js").Single());
+        Assert.True(page.IndexOf("earlier",StringComparison.Ordinal)<page.IndexOf("later",StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void CommittedEncryptedWalIsAppliedAndCorruptionIsRefused(bool corrupt) {

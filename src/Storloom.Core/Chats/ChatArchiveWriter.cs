@@ -11,7 +11,8 @@ public sealed record ChatMedia(string Path, string Kind, string Name) {
     public string? Quality { get; init; }
 }
 internal sealed class ChatArchiveWriter : IDisposable {
-    private sealed record Conversation(string Id, string Name, string File, long Count, int Pages = 0);
+    private sealed record Conversation(string Id, string Name, string File, long Count, int Pages = 0,
+        bool? Ordered = null, long? LastTimestamp = null);
     private readonly string source, destination, work;
     private readonly string account;
     private readonly Dictionary<string, string> contacts;
@@ -150,8 +151,10 @@ internal sealed class ChatArchiveWriter : IDisposable {
         if (!conversationIds.TryGetValue(message.Conversation, out string? id))
             conversationIds[message.Conversation] = id = JsonFiles.Hash(message.Conversation)[..24].ToLowerInvariant();
         if (!conversations.TryGetValue(id, out var conversation))
-            conversations[id] = conversation = new(id, name, Path.Combine(work, "conversation-" + id + ".jsonl"), 0);
-        conversations[id] = conversation with { Count = conversation.Count + 1 };
+            conversations[id] = conversation = new(id, name, Path.Combine(work, "conversation-" + id + ".jsonl"), 0, Ordered: true);
+        conversations[id] = conversation with { Count = conversation.Count + 1,
+            Ordered = conversation.Ordered == true && (conversation.LastTimestamp == null || message.Timestamp >= conversation.LastTimestamp),
+            LastTimestamp = message.Timestamp };
         if (!buffers.TryGetValue(id, out var buffer)) buffers[id] = buffer = new StringBuilder();
         int before = buffer.Length; buffer.AppendLine(line); bufferedCharacters += buffer.Length - before;
         if (buffer.Length >= 512 * 1024) FlushSpool(id);
@@ -242,16 +245,37 @@ internal sealed class ChatArchiveWriter : IDisposable {
             if (generated.ContainsKey(entry.Id)) { progress?.Report(new("chat-pages", ++done, 0, TotalFiles: conversations.Count)); continue; }
             // External merge keeps memory bounded for conversations with millions of messages.
             var runs = new List<string>(); var batch = new List<ChatMessage>(4000);
+            ChatMessage[]? sorted = null;
             void WriteRun() {
                 string path = entry.File + ".run-" + runs.Count; runs.Add(path);
                 using var output = new StreamWriter(path);
                 foreach (var message in batch.OrderBy(m => m.Timestamp)) output.WriteLine(JsonSerializer.Serialize(message)); batch.Clear();
             }
-            foreach (string line in File.ReadLines(entry.File)) { cancellation.ThrowIfCancellationRequested();
-                batch.Add(JsonSerializer.Deserialize<ChatMessage>(line)!); if (batch.Count >= 4000) WriteRun(); }
-            if (batch.Count > 0) WriteRun();
+            // Most single-database QQ conversations already arrive in chronological order.
+            // Older checkpoints have no ordering proof and safely use the sorting path.
+            if (entry.Ordered != true) {
+                foreach (string line in File.ReadLines(entry.File)) { cancellation.ThrowIfCancellationRequested();
+                    batch.Add(JsonSerializer.Deserialize<ChatMessage>(line)!); if (batch.Count >= 4000) WriteRun(); }
+                if (runs.Count == 0) { sorted = batch.OrderBy(m => m.Timestamp).ToArray(); batch.Clear(); }
+                else if (batch.Count > 0) WriteRun();
+            }
             var readers = runs.Select(File.OpenText).ToArray(); var queue = new PriorityQueue<(ChatMessage Message, int Run), (long Time, int Run)>();
             void Next(int index) { string? line = readers[index].ReadLine(); if (line != null) { var message = JsonSerializer.Deserialize<ChatMessage>(line)!; queue.Enqueue((message, index), (message.Timestamp, index)); } }
+            IEnumerable<ChatMessage> OrderedMessages() {
+                if (entry.Ordered == true) {
+                    long? previous = null;
+                    foreach (string line in File.ReadLines(entry.File)) {
+                        cancellation.ThrowIfCancellationRequested();
+                        var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid conversation spool.");
+                        if (previous != null && message.Timestamp < previous) throw new InvalidDataException("Conversation ordering checkpoint is inconsistent.");
+                        previous = message.Timestamp; yield return message;
+                    }
+                } else if (sorted != null) { foreach (var message in sorted) yield return message; }
+                else {
+                    for (int i = 0; i < readers.Length; i++) Next(i);
+                    while (queue.TryDequeue(out var item, out _)) { yield return item.Message; Next(item.Run); }
+                }
+            }
             int page = 0;
             string referencesPath = Path.Combine(destination, "conversations", entry.Id + "-refs.js");
             PrepareOutput(referencesPath);
@@ -270,10 +294,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 if (resumable) proofs.Add(ExportProgressFiles.Proof(destination, path));
             }
             try {
-                for (int i = 0; i < readers.Length; i++) Next(i);
-                while (queue.TryDequeue(out var item, out _)) { cancellation.ThrowIfCancellationRequested();
-                    Reference(item.Message.ServerId, item.Message); if (item.Message.Sequence != null) Reference("seq:" + item.Message.Sequence, item.Message);
-                    batch.Add(item.Message); Next(item.Run); if (batch.Count >= 300) WritePage(); }
+                foreach (var message in OrderedMessages()) { cancellation.ThrowIfCancellationRequested();
+                    Reference(message.ServerId, message); if (message.Sequence != null) Reference("seq:" + message.Sequence, message);
+                    batch.Add(message); if (batch.Count >= 300) WritePage(); }
                 if (batch.Count > 0) WritePage();
             } finally { foreach (var reader in readers) reader.Dispose(); }
             references.Write("});");
