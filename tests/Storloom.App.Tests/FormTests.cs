@@ -498,8 +498,8 @@ public sealed class FormTests {
             Assert.Equal("0",Query("document.querySelectorAll('details[open]').length"));
             Assert.Equal("0",Query("document.querySelectorAll('pre').length"));
             Assert.Equal("1",Query("document.querySelectorAll('.kind-image .placeholder').length"));
-            Assert.False(core.Settings.AreHostObjectsAllowed);Assert.False(core.Settings.IsWebMessageEnabled);
-            Query("document.querySelector('details').open=true;true");Pump();
+            Assert.False(core.Settings.AreHostObjectsAllowed);Assert.True(core.Settings.IsWebMessageEnabled);Assert.False(core.Settings.AreDefaultContextMenusEnabled);
+            Query("document.querySelector('details.source').open=true;true");Pump();
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('pre').length")=="0"){Pump();Thread.Sleep(10);}
             Assert.Contains("<msg>",System.Text.Json.JsonSerializer.Deserialize<string>(Query("document.querySelector('pre').textContent"))!);
             using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
@@ -603,6 +603,49 @@ public sealed class FormTests {
             Assert.Contains("@Alex",Query("document.querySelector('.source-bubble').textContent"));
         } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
+    [Fact]
+    public void ReaderFiltersJumpPagesAndKeepFacesInlineAndResolvedPicturesBare() => OnUi(() => {
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);L.SetLanguage("en");
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);"+string.Join("",Enumerable.Range(0,301).Select(i=>$"INSERT INTO MSG VALUES(1,{1700000000+i},'fixture','{(i==300?"Unique last-page fixture":"Fixture text") }');")));
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.WeChat);
+        byte[] png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII=");string image="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png)).ToLowerInvariant()+".png";Directory.CreateDirectory(Path.Combine(export.Directory,"assets"));File.WriteAllBytes(Path.Combine(export.Directory,image),png);
+        var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        try {
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}var core=window.Browser.CoreWebView2!;string Query(string s)=>Wait(core.ExecuteScriptAsync(s));
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="300"){Pump();Thread.Sleep(10);}
+            Assert.Equal("300",Query("document.querySelectorAll('.message').length"));
+            Query("document.querySelector('#last').click();true");while(DateTime.UtcNow<until&&Query("document.querySelector('#page').textContent")!="\"2 / 2\""){Pump();Thread.Sleep(10);}Assert.Contains("2 / 2",Query("document.querySelector('#page').textContent"));
+            Query("document.querySelector('#first').click();true");while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="300"){Pump();Thread.Sleep(10);}
+            Query("document.querySelector('#message-search').value='Unique';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();true");
+            while(DateTime.UtcNow<until&&!Query("document.querySelector('#messages').textContent").Contains("Unique last-page fixture")){Pump();Thread.Sleep(10);}Assert.Contains("Unique last-page fixture",Query("document.querySelector('#messages').textContent"));
+            Query("document.querySelector('#reset-filter').click();true");
+            string items=System.Text.Json.JsonSerializer.Serialize(new[]{new ChatMessage("QQ","direct:fixture","fixture",1700000000,2,""){Parts=[new("text","Hi "),new("sticker",Title:"#75"){Inline=true,EmojiId="75"},new("text"," friend")]},new ChatMessage("QQ","direct:fixture","fixture",1700000001,2,""){Parts=[new("image",Title:"internal-name.png",MediaKeys:["fixture"])],Media=[new(image,"image","internal-name.png"){Key="fixture"}]}});
+            Query("window.receivePage(window.archiveIndex.conversations[0].id,1,"+items+");true");
+            Assert.Equal("1",Query("document.querySelectorAll('.kind-face').length"));Assert.Equal("true",Query("(()=>{const p=document.querySelectorAll('.message:first-child .message-text,.message:first-child .kind-face');return Math.abs(p[0].getBoundingClientRect().top-p[1].getBoundingClientRect().top)<8})()"));
+            Assert.Equal("1",Query("document.querySelectorAll('.visual-only').length"));Assert.Equal("0",Query("document.querySelectorAll('.visual-only .kind-title,.visual-only strong').length"));
+            Query("document.querySelector('#kind-filter').value='image';document.querySelector('#kind-filter').dispatchEvent(new Event('input'));true");Assert.Equal("1",Query("document.querySelectorAll('.message').length"));
+            Query("document.querySelector('img.previewable').click();true");Assert.Equal("true",Query("document.querySelector('#image-preview').open"));
+            Query("document.querySelector('#image-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:-200,clientX:200,clientY:200,cancelable:true}));true");Assert.DoesNotContain("100%",Query("document.querySelector('#zoom-value').textContent"));
+            Query("document.querySelector('#zoom-original').click();true");Assert.Contains("100%",Query("document.querySelector('#zoom-value').textContent"));
+            Query("document.querySelector('#preview-image').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));true");Assert.Equal("false",Query("document.querySelector('#reader-menu').hidden"));Assert.Contains("Save image",Query("document.querySelector('#reader-menu').textContent"));
+            Query("document.querySelector('#image-close').click();true");Assert.Equal("false",Query("document.querySelector('#image-preview').open"));
+            Query("document.querySelector('#reset-filter').click();document.querySelector('#filter-panel').open=true;true");Pump();
+            using var screenshot=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,screenshot)));
+            DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
+            File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-inline-faces-filters.png"),screenshot.ToArray());
+        } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Fact]
+    public void ReaderImageExportAcceptsOnlyExistingHashedLocalImages() {
+        string fixture=Fixture();try {
+            string Resolve(string relative){try{return (string)typeof(ChatReaderWindow).GetMethod("ResolveImagePath",BindingFlags.Static|BindingFlags.NonPublic)!.Invoke(null,[fixture,relative])!;}catch(TargetInvocationException ex){System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();throw;}}
+            Directory.CreateDirectory(Path.Combine(fixture,"assets"));string name=new string('a',64)+".png",path=Path.Combine(fixture,"assets",name);File.WriteAllBytes(path,[1,2,3]);
+            Assert.Equal(path,Resolve("assets/"+name));
+            foreach(string relative in new[]{"../private.png","assets/../../private.png","https://example.invalid/image.png","assets/"+new string('a',64)+".exe"})Assert.Throws<InvalidDataException>(()=>Resolve(relative));
+            Assert.Throws<FileNotFoundException>(()=>Resolve("assets/"+new string('b',64)+".png"));
+        }finally{Directory.Delete(fixture,true);}
+    }
 
     [Fact]
     public void ReaderJumpsAcrossPagesAndKeepsSystemAndSourceContentOutsideOrdinaryBubbles() => OnUi(() => {

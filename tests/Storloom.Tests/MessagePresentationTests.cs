@@ -80,6 +80,42 @@ public sealed class MessagePresentationTests {
     private static byte[] B(int field,byte[] value)=>[..V((ulong)(field<<3|2)),..V((ulong)value.Length),..value];
     private static byte[] S(int field,string value)=>B(field,Encoding.UTF8.GetBytes(value));
     [Fact]
+    public void QQFacesKeepZeroIdsAndNoticesReadAttributedTextWithoutExecutingMarkup() {
+        var face=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,6),..I(47601,0)]),2));
+        Assert.True(face.Inline);Assert.Equal("0",face.EmojiId);
+        var named=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,6),..S(47602,"/smile")]),2));Assert.Null(named.EmojiId);
+        var notice=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,8),..S(48214,"<gtip><qq jp='Alex'/><nor txt=' invited '/><qq jp='Sam'/><nor txt=' to the group'/></gtip>")]),5));
+        Assert.Equal("system",notice.Kind);Assert.Equal("Alex invited Sam to the group",notice.Text);
+        var nested=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,8),..B(48210,S(48214,"<gtip><nor txt='Fixture notice'/></gtip>"))]),5));Assert.Equal("Fixture notice",nested.Text);
+        var reply=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,7),..I(47702,1),..S(45101,"Fixture reply")]),9));Assert.Equal("reply",reply.Kind);Assert.Equal("Fixture reply",reply.Text);
+        var poke=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,7),..B(47401,S(47413,"Alex poked Sam"))]),9));
+        Assert.Equal("poke",poke.Kind);Assert.Equal("Alex poked Sam",poke.Text);
+        var reaction=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,8),..I(47702,1),..S(47705,"Alex"),..S(47714,"Sam")]),5));
+        Assert.Equal("reaction",reaction.Kind);Assert.Equal("Alex",reaction.ReferenceSender);
+    }
+    [Fact]
+    public void BuiltInEmojiExtractsOnlyRequestedLocalResourcesAndUsesConfigAliases() {
+        string root=Path.Combine(AppContext.BaseDirectory,"fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+        try {
+            string source=Path.Combine(root,"source"),folder=Path.Combine(source,"nt_qq/nt_data/Emoji/BaseEmojiSyastems/EmojiSystermResource/0/png");Directory.CreateDirectory(folder);
+            byte[] png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII=");File.WriteAllBytes(Path.Combine(folder,"0.png"),png);
+            string destination=Path.Combine(root,"reading");var emoji=new BuiltInEmoji(source,destination);
+            Assert.Empty(emoji.Exported);emoji.UseParts("QQ",[new("sticker"){Inline=true,EmojiId="0"}]);
+            Assert.Single(emoji.Exported);Assert.Equal(png,File.ReadAllBytes(Path.Combine(destination,emoji.Exported["QQ:0"])));
+            emoji.AddWeChat(new(){{"face.png",png},{"newemoji-config.xml",Encoding.UTF8.GetBytes("<newemoji><emoji><cn-value>[Fixture face]</cn-value><fileName>face.png</fileName></emoji></newemoji>")}});
+            emoji.UseParts("WeChat",[new("text","Hi [Fixture face]")]);Assert.Contains("WeChat:[Fixture face]",emoji.Exported.Keys);
+            Assert.Null(emoji.Use("QQ:missing"));Assert.Single(Directory.GetFiles(Path.Combine(destination,"assets")));
+        } finally {Directory.Delete(root,true);}
+    }
+    [Fact]
+    public void QtEmojiReaderRejectsCyclicResourceTrees() {
+        byte[] data=new byte[160];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(4),2);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(6),1);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(64),5);Encoding.BigEndianUnicode.GetBytes("emoji").CopyTo(data,70);
+        Assert.Throws<InvalidDataException>(()=>QtEmojiResources.Decode(data,0,64,100));
+    }
+    [Fact]
     public void QQSegmentsKeepMixedTextImagesRepliesAndStickersInOrder() {
         byte[] payload=[..B(40800,[..I(45002,1),..S(45101,"Fixture text")]),
             ..B(40800,[..I(45002,2),..S(45402,"fixture.png")]),

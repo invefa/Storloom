@@ -32,12 +32,13 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private string ProgressPath => Path.Combine(work, "reader-progress.json");
     private sealed record WriterProgress(long Messages, int Media, int Missing, int Unsupported,
         Conversation[] Conversations, ExportFileProgress Main, ExportFileProgress[] Spools,
-        Dictionary<string, ExportFileProgress[]> Generated);
+        Dictionary<string, ExportFileProgress[]> Generated, Dictionary<string,string>? Emoji = null);
     public long ProcessedMessages => messageId;
     internal int SpoolWrites { get; private set; }
     private readonly Dictionary<string, List<string>> media = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ChatMedia?> resolved = new(StringComparer.OrdinalIgnoreCase);
     private readonly WeChatImages images;
+    private readonly BuiltInEmoji emoji;
     private long messageId;
     private bool adding;
     public int MediaFiles { get; private set; }
@@ -52,8 +53,10 @@ internal sealed class ChatArchiveWriter : IDisposable {
         this.account = account;
         this.resumable = resumable;
         images = new WeChatImages(account, source, useLocalImageConfiguration);
+        emoji = new BuiltInEmoji(source,destination,useLocalImageConfiguration);
         WriterProgress? previous = resumable && File.Exists(ProgressPath) ? JsonFiles.Read<WriterProgress>(ProgressPath) : null;
         if (previous != null) {
+            emoji.Restore(previous.Emoji);
             if (previous.Main.Path != "messages.jsonl") throw new InvalidDataException("Invalid reader checkpoint output.");
             if (previous.Messages < 0 || previous.Conversations.Sum(c => c.Count) != previous.Messages)
                 throw new InvalidDataException("Invalid reader checkpoint counters.");
@@ -121,6 +124,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             IsSelf = original.IsSelf || original.Sender == account || account.StartsWith(original.Sender + "_", StringComparison.Ordinal) };
         var attachments = new List<ChatMedia>();
         var parts = MessagePresentation.Parse(message);
+        int emojiBefore=emoji.CreatedFiles;emoji.UseParts(message.Platform,parts);MediaFiles+=emoji.CreatedFiles-emojiBefore;
         if (parts.Count(p => p.Kind is "image" or "video" or "audio" or "sticker") == 1 && message.LocalMediaKeys.Length > 0)
             parts = parts.Select(p => p.Kind is "image" or "video" or "audio" or "sticker" ? p with { MediaKeys = [.. p.MediaKeys ?? [], .. message.LocalMediaKeys] } : p).ToArray();
         var keys = Regex.Matches(message.Text, "(?:md5|cdnthumbmd5)=[\"']([a-fA-F0-9]{32})[\"']")
@@ -136,7 +140,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         MessagePart State(MessagePart p) {
             if (p.Kind == "system") p = p with { Text = Regex.Replace(p.Text, "wxid_[A-Za-z0-9_-]+", match => contacts.GetValueOrDefault(match.Value, match.Value)) };
             if (p.Kind is "unsupported" or "unparsed" || p.Kind == "forward" && p.Forwarded.Length == 0) unsupported = true;
-            if (p.Kind is "image" or "video" or "audio" or "sticker" or "file") {
+            if (p.Kind is "image" or "video" or "audio" or "sticker" or "file" && !p.Inline) {
                 var available = (p.MediaKeys ?? []).Select(k => resolved.GetValueOrDefault(k)).OfType<ChatMedia>().ToArray();
                 if (available.Length == 0 || available.All(m => m.Quality == "thumbnail")) missing = true;
                 p = p with { MediaState = available.Length > 0 ? "available" :
@@ -175,7 +179,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     internal void SaveProgress() {
         FlushJson(); foreach (string id in buffers.Keys.ToArray()) FlushSpool(id);
         if (resumable) JsonFiles.Write(ProgressPath, new WriterProgress(messageId, MediaFiles, UnresolvedMedia, UnsupportedMessages,
-            conversations.Values.Select(c => c with { File = Path.GetFileName(c.File) }).ToArray(), json.Proof(destination), spools.Values.Select(f => f.Proof(destination)).ToArray(), generated));
+            conversations.Values.Select(c => c with { File = Path.GetFileName(c.File) }).ToArray(), json.Proof(destination), spools.Values.Select(f => f.Proof(destination)).ToArray(), generated,new(emoji.Exported)));
         checkpointTime = DateTime.UtcNow;
     }
     internal void SaveSafeProgress() { if (!adding) SaveProgress(); }
@@ -318,7 +322,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));
         File.WriteAllText(Path.Combine(destination, "archive-index.js"), "window.archiveIndex=" + JsonSerializer.Serialize(new {
-            language = L.Language, labels, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages,
+            language = L.Language, labels, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported,
             conversations = conversations.Values.OrderBy(c => c.Name).Select(c => new { id = c.Id, name = c.Name, count = c.Count, pages = c.Pages }) }) + ";");
         foreach (string asset in new[] { "messages.html", "reader.css", "reader.js" }) {
             using var stream = typeof(ChatArchiveWriter).Assembly.GetManifestResourceStream("Storloom.Core.Chats.Reader." + asset) ?? throw new IOException("Missing reader asset.");

@@ -15,6 +15,7 @@ public static class QQMessageParser {
         } catch (Exception ex) when (ex is InvalidDataException or OverflowException or DecoderFallbackException) { return [new("unparsed")]; }
     }
     private static MessagePart Segment(List<Field> fields, long outerType, int depth) {
+        if(fields.FirstOrDefault(f=>f.Number==48210)?.Bytes is byte[] extension)try{fields=[..fields,..Fields(extension)];}catch(InvalidDataException){ }
         string Text(int number) {
             byte[]? data = fields.FirstOrDefault(f => f.Number == number)?.Bytes;
             return data == null ? "" : new UTF8Encoding(false, true).GetString(data);
@@ -24,6 +25,14 @@ public static class QQMessageParser {
         string kind = type switch { 1 => "text", 2 => "image", 3 => "file", 4 => "audio", 5 => "video", 6 or 11 => "sticker", 7 => "reply",
             8 => "system", 9 => "redpacket", 10 => "link", 14 => "markdown", 16 => "forward", 17 => "buttons", 21 => "call", _ => MessagePresentation.QQKind(outerType) };
         string body = Text(45101), name = Text(45402), detail = "", reference = Text(47413), sender = Text(47421);
+        if (Text(48214) is string tip && tip.StartsWith("<gtip", StringComparison.Ordinal))
+            return MessagePresentation.Parse(new("QQ", "", "", 0, 5, tip))[0];
+        if (kind == "system" && fields.Any(f => f.Number == 47702))
+            return new("reaction", ReferenceSender: MessagePresentation.SafeSummary(Text(47705)), ReferenceText: MessagePresentation.SafeSummary(Text(47714)));
+        if (fields.FirstOrDefault(f => f.Number == 47401)?.Bytes is byte[] poke) {
+            var action = Fields(poke).FirstOrDefault(f => f.Number == 47413)?.Bytes;
+            return new("poke", action == null ? "" : MessagePresentation.SafeSummary(new UTF8Encoding(false,true).GetString(action)));
+        }
         string? referenceKind = null;
         var keys = new List<string>(); if (name != "") keys.Add(Path.GetFileName(name.Replace('\\', '/')));
         foreach (int number in new[] { 45406, 45424, 45862 }) {
@@ -67,7 +76,8 @@ public static class QQMessageParser {
             return MessagePresentation.Parse(new("QQ", "", "", 0, outerType, body))[0];
         return new(kind, kind is "text" or "reply" or "system" or "markdown" ? body : "", MessagePresentation.SafeSummary(name), detail,
             MessagePresentation.SafeSummary(sender), MessagePresentation.SafeSummary(reference), keys.ToArray()) { ReferenceKind = referenceKind,
-                ReferenceId = kind == "reply" && Number(47401) != 0 ? Number(47401).ToString(System.Globalization.CultureInfo.InvariantCulture) : null };
+                ReferenceId = kind == "reply" && Number(47401) != 0 ? Number(47401).ToString(System.Globalization.CultureInfo.InvariantCulture) : null,
+                Inline = type == 6, EmojiId = type == 6 && fields.Any(f=>f.Number==47601) ? Number(47601).ToString(System.Globalization.CultureInfo.InvariantCulture) : null };
     }
     public static ForwardedMessage[] ParseForwardCache(byte[] bytes) {
         try {

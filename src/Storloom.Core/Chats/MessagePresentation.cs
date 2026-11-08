@@ -11,6 +11,8 @@ public sealed record MessagePart(string Kind, string Text = "", string Title = "
     public string? MediaState { get; init; }
     public string? ReferenceKind { get; init; }
     public string? ReferenceId { get; init; }
+    public bool Inline { get; init; }
+    public string? EmojiId { get; init; }
     public ForwardedMessage[] Forwarded { get; init; } = [];
 }
 public sealed record ForwardedMessage(string Sender, string Time, MessagePart[] Parts);
@@ -62,6 +64,11 @@ public static class MessagePresentation {
     }
     private static MessagePart ParseXml(XDocument document, ChatMessage message, int depth = 0) {
         var root = document.Root!;
+        if (root.Name.LocalName == "gtip") {
+            string notice = string.Concat(root.Descendants().Where(e => e.Name.LocalName is "qq" or "nor").Select(e =>
+                e.Name.LocalName == "qq" ? e.Attribute("nm")?.Value ?? e.Attribute("jp")?.Value ?? e.Attribute("uin")?.Value ?? e.Value : e.Attribute("txt")?.Value ?? e.Value));
+            return new("system", notice);
+        }
         XElement? Find(string name) => root.DescendantsAndSelf().FirstOrDefault(e => e.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase));
         string Value(string name) => Find(name)?.Value.Trim() ?? "";
         string Attribute(string name, string attribute) => Find(name)?.Attribute(attribute)?.Value ?? "";

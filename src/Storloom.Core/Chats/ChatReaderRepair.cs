@@ -7,7 +7,7 @@ namespace Storloom.Core.Chats;
 
 public static class ChatReaderRepair {
     // Refresh presentation only. Messages, reference maps and media remain untouched.
-    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null) {
+    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
         string reportPath = Path.Combine(directory, "export-report.json");
         var report = JsonFiles.Read<ChatExportResult>(reportPath);
@@ -19,6 +19,7 @@ public static class ChatReaderRepair {
         string text = File.ReadAllText(indexPath); const string prefix = "window.archiveIndex=";
         if (!text.StartsWith(prefix, StringComparison.Ordinal) || !text.TrimEnd().EndsWith(';')) throw new InvalidDataException("Unsupported reader index.");
         var index = JsonNode.Parse(text[prefix.Length..].Trim().TrimEnd(';'))?.AsObject() ?? throw new InvalidDataException("Invalid reader index.");
+        if(emojiSource!=null){var emoji=new BuiltInEmoji(emojiSource,directory,includeInstalledEmoji);emoji.ExportAll();index["builtInEmoji"]=JsonSerializer.SerializeToNode(emoji.Exported);}
         string language = index["language"]?.GetValue<string>() ?? "en";
         if (language is not ("en" or "zh-CN")) throw new InvalidDataException("Unsupported reader language.");
         var assembly = typeof(ChatMessage).Assembly;

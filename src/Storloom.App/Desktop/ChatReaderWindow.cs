@@ -18,7 +18,29 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.Combine(dataRoot, "reader-browser"));
                 if (closed) return; await Browser.EnsureCoreWebView2Async(environment); if (closed) return;
                 var core = Browser.CoreWebView2;
-                core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = false;
+                core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = true;
+                core.Settings.AreDefaultContextMenusEnabled = false;
+                core.WebMessageReceived += (_,args) => {
+                    if(args.Source!="https://reader.storloom.invalid/messages.html" && !args.Source.StartsWith("https://reader.storloom.invalid/messages.html#",StringComparison.Ordinal))return;
+                    try {
+                        if(args.WebMessageAsJson.Length>1024*1024)return;
+                        using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
+                        string? action=root.GetProperty("action").GetString();
+                        if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)Clipboard.SetText(value);core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
+                        if(action!="save-image")return;
+                        string? path=root.GetProperty("path").GetString();string source=ResolveImagePath(directory,path);
+                        string name=Path.GetFileName(root.TryGetProperty("name",out var valueName)?valueName.GetString():null)??"image";
+                        foreach(char invalid in Path.GetInvalidFileNameChars())name=name.Replace(invalid,'_');
+                        string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
+                        var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T("ReaderSaveImage"),FileName=name,Filter="Image|*"+extension,AddExtension=true,DefaultExt=extension};
+                        if(picker.ShowDialog(this)!=true)return;
+                        string target=PathPolicy.Normalize(picker.FileName);PathPolicy.AssertNoLinks(target);
+                        if(target.Equals(source,StringComparison.OrdinalIgnoreCase))return;
+                        if(File.Exists(target)&&NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared image destination cannot be overwritten.");
+                        File.Copy(source,target,true);
+                        core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderImageSaved")}));
+                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException){if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderSaveFailed")}));}
+                };
                 core.Settings.AreDefaultScriptDialogsEnabled = false; core.Settings.AreDevToolsEnabled = false; core.Settings.IsStatusBarEnabled = false;
                 core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
                 bool Allowed(string uri) => Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.Scheme == "https" && parsed.Port == 443 && parsed.UserInfo.Length == 0 && parsed.Host is "archive.storloom.invalid" or "reader.storloom.invalid";
@@ -43,6 +65,11 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T("ReaderRuntimeMissing") + "\n" + ex.Message));
             }
         };
+    }
+    internal static string ResolveImagePath(string directory,string? relative) {
+        if(relative==null||!System.Text.RegularExpressions.Regex.IsMatch(relative,"^assets/[a-f0-9]{64}\\.(png|jpg|jpeg|gif|webp|bmp)$"))throw new InvalidDataException("Invalid archive image.");
+        string path=TransferService.Child(directory,relative);PathPolicy.AssertNoLinks(path);
+        if(!File.Exists(path))throw new FileNotFoundException("Archive image is missing.");return path;
     }
     private static Dictionary<string, (byte[] Bytes, string Type)> ReaderAssets() {
         var assembly = typeof(ChatMessage).Assembly;

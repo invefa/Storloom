@@ -24,6 +24,9 @@ public sealed partial class ShellWindow {
     private bool readingComplete;
     private void BuildChats() {
         var layout = Page("chats", "ChatTitle", "ChatLead", View.Auto, View.Fill, View.Auto);
+        var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,0)};
+        entries.Children.Add(Button("OpenChatBackup",OpenChatBackup));entries.Children.Add(Button("OpenReaderArchive",OpenReaderArchive));
+        ((StackPanel)layout.Children[0]).Children.Add(entries);
         var steps = new Grid { Margin = new Thickness(0, 0, 0, 10) }; chatSteps = new TextBlock[3]; chatStepFrames = new Border[3];
         string[] keys = ["ChatStepAccount", "ChatStepBackup", "ChatStepExport"];
         for (int i = 0; i < 3; i++) {
