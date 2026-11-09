@@ -22,11 +22,14 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 core.Settings.AreDefaultContextMenusEnabled = false;
                 core.WebMessageReceived += (_,args) => {
                     if(args.Source!="https://reader.storloom.invalid/messages.html" && !args.Source.StartsWith("https://reader.storloom.invalid/messages.html#",StringComparison.Ordinal))return;
+                    bool copyingImage=false;
                     try {
-                        if(args.WebMessageAsJson.Length>1024*1024)return;
+                        if(args.WebMessageAsJson.Length>34*1024*1024)return;
                         using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
                         string? action=root.GetProperty("action").GetString();
+                        if(action!="clipboard-image"&&args.WebMessageAsJson.Length>1024*1024)return;
                         if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)Clipboard.SetText(value);core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
+                        if(action=="clipboard-image"){copyingImage=true;Clipboard.SetImage(DecodeClipboardImage(root.GetProperty("data").GetString()));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action is not ("save-image" or "save-file"))return;
                         string? path=root.GetProperty("path").GetString();string source=action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
                         string name=Path.GetFileName(root.TryGetProperty("name",out var valueName)?valueName.GetString():null)??"image";
@@ -39,7 +42,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         if(File.Exists(target)&&NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared image destination cannot be overwritten.");
                         File.Copy(source,target,true);
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
-                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException){if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderSaveFailed")}));}
+                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException){if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
                 };
                 core.Settings.AreDefaultScriptDialogsEnabled = false; core.Settings.AreDevToolsEnabled = false; core.Settings.IsStatusBarEnabled = false;
                 core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
@@ -54,7 +57,13 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 core.WebResourceRequested += (_, args) => {
                     if (!Allowed(args.Request.Uri)) args.Response = environment.CreateWebResourceResponse(null, 403, "Local archive only", "");
                     else if (new Uri(args.Request.Uri).Host == "reader.storloom.invalid") {
-                        if (assets.TryGetValue(new Uri(args.Request.Uri).AbsolutePath, out var asset))
+                        string relative=new Uri(args.Request.Uri).AbsolutePath;
+                        if(relative.StartsWith("/image-copy/",StringComparison.Ordinal)) {
+                            try {string path=ResolveImagePath(directory,"assets/"+relative[12..]);if(new FileInfo(path).Length>32*1024*1024)throw new InvalidDataException("Image exceeds clipboard source limit.");string mime=Path.GetExtension(path).ToLowerInvariant() switch {".jpg" or ".jpeg"=>"image/jpeg",".gif"=>"image/gif",".webp"=>"image/webp",".bmp"=>"image/bmp",_=>"image/png"};
+                                args.Response=environment.CreateWebResourceResponse(File.OpenRead(path),200,"OK","Content-Type: "+mime+"\r\nCache-Control: no-store");
+                            }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException){args.Response=environment.CreateWebResourceResponse(null,404,"Image unavailable","");}
+                        }
+                        else if (assets.TryGetValue(relative, out var asset))
                             args.Response = environment.CreateWebResourceResponse(new MemoryStream(asset.Bytes, false), 200, "OK", "Content-Type: " + asset.Type + "; charset=utf-8\r\nCache-Control: no-store");
                         else args.Response = environment.CreateWebResourceResponse(null, 404, "Unknown reader asset", "");
                     }
@@ -65,6 +74,15 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T("ReaderRuntimeMissing") + "\n" + ex.Message));
             }
         };
+    }
+    internal static System.Windows.Media.Imaging.BitmapSource DecodeClipboardImage(string? encoded) {
+        if(encoded==null||encoded.Length>32*1024*1024)throw new InvalidDataException("Invalid clipboard image size.");
+        byte[] bytes;try{bytes=Convert.FromBase64String(encoded);}catch(FormatException){throw new InvalidDataException("Invalid clipboard image.");}
+        if(bytes.Length<33||!bytes.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10})||!bytes.AsSpan(12,4).SequenceEqual("IHDR"u8))throw new InvalidDataException("Expected a PNG image.");
+        uint width=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(16,4)),height=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(20,4));
+        if(width==0||height==0||(ulong)width*height>32_000_000)throw new InvalidDataException("Clipboard image dimensions are too large.");
+        using var input=new MemoryStream(bytes,false);var decoder=new System.Windows.Media.Imaging.PngBitmapDecoder(input,System.Windows.Media.Imaging.BitmapCreateOptions.PreservePixelFormat,System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        var image=decoder.Frames[0];image.Freeze();return image;
     }
     private static string ResolveResourcePath(string directory,string? relative) {
         if(relative==null||!System.Text.RegularExpressions.Regex.IsMatch(relative,"^assets/[a-f0-9]{64}\\.(pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv)$"))throw new InvalidDataException("Invalid archive resource.");
@@ -88,7 +106,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
         foreach (var (name, mime) in new[] { ("messages.html", "text/html"), ("reader.css", "text/css"), ("reader.js", "text/javascript") }) {
             using var input = assembly.GetManifestResourceStream("Storloom.Core.Chats.Reader." + name)!;
             using var reader = new StreamReader(input); string text = reader.ReadToEnd();
-            if (name == "reader.js") text = "window.archiveContentBase='https://archive.storloom.invalid/';window.readerCatalogs=" + JsonSerializer.Serialize(catalogs) + ";\n" + text;
+            if (name == "reader.js") text = "window.readerImageCopyBase='https://reader.storloom.invalid/image-copy/';window.archiveContentBase='https://archive.storloom.invalid/';window.readerCatalogs=" + JsonSerializer.Serialize(catalogs) + ";\n" + text;
             if (name == "messages.html") text = text.Replace("reader.css\"", "reader.css?v=" + ProductInfo.Version + "\"", StringComparison.Ordinal)
                 .Replace("reader.js\"", "reader.js?v=" + ProductInfo.Version + "\"", StringComparison.Ordinal)
                 .Replace("src=\"archive-index.js\"", "src=\"https://archive.storloom.invalid/archive-index.js\"", StringComparison.Ordinal)

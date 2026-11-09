@@ -39,6 +39,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private readonly Dictionary<string, ChatMedia?> resolved = new(StringComparer.OrdinalIgnoreCase);
     private readonly WeChatImages images;
     private readonly BuiltInEmoji emoji;
+    private readonly IReadOnlyDictionary<string,string>? avatars;
     private readonly WeChatVoices? voices;
     private long messageId;
     private bool adding;
@@ -46,7 +47,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null) {
+        this.avatars=avatars;
         this.voices = voices;
         this.pageParallelism = pageParallelism is >= 1 and <= 4 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination); work = PathPolicy.Normalize(work);
@@ -96,7 +98,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         IEnumerable<string> files = verified?.Keys ?? EnumerateMediaFiles(source);
         foreach (string relative in files) {
             cancellation.ThrowIfCancellationRequested();
-            if (!new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".dat", ".mp4", ".webm", ".mp3", ".wav", ".ogg", ".silk", ".m4a", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".7z", ".rar", ".txt", ".md", ".csv" }
+            if (!new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".dat", ".mp4", ".webm", ".mp3", ".wav", ".ogg", ".silk", ".amr", ".m4a", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".7z", ".rar", ".txt", ".md", ".csv" }
                 .Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase) && !Regex.IsMatch(Path.GetFileName(relative), "^[a-fA-F0-9]{32}$")) continue;
             foreach (string key in new[] { Path.GetFileName(relative), Path.GetFileNameWithoutExtension(relative) }.Distinct(StringComparer.OrdinalIgnoreCase)) {
                 if (!media.TryGetValue(key, out var values)) media[key] = values = [];
@@ -197,7 +199,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     }
     internal void SaveSafeProgress() { if (!adding) SaveProgress(); }
     internal ChatMedia? ResolveMedia(string key) {
-        var candidates = new[] { key + "_h.dat", key + "_W.dat", key, key + ".dat", key + ".jpg", key + ".png", key + ".gif", key + ".webp", key + ".mp4", key + "_t.dat", key + "_t_W.dat", key + "_thumb.jpg" }
+        var candidates = new[] { key + "_h.dat", key + "_W.dat", key, key + ".dat", key + ".jpg", key + ".png", key + ".gif", key + ".webp", key + ".mp4", key + ".jpeg", key + ".webm", key + ".silk", key + ".amr", key + ".m4a", key + ".ogg", key + "_t.dat", key + "_t_W.dat", key + "_thumb.jpg" }
             .Where(media.ContainsKey).SelectMany(k => media[k]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (candidates.Length == 0) return null;
         // Prefer the full image over its thumbnail; never guess between ambiguous full-size files.
@@ -219,7 +221,14 @@ internal sealed class ChatArchiveWriter : IDisposable {
         path.Replace('\\', '/').Split('/').Any(segment => segment.Equals("Thumb", StringComparison.OrdinalIgnoreCase) || segment.Equals("ThumbStore", StringComparison.OrdinalIgnoreCase));
     private ChatMedia? ResolveFile(string key, string relative) {
         string path = TransferService.Child(source, relative); PathPolicy.AssertNoLinks(path);
-        if (Path.GetExtension(path).Equals(".silk", StringComparison.OrdinalIgnoreCase)) return null;
+        if (Path.GetExtension(path).ToLowerInvariant() is ".silk" or ".amr") {
+            if(new FileInfo(path).Length>32*1024*1024)return null;
+            byte[] encoded=File.ReadAllBytes(path);if(verified!=null&&(!verified.TryGetValue(relative,out var proof)||Convert.ToHexString(SHA256.HashData(encoded))!=proof.Sha256))throw new InvalidDataException("Archived voice changed after verification.");
+            byte[]? wave=SilkAudio.Decode(encoded,cancellation);if(wave==null)return null;
+            string voiceAssets=Path.Combine(destination,"assets");Directory.CreateDirectory(voiceAssets);PathPolicy.AssertNoLinks(voiceAssets);string name=Convert.ToHexString(SHA256.HashData(wave)).ToLowerInvariant()+".wav",targetVoice=Path.Combine(voiceAssets,name);if(File.Exists(targetVoice))PathPolicy.AssertNoLinks(targetVoice);
+            if(!File.Exists(targetVoice)){using var output=new FileStream(targetVoice,FileMode.CreateNew,FileAccess.Write);output.Write(wave);MediaFiles++;}else{using var inputVoice=File.OpenRead(targetVoice);if(!SHA256.HashData(inputVoice).AsSpan().SequenceEqual(SHA256.HashData(wave)))throw new InvalidDataException("Voice asset conflicts with existing content.");}
+            return new("assets/"+name,"audio",Path.GetFileName(relative)){Key=key};
+        }
         string originalExtension = Path.GetExtension(path).ToLowerInvariant();
         if (originalExtension is not (".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp" or ".dat" or "")) return CopyStreaming(key, relative, path, originalExtension);
         using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -349,7 +358,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));
         File.WriteAllText(Path.Combine(destination, "archive-index.js"), "window.archiveIndex=" + JsonSerializer.Serialize(new {
-            language = L.Language, labels, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported,
+            language = L.Language, labels, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported, avatars,
+            conversationAvatars=conversationIds.Where(c=>avatars?.ContainsKey(c.Key.Replace("direct:","",StringComparison.Ordinal))==true).ToDictionary(c=>c.Value,c=>avatars![c.Key.Replace("direct:","",StringComparison.Ordinal)]),
             conversations = conversations.Values.OrderBy(c => c.Name).Select(c => new { id = c.Id, name = c.Name, count = c.Count, pages = c.Pages }) }) + ";");
         foreach (string asset in new[] { "messages.html", "reader.css", "reader.js" }) {
             using var stream = typeof(ChatArchiveWriter).Assembly.GetManifestResourceStream("Storloom.Core.Chats.Reader." + asset) ?? throw new IOException("Missing reader asset.");

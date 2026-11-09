@@ -1,6 +1,32 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<title>Storloom</title><link rel="stylesheet" href="reader.css"><script defer src="archive-index.js"></script><script defer src="reader.js"></script></head>
-<body><aside><header><strong id="archive-title"></strong><div class="appearance"><select id="palette"></select><button id="theme"></button></div></header><input id="contacts-search" type="search"><nav id="conversations"></nav></aside>
-<div id="sidebar-splitter" role="separator" aria-orientation="vertical" tabindex="0"></div><main><header class="chat-header"><button id="sidebar-toggle" type="button">☰</button><div><h1 id="chat-title"></h1><small id="chat-meta"></small></div><details id="filter-panel" open><summary id="filter-label"></summary><div class="filters"><label class="content-search"><span id="content-label"></span><input id="message-search" type="search"></label><label><span id="kind-label"></span><select id="kind-filter"></select></label><label><span id="sender-label"></span><input id="sender-filter" type="search"></label><label><span id="from-label"></span><input id="date-from" type="date"></label><label><span id="to-label"></span><input id="date-to" type="date"></label><label class="check-field"><input id="self-filter" type="checkbox"><span id="self-label"></span></label><button id="reset-filter"></button><button id="find-page"></button><button id="stop-search" hidden></button><span id="filter-status" role="status"></span></div></details><div class="context-controls"><button id="back-results" hidden></button></div></header><div id="notice" role="status"></div><section id="messages" aria-live="polite"></section><footer class="page-footer"><div class="pagination"><button id="first"></button><button id="previous"></button><span id="page"></span><button id="next"></button><button id="last"></button><span class="page-jump"><label id="jump-label" for="page-input"></label><input id="page-input" type="number" min="1" step="1"><button id="page-go"></button></span></div><div class="reading-controls"><button id="page-bottom"></button><label class="check-field"><input id="auto-bottom" type="checkbox"><span id="auto-bottom-label"></span></label><label class="check-field"><input id="auto-last" type="checkbox"><span id="auto-last-label"></span></label></div></footer></main><dialog id="image-preview"><header id="image-window-header"><span id="image-title"></span><div class="image-navigation"><button id="image-previous"></button><button id="image-next"></button></div><button id="image-close"></button></header><div id="image-stage"><img id="preview-image" alt=""></div><footer><button id="zoom-out">-</button><button id="zoom-fit"></button><button id="zoom-original">100%</button><button id="zoom-in">+</button><span id="zoom-value"></span><button id="image-save"></button></footer></dialog><div id="reader-menu" role="menu" hidden></div><div id="action-status" role="status" aria-live="polite"></div></body></html>
+<title>Storloom</title><link rel="stylesheet" href="reader.css"><script defer src="archive-index.js"></script><script defer src="reader.js"></script>
+</head>
+<body>
+<aside><header><strong id="archive-title"></strong><div class="appearance"><select id="palette"></select><button id="theme"></button></div></header><input id="contacts-search" type="search"><nav id="conversations"></nav></aside>
+<div id="sidebar-splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
+<main>
+<header class="chat-header">
+<button id="sidebar-toggle" type="button">☰</button><div class="conversation-heading"><h1 id="chat-title"></h1><small id="chat-meta"></small></div>
+<div class="header-actions"><button id="back-results" hidden></button><button id="filter-toggle" type="button" aria-controls="filter-panel" aria-expanded="false"><span id="filter-label"></span></button></div>
+</header>
+<details id="filter-panel"><summary class="filter-summary"></summary>
+<div class="filter-toolbar"><label id="scope-label" for="search-scope"></label><select id="search-scope"><option value="conversation"></option><option value="archive"></option></select><div class="filter-actions"><button id="stop-search" hidden></button><button id="reset-filter"></button><button id="find-page"></button></div></div>
+<div class="filters">
+<div class="filter-field content-search"><label id="content-label" for="message-search"></label><input id="message-search" type="search"></div>
+<div class="filter-field"><label id="sender-label" for="sender-filter"></label><input id="sender-filter" type="search"></div>
+<div class="filter-field"><label id="kind-label" for="kind-filter"></label><select id="kind-filter"></select></div>
+<div class="filter-field"><label id="from-label" for="date-from"></label><input id="date-from" type="date"></div>
+<div class="filter-field"><label id="to-label" for="date-to"></label><input id="date-to" type="date"></div>
+<label class="check-field"><input id="self-filter" type="checkbox"><span id="self-label"></span></label>
+</div><div class="filter-hint"><span id="search-scope-note"></span><span id="filter-status" role="status"></span></div>
+</details>
+<div id="notice" role="status"></div><section id="messages" aria-live="polite"></section>
+<footer class="page-footer"><div class="pagination"><button id="first"></button><button id="previous"></button><span id="page"></span><button id="next"></button><button id="last"></button><span class="page-jump"><label id="jump-label" for="page-input"></label><input id="page-input" type="number" min="1" step="1"><button id="page-go"></button></span></div><div class="reading-controls"><button id="page-bottom"></button><label class="check-field"><input id="auto-bottom" type="checkbox"><span id="auto-bottom-label"></span></label><label class="check-field"><input id="auto-last" type="checkbox"><span id="auto-last-label"></span></label></div></footer>
+</main>
+<dialog id="image-preview"><header id="image-window-header"><span id="image-title"></span><div class="image-navigation"><button id="image-previous"></button><button id="image-next"></button></div><button id="image-close"></button></header><div id="image-stage"><img id="preview-image" alt=""></div><footer><button id="image-locate"></button><button id="rotate-left">↶</button><button id="rotate-right">↷</button><button id="image-copy"></button><button id="zoom-out">-</button><button id="zoom-fit"></button><button id="zoom-original">100%</button><button id="zoom-in">+</button><span id="zoom-value"></span><button id="image-save"></button></footer></dialog>
+<div id="reader-menu" role="menu" hidden></div><div id="action-status" role="status" aria-live="polite"></div>
+</body></html>

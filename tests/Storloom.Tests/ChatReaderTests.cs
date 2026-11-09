@@ -12,6 +12,34 @@ public sealed class ChatReaderTests : IDisposable {
     private readonly string root = Path.Combine(AppContext.BaseDirectory, "fixtures", Guid.NewGuid().ToString("N"));
     private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7WQAAAAASUVORK5CYII=");
     public ChatReaderTests() => Directory.CreateDirectory(root);
+    [Fact]
+    public void AvatarMetadataIsExportedAndReaderRepairRejectsInvalidPaths() {
+        string source=Path.Combine(root,"account");Directory.CreateDirectory(source);
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','hello');");
+        Database(Path.Combine(source,"head_image.db"),"CREATE TABLE head_image(username,image_buffer);INSERT INTO head_image VALUES('fixture',X'"+Convert.ToHexString(Png)+"'),('invalid',X'000102');");
+        var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"raw")),Path.Combine(root,"journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.WeChat);
+        Assert.True(result.Issues.Count==0,string.Join(" | ",result.Issues.Select(i=>i.ToString())));string indexPath=Path.Combine(result.Directory,"archive-index.js");using var index=JsonDocument.Parse(File.ReadAllText(indexPath)["window.archiveIndex=".Length..].TrimEnd(';'));
+        var avatars=index.RootElement.GetProperty("avatars");string path=avatars.GetProperty("fixture").GetString()!;Assert.Single(avatars.EnumerateObject());Assert.Equal(Png,File.ReadAllBytes(Path.Combine(result.Directory,path)));
+        string[] before=Directory.GetFiles(Path.Combine(result.Directory,"assets"));ChatReaderRepair.Refresh(result.Directory,avatars:new Dictionary<string,string>{{"alias",path}});Assert.Equal(before,Directory.GetFiles(Path.Combine(result.Directory,"assets")));
+        Assert.Throws<InvalidDataException>(()=>ChatReaderRepair.Refresh(result.Directory,avatars:new Dictionary<string,string>{{"bad","../image.jpg"}}));
+        using var repaired=JsonDocument.Parse(File.ReadAllText(indexPath)["window.archiveIndex=".Length..].TrimEnd(';'));Assert.Equal(path,repaired.RootElement.GetProperty("avatars").GetProperty("alias").GetString());
+    }
+    [Fact]
+    public void WeChatTerminalPaddingAndLiteralMarkupKeepTheOriginalBody() {
+        const string xml="<msg><appmsg><type>57</type><title>reply text</title><refermsg><type>1</type><content>quoted fixture</content><svrid>123</svrid></refermsg></appmsg></msg>\0\0";
+        var message=new ChatMessage("WeChat","fixture","sender",1700000000,244813135921,xml);
+        var part=Assert.Single(MessagePresentation.Parse(message));Assert.Equal("reply",part.Kind);Assert.Contains("quoted fixture",part.ReferenceText);Assert.Contains('\0',message.Text);
+        foreach(string body in new[]{"<script>literal text</script>","{literal fixture}","<a href='fixture'>literal link</a>"}) {var text=Assert.Single(MessagePresentation.Parse(message with{Type=1,Text=body}));Assert.Equal("text",text.Kind);Assert.Equal(body,text.Text);}
+    }
+    [Fact]
+    public void LocalSilkAndAmrReferencesDecodeWithoutAFileDownloadCard() {
+        string source=Path.Combine(root,"voice-local"),destination=Path.Combine(root,"voice-reader"),work=Path.Combine(root,"voice-work");Directory.CreateDirectory(source);Directory.CreateDirectory(destination);Directory.CreateDirectory(work);
+        byte[] wave=Convert.FromHexString("524946462600000057415645666D74201000000001000100C05D000080BB00000200100064617461020000000000");
+        File.WriteAllBytes(Path.Combine(source,"voice.amr"),wave);File.WriteAllBytes(Path.Combine(source,"voice.silk"),wave);
+        using var writer=new ChatArchiveWriter(source,destination,work,[],null,CancellationToken.None,"fixture");
+        foreach(string key in new[]{"voice.amr","voice.silk"}){var media=writer.ResolveMedia(key);Assert.NotNull(media);Assert.Equal("audio",media.Kind);Assert.Equal(wave,File.ReadAllBytes(Path.Combine(destination,media.Path)));}
+    }
     [Theory]
     [InlineData(1)]
     [InlineData(2)]

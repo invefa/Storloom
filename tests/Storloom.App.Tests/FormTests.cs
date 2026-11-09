@@ -590,7 +590,7 @@ public sealed class FormTests {
         var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
         try {
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
-            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="2"){Pump();Thread.Sleep(10);}
             Assert.Contains("Fixture friend",Query("document.querySelector('#chat-title').textContent"));
             Assert.Contains("Fixture sender",Query("document.querySelector('.message:not(.system) .timestamp').textContent"));
@@ -605,6 +605,7 @@ public sealed class FormTests {
     });
     [Fact]
     public void ReaderFiltersJumpPagesAndKeepFacesInlineAndResolvedPicturesBare() => OnUi(() => {
+        Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});
         string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);L.SetLanguage("en");
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);"+string.Join("",Enumerable.Range(0,301).Select(i=>$"INSERT INTO MSG VALUES(1,{1700000000+i},'fixture','{(i==300?"Unique last-page fixture":"Fixture text") }');")));
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
@@ -612,7 +613,7 @@ public sealed class FormTests {
         byte[] png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII=");string image="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png)).ToLowerInvariant()+".png";Directory.CreateDirectory(Path.Combine(export.Directory,"assets"));File.WriteAllBytes(Path.Combine(export.Directory,image),png);
         var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
         try {
-            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}var core=window.Browser.CoreWebView2!;string Query(string s)=>Wait(core.ExecuteScriptAsync(s));
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string s)=>Wait(core.ExecuteScriptAsync(s));
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="300"){Pump();Thread.Sleep(10);}
             Assert.Equal("300",Query("document.querySelectorAll('.message').length"));
             Assert.Equal("true",Query("document.querySelector('#filter-panel').contains(document.querySelector('#message-search'))"));
@@ -641,6 +642,9 @@ public sealed class FormTests {
             Assert.Equal("true",Query("document.querySelector('#image-preview').open"));Assert.Equal("620",Query("document.querySelector('#image-preview').getBoundingClientRect().width"));
             Query("document.querySelector('#image-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:-200,clientX:200,clientY:200,cancelable:true}));true");Assert.DoesNotContain("100%",Query("document.querySelector('#zoom-value').textContent"));
             Query("document.querySelector('#zoom-original').click();true");Assert.Contains("100%",Query("document.querySelector('#zoom-value').textContent"));
+            Query("document.querySelector('#rotate-right').click();true");Assert.Contains("rotate(90deg)",Query("document.querySelector('#preview-image').style.transform"));
+            Query("document.querySelector('#rotate-left').click();true");Assert.Contains("rotate(0deg)",Query("document.querySelector('#preview-image').style.transform"));
+            Query("document.querySelector('#image-copy').click();true");var copiedUntil=DateTime.UtcNow.AddSeconds(5);while(DateTime.UtcNow<copiedUntil&&!Query("document.querySelector('#action-status').textContent").Contains("Copied")){Pump();Thread.Sleep(10);}Assert.Contains("Copied",Query("document.querySelector('#action-status').textContent"));Assert.True(Clipboard.ContainsImage());
             Query("document.querySelector('#preview-image').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));true");Assert.Equal("false",Query("document.querySelector('#reader-menu').hidden"));Assert.Contains("Save image",Query("document.querySelector('#reader-menu').textContent"));
             Query("document.querySelector('#image-close').click();true");Assert.Equal("false",Query("document.querySelector('#image-preview').open"));
             Query("document.querySelector('#reset-filter').click();document.querySelector('#filter-panel').open=true;true");Pump();
@@ -648,6 +652,59 @@ public sealed class FormTests {
             DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
             File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-inline-faces-filters.png"),screenshot.ToArray());
         } finally {window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Fact]
+    public void ReaderSearchScopesKeepBoundedResultsContextAndCompactSelectableControls() => OnUi(() => {
+        Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);L.SetLanguage("en");
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);"+string.Join("",Enumerable.Range(0,201).Select(i=>$"INSERT INTO MSG VALUES(1,{1700000000+i},'alpha','needle {i}');"))+"INSERT INTO MSG VALUES(1,1700000300,'beta','needle beta'),(1,1700000301,'beta','needle beta two');");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.WeChat);
+        var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        try {
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string q)=>Wait(core.ExecuteScriptAsync(q));
+            void Until(string q,string expected){var limit=DateTime.UtcNow.AddSeconds(20);while(DateTime.UtcNow<limit&&Query(q)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(q));}
+            Until("document.querySelectorAll('.message').length","201");
+            Assert.Equal("false",Query("document.querySelector('#filter-panel').open"));
+            Assert.Equal("true",Query("Math.abs(document.querySelector('main').getBoundingClientRect().right-document.querySelector('#filter-toggle').getBoundingClientRect().right-12)<2"));
+            Assert.Equal("true",Query("(()=>{const b=document.querySelector('#sidebar-toggle').getBoundingClientRect(),t=document.querySelector('#chat-title').getBoundingClientRect(),m=document.querySelector('#chat-meta').getBoundingClientRect();return Math.abs(b.top+b.height/2-t.top-t.height/2)<5&&Math.abs(t.bottom-m.bottom)<6&&document.querySelector('.chat-header').getBoundingClientRect().height<60})()"));
+            Assert.Equal("true",Query("Math.abs(document.querySelector('.pagination').getBoundingClientRect().left-document.querySelector('main').getBoundingClientRect().left-12)<2"));
+            Query("document.querySelector('#filter-toggle').click();document.querySelector('#message-search').value='selectable content';true");
+            using(var rect=System.Text.Json.JsonDocument.Parse(Query("(()=>{const r=document.querySelector('#message-search').getBoundingClientRect();return {x:r.left+10,y:r.top+r.height/2}})()"))){double x=rect.RootElement.GetProperty("x").GetDouble(),y=rect.RootElement.GetProperty("y").GetDouble();
+                string Mouse(string type,double px,int buttons)=>System.Text.Json.JsonSerializer.Serialize(new{type,x=px,y,button="left",buttons,clickCount=1});
+                Wait(core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",Mouse("mousePressed",x,1)));
+                for(int i=1;i<=8;i++)Wait(core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",Mouse("mouseMoved",x+12*i,1)));
+                Wait(core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",Mouse("mouseReleased",x+96,0)));
+            }
+            Assert.Equal("true",Query("(()=>{const i=document.querySelector('#message-search');return i.selectionEnd>i.selectionStart})()"));
+            Query("document.querySelector('#sender-filter').value='selectable sender';document.querySelector('#sender-filter').focus();document.querySelector('#sender-filter').select();true");
+            Assert.Equal("true",Query("document.querySelector('#sender-filter').selectionEnd>document.querySelector('#sender-filter').selectionStart"));
+            Assert.Equal("true",Query("(()=>{const a=document.querySelector('.filter-actions').getBoundingClientRect(),p=document.querySelector('#filter-panel').getBoundingClientRect();return p.right-a.right<15})()"));
+            Query("document.querySelector('#reset-filter').click();document.querySelector('#search-scope').value='archive';document.querySelector('#search-scope').dispatchEvent(new Event('change'));document.querySelector('#message-search').value='needle';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();true");
+            Until("document.querySelectorAll('.result-location').length","100");Assert.Contains("Entire archive",Query("document.querySelector('#chat-title').textContent"));
+            Query("document.querySelector('#next').click();true");Until("document.querySelector('#page').textContent","\"Results · batch 2\"");
+            string first=Query("document.querySelector('.message').id");
+            Query("document.querySelector('.show-context').click();true");Until("document.querySelectorAll('.message').length","201");Assert.Equal("1",Query("document.querySelectorAll('.referenced').length"));
+            Query("document.querySelector('#back-results').click();true");Until("document.querySelectorAll('.result-location').length","100");Assert.Equal(first,Query("document.querySelector('.message').id"));
+            Query("document.querySelector('#next').click();true");Until("document.querySelectorAll('.result-location').length","3");
+            Assert.Contains("beta",Query("document.querySelector('#messages').textContent"));
+            Query("document.querySelectorAll('.show-context')[1].click();true");Until("document.querySelectorAll('.message').length","2");
+            Query("document.querySelector('#back-results').click();true");Until("document.querySelectorAll('.result-location').length","3");
+            Query("document.querySelector('#first').click();true");Until("document.querySelectorAll('.result-location').length","100");
+            Query("document.querySelector('#filter-toggle').click();document.querySelector('#message-search').value='absent';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();document.querySelector('#stop-search').click();true");
+            Assert.Equal("false",Query("document.querySelector('#find-page').disabled"));Assert.Contains("stopped",Query("document.querySelector('#filter-status').textContent"));
+            Query("document.querySelector('#reset-filter').click();true");Until("document.querySelectorAll('.message').length","201");
+            using var screenshot=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,screenshot)));
+            DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
+            File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-compact-search.png"),screenshot.ToArray());
+        }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Fact]
+    public void ClipboardImagesRequireBoundedPngData() => OnUi(() => {
+        string Encode(uint width=2,uint height=1){var bitmap=BitmapSource.Create(2,1,96,96,PixelFormats.Bgra32,null,new byte[]{0,0,255,255,0,255,0,255},8);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var output=new MemoryStream();encoder.Save(output);byte[] data=output.ToArray();System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(16,4),width);System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(20,4),height);return Convert.ToBase64String(data);}
+        BitmapSource Decode(string? encoded){try{return (BitmapSource)typeof(ChatReaderWindow).GetMethod("DecodeClipboardImage",BindingFlags.NonPublic|BindingFlags.Static)!.Invoke(null,[encoded])!;}catch(TargetInvocationException ex){System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();throw;}}
+        var image=Decode(Encode());Assert.Equal(2,image.PixelWidth);Assert.Equal(1,image.PixelHeight);Assert.True(image.IsFrozen);
+        Assert.Throws<InvalidDataException>(()=>Decode(null));Assert.Throws<InvalidDataException>(()=>Decode("not base64"));Assert.Throws<InvalidDataException>(()=>Decode(Convert.ToBase64String(new byte[40])));Assert.Throws<InvalidDataException>(()=>Decode(Encode(uint.MaxValue,2)));
     });
     [Fact]
     public void ReaderImageExportAcceptsOnlyExistingHashedLocalImages() {
@@ -674,7 +731,7 @@ public sealed class FormTests {
         var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
         try {
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
-            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
             void Until(string expression,string expected){while(DateTime.UtcNow<until&&Query(expression)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(expression));}
             Until("document.querySelectorAll('.message.system').length","1");Assert.Equal("0",Query("document.querySelectorAll('.system .avatar').length"));
             Query("window.readerOriginalScrollIntoView=Element.prototype.scrollIntoView;Element.prototype.scrollIntoView=function(options){window.readerJumpStart=document.querySelector('#messages').scrollTop;window.readerJumpAnchorTop=window.readerOrigin.getBoundingClientRect().top;window.readerJumpBehavior=options.behavior;return window.readerOriginalScrollIntoView.call(this,options);};window.readerOrigin=document.querySelector('blockquote').closest('.message');document.querySelector('#messages').scrollTop=window.readerOrigin.offsetTop-100;window.readerOriginTop=window.readerOrigin.getBoundingClientRect().top;true");
@@ -715,7 +772,7 @@ public sealed class FormTests {
         var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
         try {
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
-            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="4"){Pump();Thread.Sleep(10);}
             Assert.Equal("4",Query("document.querySelectorAll('.message').length"));
             while(DateTime.UtcNow<until&&Query("document.querySelector('.bubble img')?.naturalWidth")!="8"){Pump();Thread.Sleep(10);}

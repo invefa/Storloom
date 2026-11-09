@@ -40,7 +40,7 @@ public static class ChatReaderRepair {
             cancellation.ThrowIfCancellationRequested();
             var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid archived message.");
             foreach (var media in message.Media) if (media.Key != null && CanReuse(media)) resources.TryAdd(media.Key, media);
-            Collect(message.Parts);
+            Collect((message.Id is {} id ? oldIndex["messageParts"]?[id]?.Deserialize<MessagePart[]>() : null)??message.Parts);
         }
         string stage = Path.Combine(directory, ".resource-repair-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stage);
@@ -71,7 +71,7 @@ public static class ChatReaderRepair {
         } finally { PathPolicy.AssertNoLinks(stage); Directory.Delete(stage, true); }
     }
     // Refresh presentation and optional resource associations without rewriting messages or pages.
-    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false, IReadOnlyDictionary<string, ChatMedia>? resourceMedia = null) {
+    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false, IReadOnlyDictionary<string, ChatMedia>? resourceMedia = null, IReadOnlyDictionary<string,string>? avatars = null, IReadOnlyDictionary<string,MessagePart[]>? messageParts = null) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
         string reportPath = Path.Combine(directory, "export-report.json");
         var report = JsonFiles.Read<ChatExportResult>(reportPath);
@@ -83,6 +83,15 @@ public static class ChatReaderRepair {
         string text = File.ReadAllText(indexPath); const string prefix = "window.archiveIndex=";
         if (!text.StartsWith(prefix, StringComparison.Ordinal) || !text.TrimEnd().EndsWith(';')) throw new InvalidDataException("Unsupported reader index.");
         var index = JsonNode.Parse(text[prefix.Length..].Trim().TrimEnd(';'))?.AsObject() ?? throw new InvalidDataException("Invalid reader index.");
+        if(messageParts!=null){var parts=index["messageParts"] as JsonObject??new JsonObject();foreach(var pair in messageParts)parts[pair.Key]=JsonSerializer.SerializeToNode(pair.Value);index["messageParts"]=parts;}
+        if(avatars!=null){
+            var mapped=index["avatars"] as JsonObject??new JsonObject();
+            foreach(var pair in avatars){if(!System.Text.RegularExpressions.Regex.IsMatch(pair.Value,"^assets/[a-f0-9]{64}\\.(png|jpg|jpeg|gif|webp|bmp)$"))throw new InvalidDataException("Invalid avatar image.");string path=TransferService.Child(directory,pair.Value);PathPolicy.AssertNoLinks(path);if(!File.Exists(path))throw new FileNotFoundException("Avatar image is missing.");mapped[pair.Key]=pair.Value;}
+            index["avatars"]=mapped;
+            var ids=index["conversations"]!.AsArray().Select(c=>c!["id"]!.GetValue<string>()).ToHashSet();var conversationAvatars=new Dictionary<string,string>();
+            foreach(var pair in mapped){foreach(string native in new[]{pair.Key,"direct:"+pair.Key}){string id=JsonFiles.Hash(native)[..24].ToLowerInvariant();if(ids.Contains(id))conversationAvatars[id]=pair.Value!.GetValue<string>();}}
+            index["conversationAvatars"]=JsonSerializer.SerializeToNode(conversationAvatars);
+        }
         if (resourceMedia != null) {
             var resources = index["resourceMedia"] as JsonObject ?? new JsonObject();
             foreach (var pair in resourceMedia) {

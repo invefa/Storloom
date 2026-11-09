@@ -29,7 +29,9 @@ public static class MessagePresentation {
     }
     public static MessagePart[] Parse(ChatMessage message) {
         if (message.Parts.Length > 0) return message.Parts;
-        string body = (ResolveSenderPrefix(message).DisplayText ?? message.Text).Trim();
+        // Database text may include terminal C-string padding. Keep Text lossless; normalize only this derived view.
+        string body = (ResolveSenderPrefix(message).DisplayText ?? message.Text).Trim().TrimEnd('\0').Trim();
+        if(message.Platform=="WeChat"&&message.Type%4294967296==1)return [new("text",body)];
         if (body.StartsWith("[attachment] ", StringComparison.Ordinal)) {
             string name = body[13..].Trim(); string extension = Path.GetExtension(name).ToLowerInvariant();
             string kind = extension is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" ? "image" :
