@@ -37,10 +37,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
                         var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T(action=="save-image"?"ReaderSaveImage":"ReaderSaveFile"),FileName=name,Filter="File|*"+extension,AddExtension=true,DefaultExt=extension};
                         if(picker.ShowDialog(this)!=true)return;
-                        string target=PathPolicy.Normalize(picker.FileName);PathPolicy.AssertNoLinks(target);
-                        if(target.Equals(source,StringComparison.OrdinalIgnoreCase))return;
-                        if(File.Exists(target)&&NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared image destination cannot be overwritten.");
-                        File.Copy(source,target,true);
+                        SaveResourceFile(source,picker.FileName);
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
                     }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException){if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
                 };
@@ -74,6 +71,16 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T("ReaderRuntimeMissing") + "\n" + ex.Message));
             }
         };
+    }
+    internal static void SaveResourceFile(string source,string target) {
+        source=PathPolicy.Normalize(source);target=PathPolicy.Normalize(target);PathPolicy.AssertNoLinks(source);
+        if(target.Equals(source,StringComparison.OrdinalIgnoreCase))return;
+        PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);
+        if(File.Exists(target)) {
+            PathPolicy.AssertNoLinks(target);
+            if(NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared resource destination cannot be overwritten.");
+        }
+        File.Copy(source,target,true);
     }
     internal static System.Windows.Media.Imaging.BitmapSource DecodeClipboardImage(string? encoded) {
         if(encoded==null||encoded.Length>32*1024*1024)throw new InvalidDataException("Invalid clipboard image size.");

@@ -707,6 +707,16 @@ public sealed class FormTests {
         Assert.Throws<InvalidDataException>(()=>Decode(null));Assert.Throws<InvalidDataException>(()=>Decode("not base64"));Assert.Throws<InvalidDataException>(()=>Decode(Convert.ToBase64String(new byte[40])));Assert.Throws<InvalidDataException>(()=>Decode(Encode(uint.MaxValue,2)));
     });
     [Fact]
+    public void ReaderCanSaveImagesAndFilesToNewDestinations() {
+        string fixture=Fixture();try{
+            string source=Path.Combine(fixture,"original.png"),target=Path.Combine(fixture,"saved.png");byte[] bytes=[137,80,78,71,13,10,26,10];File.WriteAllBytes(source,bytes);
+            var save=typeof(ChatReaderWindow).GetMethod("SaveResourceFile",BindingFlags.Static|BindingFlags.NonPublic)!;
+            save.Invoke(null,[source,target]);Assert.Equal(bytes,File.ReadAllBytes(target));Assert.Equal(bytes,File.ReadAllBytes(source));
+            File.WriteAllText(target,"old fixture");save.Invoke(null,[source,target]);Assert.Equal(bytes,File.ReadAllBytes(target));
+            save.Invoke(null,[source,source]);Assert.Equal(bytes,File.ReadAllBytes(source));
+        }finally{Directory.Delete(fixture,true);}
+    }
+    [Fact]
     public void ReaderImageExportAcceptsOnlyExistingHashedLocalImages() {
         string fixture=Fixture();try {
             string Resolve(string relative){try{return (string)typeof(ChatReaderWindow).GetMethod("ResolveImagePath",BindingFlags.Static|BindingFlags.NonPublic)!.Invoke(null,[fixture,relative])!;}catch(TargetInvocationException ex){System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();throw;}}
