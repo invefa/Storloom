@@ -87,7 +87,7 @@ public sealed class FormTests {
     [InlineData(AppTheme.OneDark)]
     public void LogStopsFollowingOnManualInputAndPreservesSelection(AppTheme theme) => OnUi(() => {
         Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
-        var panel=new OperationPanel();var window=new ThemeWindow("Isolated log fixture",1000,500){ShowInTaskbar=false};window.Body.Children.Add(panel);
+        var panel=new OperationPanel();panel.ToggleExpanded();var window=new ThemeWindow("Isolated log fixture",1000,500){ShowInTaskbar=false};window.Body.Children.Add(panel);
         try {
             window.Show();Pump();panel.Start();
             for(int i=0;i<150;i++)panel.AddLog("fixture log "+i);
@@ -151,7 +151,7 @@ public sealed class FormTests {
         var layout=new Grid();layout.ColumnDefinitions.Add(new ColumnDefinition());layout.ColumnDefinitions.Add(new ColumnDefinition());window.Body.Children.Add(layout);
         var table=new DataGrid{IsReadOnly=true,AutoGenerateColumns=false};table.Columns.Add(new DataGridTextColumn{Header="Fixture path",Binding=new System.Windows.Data.Binding("Name"),Width=1600});
         table.ItemsSource=Enumerable.Range(0,100).Select(i=>new{Name="Isolated row "+i}).ToArray();layout.Children.Add(table);
-        var operation=new OperationPanel();Grid.SetColumn(operation,1);layout.Children.Add(operation);
+        var operation=new OperationPanel();operation.ToggleExpanded();Grid.SetColumn(operation,1);layout.Children.Add(operation);
         try {
             window.Show();Pump();operation.Start();operation.AddLog(new string('x',500));Pump();window.UpdateLayout();
             var scroll=Descendants(table).OfType<ScrollViewer>().Single(s=>s.Name=="DG_ScrollViewer");var handle=new System.Windows.Interop.WindowInteropHelper(window).Handle;
@@ -165,6 +165,7 @@ public sealed class FormTests {
             Wheel(table,-1200);Assert.InRange(scroll.HorizontalOffset,0,0.1);Capture(window,"horizontal-wheel-"+theme);
         } finally {window.Close();}
     });
+    [DllImport("user32.dll")]private static extern int GetWindowLongW(nint hwnd,int index);
     [DllImport("user32.dll")]private static extern nint SendMessageW(nint hwnd,uint message,nint wParam,nint lParam);
     [Theory]
     [InlineData(AppTheme.Light)]
@@ -369,7 +370,7 @@ public sealed class FormTests {
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
     [Fact]
-    public void DiscoveryReportsNoResultsInThePageAndLogsUseEnglish() => OnUi(() => {
+    public void DiscoveryReportsNoResultsInThePageAndNormalLogsUseTheSelectedLanguage() => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true});
         var window=new ShellWindow(fixture){ShowInTaskbar=false};
         try {
@@ -378,7 +379,7 @@ public sealed class FormTests {
             Wait(AsResult(task));Pump();
             var notice=Descendants(window).OfType<TextBlock>().Single(t=>t.Name=="account_discovery_notice");Assert.Equal(L.T("DiscoveryEmpty"),notice.Text);
             var log=Descendants(window).OfType<OperationPanel>().Single().Log;
-            Assert.Contains("0 account(s) found",log.Text);Assert.Contains("Operation completed",log.Text);Assert.DoesNotContain(L.T("OperationStarting"),log.Text);
+            Assert.Contains(L.T("LogAccountsDone",0),log.Text);Assert.Contains(L.T("OperationCompletedLog"),log.Text);Assert.Contains(L.T("OperationStarting"),log.Text);
             Assert.False(ControlFeedback.GetEnabled(log));Capture(window,"discovery-empty");
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
@@ -402,7 +403,7 @@ public sealed class FormTests {
             item.IsSubmenuOpen=false;window.Navigate("overview");Pump();
             nodes=Descendants(window).ToArray();var input=nodes.OfType<TextBox>().Single(t=>t.Text==Path.GetPathRoot(Environment.SystemDirectory));
             var browse=nodes.OfType<Button>().First(b=>Equals(b.Content,L.T("Browse"))&&b.IsVisible);
-            Assert.Equal(32,input.ActualHeight);Assert.Equal(input.ActualHeight,browse.ActualHeight);
+            Assert.Equal(28,input.ActualHeight);Assert.Equal(input.ActualHeight,browse.ActualHeight);
             Assert.InRange(Math.Abs(input.TranslatePoint(new Point(0,input.ActualHeight/2),window).Y-browse.TranslatePoint(new Point(0,browse.ActualHeight/2),window).Y),0,.5);
             var tab=nodes.OfType<TabControl>().First(t=>t.IsVisible);var selected=(TabItem)tab.SelectedItem;
             var header=(Border)selected.Template.FindName("head",selected);
@@ -720,7 +721,7 @@ public sealed class FormTests {
             Assert.Equal("true",Query("(()=>{const a=document.querySelector('.filter-actions').getBoundingClientRect(),p=document.querySelector('#filter-panel').getBoundingClientRect();return p.right-a.right<15})()"));
             Query("document.querySelector('#reset-filter').click();document.querySelector('#search-scope').value='archive';document.querySelector('#search-scope').dispatchEvent(new Event('change'));document.querySelector('#message-search').value='needle';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();true");
             Until("document.querySelectorAll('.result-location').length","100");Assert.Contains("Entire archive",Query("document.querySelector('#chat-title').textContent"));
-            Query("document.querySelector('#next').click();true");Until("document.querySelector('#page').textContent","\"Results · batch 2\"");
+            Query("document.querySelector('#next').click();true");Until("document.querySelector('#page').textContent","\"Results - batch 2\"");
             string first=Query("document.querySelector('.message').id");
             Query("document.querySelector('.show-context').click();true");Until("document.querySelectorAll('.message').length","201");Assert.Equal("1",Query("document.querySelectorAll('.referenced').length"));
             Query("document.querySelector('#back-results').click();true");Until("document.querySelectorAll('.result-location').length","100");Assert.Equal(first,Query("document.querySelector('.message').id"));
@@ -737,10 +738,17 @@ public sealed class FormTests {
             Query("document.querySelector('#next').click();true");Until("document.querySelector('#page').textContent","\"2 / 3\"");
             Query("document.querySelector('#find-previous').click();true");Until("document.querySelector('#page').textContent","\"1 / 3\"");
             Query("document.querySelector('#minimap-toggle').click();true");Until("document.querySelector('#minimap-canvas').width>0","true");
+            Assert.Equal("true",Query("document.querySelector('#messages').getBoundingClientRect().right<=document.querySelector('#minimap').getBoundingClientRect().left+1"));
             Query("document.querySelector('#minimap-collapse').click();true");Assert.Equal("true",Query("document.querySelector('#minimap').classList.contains('collapsed')&&document.querySelector('#minimap-canvas').width>0"));
+            Assert.Equal("true",Query("document.querySelector('#messages').getBoundingClientRect().right<=document.querySelector('#minimap').getBoundingClientRect().left+1"));
+            Query("document.querySelector('#page-size').value='125';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","125");
             Query("document.querySelector('#minimap-close').click();true");Assert.Equal("true",Query("document.querySelector('#minimap').hidden&&document.querySelector('#minimap-canvas').width===0"));
             Query("document.querySelector('#chat-title').click();true");Assert.Equal("true",Query("document.querySelector('#conversation-details').open"));Assert.Contains("Archived senders",Query("document.querySelector('#conversation-details-body').textContent"));
             Query("document.querySelector('#conversation-details-close').click();document.querySelector('#page-size').value='300';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","201");
+            window.Width=500;Pump();Until("innerWidth<640","true");Query("if(!document.querySelector('#filter-panel').open)document.querySelector('#filter-toggle').click();true");Pump();
+            Assert.Equal("true",Query("document.querySelector('.header-actions').getBoundingClientRect().right<=document.querySelector('main').getBoundingClientRect().right+1"));
+            Assert.Equal("true",Query("document.querySelector('#filter-panel').getBoundingClientRect().top>=document.querySelector('.chat-header').getBoundingClientRect().bottom"));
+            window.Width=1200;Pump();
             using var screenshot=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,screenshot)));
             DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
             File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-compact-search.png"),screenshot.ToArray());
@@ -950,13 +958,13 @@ public sealed class FormTests {
             window.Navigate("chats");
             foreach(int step in new[]{1,3}) {
                 Set("chatStep",step);type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();window.UpdateLayout();
-                var labels=Descendants(window).OfType<Label>().Where(l=>l.IsVisible).ToArray();Assert.Equal(2,labels.Length);
+                var labels=Descendants(window).OfType<Label>().Where(l=>l.IsVisible&&!Equals(l.Content,L.T("ChatWorkers"))).ToArray();Assert.Equal(2,labels.Length);
                 Assert.Equal(step==1?new[]{L.T("AccountFolderLabel"),L.T("BackupTo")}:new[]{L.T("RawBackupLabel"),L.T("ReadingCopyLabel")},labels.Select(l=>l.Content));
                 foreach(var label in labels) {
                     var target=(FrameworkElement)label.Target;var lp=label.TranslatePoint(new Point(),window);var cp=target.TranslatePoint(new Point(),window);
                     Assert.True(lp.X+label.ActualWidth<=cp.X);Assert.InRange(Math.Abs(lp.Y+label.ActualHeight/2-cp.Y-target.ActualHeight/2),0,1);
                 }
-                Assert.InRange(labels[1].TranslatePoint(new Point(),window).Y-labels[0].TranslatePoint(new Point(),window).Y,42,50);
+                Assert.InRange(labels[1].TranslatePoint(new Point(),window).Y-labels[0].TranslatePoint(new Point(),window).Y,38,44);
                 Capture(window,"chat-fields-"+step+"-"+locale);
             }
         } finally {window.Close();Directory.Delete(fixture,true);}
@@ -964,6 +972,7 @@ public sealed class FormTests {
     [Theory]
     [InlineData(AppTheme.Light)]
     [InlineData(AppTheme.OneDark)]
+    [InlineData(AppTheme.Dark)]
     public void ManualDatabaseKeyUsesTheSharedEditorPaletteAndLeftLabel(AppTheme theme) => OnUi(() => {
         string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);
         File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
@@ -988,6 +997,10 @@ public sealed class FormTests {
                 Capture(window,"manual-key-"+theme+"-"+focus);
             }
             Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("DatabaseKeyEntryHelp"));
+            var help=Descendants(window).OfType<Expander>().Single(e=>Equals(e.Header,L.T("ExportHelpTitle")));help.IsExpanded=true;Pump();
+            Assert.InRange(Descendants(help).OfType<System.Windows.Controls.Primitives.ToggleButton>().First().ActualHeight,10,26);
+            var textInput=Descendants(window).OfType<TextBox>().First(t=>t.IsVisible&&t.IsReadOnly&&t.Text.Length>0);var glyph=textInput.GetRectFromCharacterIndex(0);Assert.True(glyph.Left>=6);Assert.InRange(Math.Abs(glyph.Top+glyph.Height/2-textInput.ActualHeight/2),0,2);
+            help.BringIntoView();Pump();Capture(window,"export-compact-help-"+theme);
             foreach(double width in new[]{760d,1100d}){window.Width=width;Pump();window.UpdateLayout();
                 var viewport=Descendants(window).OfType<ScrollViewer>().First(v=>v.Content is StackPanel panel&&Descendants(panel).OfType<PasswordBox>().Any());
                 var bounds=viewport.TransformToAncestor(window).TransformBounds(new Rect(0,0,viewport.ActualWidth,viewport.ActualHeight));
@@ -1025,7 +1038,7 @@ public sealed class FormTests {
         try {
             window.Show();panel.Start();panel.Report(new("chat-reader",75,0,TotalFiles:100));Pump();window.UpdateLayout();
             var bar=Descendants(panel).OfType<ProgressBar>().Single();
-            Assert.True(bar.IsVisible);Assert.InRange(bar.ActualHeight,6,10);Assert.Equal(.75,bar.Value,3);
+            Assert.True(bar.IsVisible);Assert.InRange(bar.ActualHeight,1,3);Assert.Equal(.75,bar.Value,3);
             var track=(FrameworkElement)bar.Template.FindName("PART_Track",bar);var indicator=(FrameworkElement)bar.Template.FindName("PART_Indicator",bar);
             Assert.InRange(indicator.ActualWidth/track.ActualWidth,.74,.76);
             panel.Report(new("chat-resume",0,0));Pump();Assert.True(bar.IsVisible);Assert.True(bar.IsIndeterminate);
@@ -1112,7 +1125,7 @@ public sealed class FormTests {
             panel.AddDiagnostic(new("candidate=must-never-appear"));panel.AddException(new InvalidOperationException("private-input-must-never-appear"));
             panel.ToggleExpanded();Assert.True(Descendants(panel).OfType<Button>().Single(b=>b.Name=="export_log").IsVisible);
             string path=Path.Combine(fixture,"session.log");panel.ExportLog(path);string text=File.ReadAllText(path);
-            Assert.Contains("Storloom ",text);Assert.Contains("first-fixture-entry",text);Assert.Contains(L.T("DebugBytes","120.6 KiB"),text);Assert.Contains(L.T("DebugCandidates",6),text);
+            Assert.Contains("Storloom ",text);Assert.Contains("first-fixture-entry",text);Assert.Contains("bytes: 123,456",text);Assert.Contains("candidates: 6",text);Assert.All(text.Split('\n').Where(line=>line.Contains("[DEBUG]")),line=>Assert.All(line,c=>Assert.InRange((int)c,0,127)));
             Assert.Contains("System.InvalidOperationException",text);Assert.DoesNotContain("must-never-appear",text);Assert.DoesNotContain("key.passive.exhausted",text);
             panel.DebugToggle.IsChecked=false;panel.Start();panel.ExportLog(path);Assert.Contains("first-fixture-entry",File.ReadAllText(path));Assert.Contains(L.T("DebugDisabled"),File.ReadAllText(path));
             Capture(window,"diagnostic-log-"+locale);
@@ -1180,6 +1193,28 @@ public sealed class FormTests {
                 }
         }finally{window.Close();Directory.Delete(fixture,true);Theme.Apply(new AppPreferences{ReduceMotion=true});}
     });
+    [Fact]
+    public void PersistentLogBarRespectsAutoOpenAndWrapAndKeepsIconsCentered() => OnUi(()=>{
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true,LogAutoShow=false});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};var finish=new TaskCompletionSource();Task? task=null;
+        try{window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();
+            Assert.True(panel.IsVisible);Assert.False(panel.Expanded);Assert.True(panel.Follow);Assert.InRange(panel.ActualHeight,25,28);
+            task=(Task)typeof(ShellWindow).GetMethod("RunPausable",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[new Func<CancellationToken,Task>(_=>finish.Task)])!;Pump();Assert.False(panel.Expanded);
+            panel.WrapToggle.IsChecked=true;Assert.Equal(TextWrapping.Wrap,panel.Log.TextWrapping);Assert.Equal(ScrollBarVisibility.Disabled,panel.Log.HorizontalScrollBarVisibility);
+            panel.ToggleExpanded();Pump();Assert.True(panel.Expanded);Assert.True(panel.ActualHeight>80);
+            foreach(var button in new[]{panel.PauseButton,panel.CancelButton}){var icon=Assert.IsType<System.Windows.Shapes.Path>(button.Content);var bounds=icon.RenderedGeometry.Bounds;var center=icon.TranslatePoint(new Point(bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2),button);Assert.InRange(Math.Abs(center.X-button.ActualWidth/2),0,1.5);Assert.InRange(Math.Abs(center.Y-button.ActualHeight/2),0,1.5);}
+            Capture(window,"compact-persistent-log");panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,25,28);finish.SetResult();Wait(AsResult(task));
+        }finally{finish.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]
+    public void KeyCustodyDialogIsFixedAndUsesASeparatedActionRow() => OnUi(()=>{
+        string fixture=Fixture();var owner=new ShellWindow(fixture){ShowInTaskbar=false};
+        try{owner.Show();typeof(ShellWindow).GetField("activeChat",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(owner,new ChatLocation(ChatPlatform.QQ,fixture,"fixture",Path.Combine(fixture,"db"),0));typeof(ShellWindow).GetMethod("SetCapturedKey",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(owner,[System.Text.Encoding.ASCII.GetBytes("synthetic-key-123")]);
+            owner.Dispatcher.BeginInvoke(new Action(()=>{var dialog=Application.Current.Windows.Cast<Window>().Single(w=>w.Owner==owner);Assert.Equal(ResizeMode.NoResize,dialog.ResizeMode);Assert.Equal(0,GetWindowLongW(new System.Windows.Interop.WindowInteropHelper(dialog).Handle,-16)&0x40000);Assert.Equal(new Thickness(0),System.Windows.Shell.WindowChrome.GetWindowChrome(dialog)!.ResizeBorderThickness);var actions=Descendants(dialog).OfType<Button>().Where(b=>Equals(b.Content,L.T("KeyCopy"))||Equals(b.Content,L.T("KeySave"))||Equals(b.Content,L.T("Close"))).ToArray();Assert.Equal(3,actions.Length);Capture(dialog,"key-custody-compact");dialog.Close();}));
+            typeof(ShellWindow).GetMethod("ManageChatKey",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(owner,null);
+        }finally{owner.Close();Directory.Delete(fixture,true);}
+    });
+
     [Fact]
     public void MainWindowRemembersNarrowSizeWithoutChangingExistingSettings() => OnUi(()=>{
         string fixture=Fixture();var first=new ShellWindow(fixture){ShowInTaskbar=false};

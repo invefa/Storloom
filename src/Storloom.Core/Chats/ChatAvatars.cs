@@ -3,11 +3,11 @@ using System.Security.Cryptography;
 namespace Storloom.Core.Chats;
 
 internal static class ChatAvatars {
-    internal static Dictionary<string,string> DownloadQQGroups(IEnumerable<string> groups,string destination,IProgress<ScanProgress>? progress,CancellationToken cancellation,out int failed) {
+    internal static Dictionary<string,string> DownloadQQGroups(IEnumerable<string> groups,string destination,IProgress<ScanProgress>? progress,CancellationToken cancellation,out int failed,int workers=4) {
         string[] ids=groups.Where(g=>System.Text.RegularExpressions.Regex.IsMatch(g,"^group:[1-9][0-9]{4,14}$")).Distinct(StringComparer.Ordinal).ToArray();
         var result=new System.Collections.Concurrent.ConcurrentDictionary<string,string>(StringComparer.Ordinal);int done=0;
         using var client=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}){Timeout=TimeSpan.FromSeconds(10)};
-        Parallel.ForEach(ids,new ParallelOptions{MaxDegreeOfParallelism=4,CancellationToken=cancellation},id=>{
+        Parallel.ForEach(ids,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},id=>{
             try {
                 using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromSeconds(10));
                 string number=id[6..];using var request=new HttpRequestMessage(HttpMethod.Get,$"https://p.qlogo.cn/gh/{number}/{number}/640");

@@ -37,7 +37,8 @@
  const resourceMap=new Map(Object.entries(index.resourceMedia||{}).map(([key,value])=>[key.toLowerCase(),value]));
  const mediaMatches=(keys,media)=>(keys||[]).some(key=>[media.Key,media.Name].some(value=>typeof value==='string'&&key.toLowerCase()===value.toLowerCase()));
  const readerPrefs=(()=>{try{return JSON.parse(localStorage.getItem('storloom.reader.view'))||{};}catch{return {};}})();
- let pageSize=[100,300,500,1000,2000].includes(Number(readerPrefs.pageSize))?Number(readerPrefs.pageSize):300;
+ const validPageSize=n=>Number.isInteger(n)&&n>=10&&n<=5000;
+ let pageSize=validPageSize(Number(readerPrefs.pageSize))?Number(readerPrefs.pageSize):300;
  const physicalSize=300, pageCount=chat=>Math.max(1,Math.ceil(chat.count/pageSize));
  async function logicalPage(chat,n){const start=n*pageSize,end=Math.min(chat.count,start+pageSize),items=[];
   for(let p=Math.floor(start/physicalSize);p<Math.ceil(end/physicalSize);p++)items.push(...(await readPage(chat.id,p)).slice(Math.max(0,start-p*physicalSize),Math.min(physicalSize,end-p*physicalSize)));
@@ -82,7 +83,8 @@
  for(const kind of ['text','image','sticker','video','audio','file','reply','forward','system','poke','recall','reaction','link','miniapp','contact','location','call','transfer','redpacket','music','channel','gift','markdown','buttons','wallet','unsupported','unparsed'])$('kind-filter').append(new Option(label('ReaderKind_'+kind),kind));
  for(const [id,key] of [['scope-label','ReaderSearchScope'],['image-locate','ReaderLocateImage'],['image-copy','ReaderCopyImage']])text(id,label(key));
  $('search-scope').options[0].textContent=label('ReaderScopeConversation');$('search-scope').options[1].textContent=label('ReaderScopeArchive');
- function toggleFilters(open=!$('filter-panel').open){$('filter-panel').open=open;$('filter-toggle').setAttribute('aria-expanded',String(open));}
+ function positionFilters(){$('filter-panel').style.top=(document.querySelector('.chat-header').getBoundingClientRect().height+4)+'px';}
+ function toggleFilters(open=!$('filter-panel').open){positionFilters();$('filter-panel').open=open;$('filter-toggle').setAttribute('aria-expanded',String(open));}
  $('filter-toggle').onclick=()=>toggleFilters();
  function scopeHint(){text('search-scope-note',label($('search-scope').value==='archive'?'ReaderArchiveSearchHint':'ReaderConversationSearchHint'));}
  scopeHint();
@@ -162,10 +164,10 @@
   stopSearch();returnPoints.push(saved);toggleFilters(false);contextMode=true;archiveResults=null;$('back-results').hidden=false;current=index.conversations.find(c=>c.id===row.conversation);page=targetPage;pendingJump={conversation:current.id,page,id:row.message.Id};toggleFilters(false);list();load();
  }
  $('page-size').value=String(pageSize);text('page-size-label',label('ReaderPageSize'));
- $('page-size').onchange=()=>{const ordinal=page*pageSize;stopSearch();discardResults();leaveContext();pageSize=Number($('page-size').value);readerPrefs.pageSize=pageSize;savePrefs();page=Math.floor(ordinal/pageSize);load();};
+ $('page-size').onchange=()=>{const requested=Number($('page-size').value);if(!validPageSize(requested)){$('page-size').reportValidity();return;}const ordinal=page*pageSize;stopSearch();discardResults();leaveContext();pageSize=Number($('page-size').value);readerPrefs.pageSize=pageSize;savePrefs();page=Math.floor(ordinal/pageSize);load();};
  $('page-size').title=label('ReaderPageSizeHelp');
  text('page-top',label('ReaderPageTop'));$('page-top').onclick=()=>{pinBottom=false;$('messages').scrollTo({top:0,behavior:'smooth'});};
- text('find-previous',label('ReaderFindPreviousPage'));text('archive-search',label('ReaderScopeArchive'));
+ text('find-previous',label('ReaderFindPreviousPage'));text('archive-search',label('ReaderArchiveSearch'));
  $('archive-search').onclick=()=>{$('search-scope').value='archive';filterChanged();scopeHint();toggleFilters(true);$('message-search').focus();};
  $('page-bottom').onclick=scrollBottom;$('auto-bottom').onchange=()=>{readerPrefs.autoBottom=$('auto-bottom').checked;savePrefs();if(readerPrefs.autoBottom)scrollBottom();};
  $('auto-last').onchange=()=>{readerPrefs.autoLast=$('auto-last').checked;savePrefs();if(readerPrefs.autoLast&&current){leaveContext();go(pageCount(current)-1);}};
@@ -518,7 +520,7 @@
  function outsidePreview(e){const box=preview.getBoundingClientRect();return e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom;}
  preview.addEventListener('pointerdown',e=>{backdropPressed=e.target===preview&&outsidePreview(e);});
  preview.onclick=e=>{if(backdropPressed&&e.target===preview&&outsidePreview(e))preview.close();backdropPressed=false;};
- $('image-previous').onclick=()=>changeImage(-1);$('image-next').onclick=()=>changeImage(1);$('image-close').onclick=()=>preview.close();preview.onkeydown=e=>{if(e.key==='ArrowLeft')changeImage(-1);if(e.key==='ArrowRight')changeImage(1);if(e.key==='+')zoom(1.25);if(e.key==='-')zoom(.8);};window.addEventListener('resize',()=>{if(preview.open)fitImage();});
+ $('image-previous').onclick=()=>changeImage(-1);$('image-next').onclick=()=>changeImage(1);$('image-close').onclick=()=>preview.close();preview.onkeydown=e=>{if(e.key==='ArrowLeft')changeImage(-1);if(e.key==='ArrowRight')changeImage(1);if(e.key==='+')zoom(1.25);if(e.key==='-')zoom(.8);};window.addEventListener('resize',()=>{if(preview.open)fitImage();if($('filter-panel').open)positionFilters();});
  function hostAction(message){if(window.chrome?.webview){window.chrome.webview.postMessage(message);return true;}return false;}
  let statusTimer;function actionStatus(value){text('action-status',value);clearTimeout(statusTimer);statusTimer=setTimeout(()=>text('action-status',''),4000);}
  window.chrome?.webview?.addEventListener('message',e=>{if(e.data?.action==='reader-status'&&typeof e.data.text==='string')actionStatus(e.data.text);});
@@ -556,18 +558,19 @@
  // The minimap draws lightweight marks rather than duplicating message/media DOM.
  const mini=$('minimap'),mapCanvas=$('minimap-canvas'),mapPane=$('messages');let mapFrame=0;
  let mapMode=['shown','collapsed'].includes(readerPrefs.minimap)?readerPrefs.minimap:'closed';
- function drawMap(){mapFrame=0;if(mapMode!=='shown')return;const width=72,height=Math.max(80,mini.clientHeight-32),ratio=devicePixelRatio||1;
+ function drawMap(){mapFrame=0;if(mapMode!=='shown')return;const width=52,height=Math.max(80,mini.clientHeight-28),ratio=devicePixelRatio||1;
   mapCanvas.width=width*ratio;mapCanvas.height=height*ratio;mapCanvas.style.height=height+'px';
   const ctx=mapCanvas.getContext('2d');ctx.scale(ratio,ratio);const style=getComputedStyle(document.body),total=Math.max(1,mapPane.scrollHeight),bounds=mapPane.getBoundingClientRect();ctx.fillStyle=style.getPropertyValue('--muted');
   const nodes=mapPane.querySelectorAll('.message'),stride=Math.max(1,Math.ceil(nodes.length/1000));
-  for(let i=0;i<nodes.length;i+=stride){const node=nodes[i],r=node.getBoundingClientRect(),y=(r.top-bounds.top+mapPane.scrollTop)/total*height;ctx.globalAlpha=.55;ctx.fillRect(node.classList.contains('self')?24:5,y,42,Math.max(1,Math.min(4,r.height/total*height)));}
+  for(let i=0;i<nodes.length;i+=stride){const node=nodes[i],r=node.getBoundingClientRect(),y=(r.top-bounds.top+mapPane.scrollTop)/total*height;ctx.globalAlpha=.55;ctx.fillRect(node.classList.contains('self')?18:4,y,30,Math.max(1,Math.min(4,r.height/total*height)));}
   ctx.globalAlpha=.3;ctx.fillStyle=style.getPropertyValue('--accent');ctx.fillRect(0,mapPane.scrollTop/total*height,width,Math.max(6,mapPane.clientHeight/total*height));ctx.globalAlpha=1;
  }
- function scheduleMap(){if(mapMode==='shown'&&!mapFrame)mapFrame=requestAnimationFrame(drawMap);}
+ function positionMap(){if(mapMode==='closed')return;const pane=mapPane.getBoundingClientRect(),main=document.querySelector('main').getBoundingClientRect();mini.style.top=Math.max(0,pane.top-main.top)+'px';mini.style.bottom=Math.max(0,main.bottom-pane.bottom)+'px';}
+ function scheduleMap(){positionMap();if(mapMode==='shown'&&!mapFrame)mapFrame=requestAnimationFrame(drawMap);}
  const mapResize=new ResizeObserver(scheduleMap),mapMutation=new MutationObserver(scheduleMap);
- function setMap(mode){mapMode=mode;readerPrefs.minimap=mode;savePrefs();mini.hidden=mode==='closed';mini.classList.toggle('collapsed',mode==='collapsed');document.querySelector('main').classList.toggle('has-minimap',mode==='shown');
+ function setMap(mode){mapMode=mode;readerPrefs.minimap=mode;savePrefs();mini.hidden=mode==='closed';mini.classList.toggle('collapsed',mode==='collapsed');document.querySelector('main').classList.toggle('has-minimap',mode==='shown');document.querySelector('main').classList.toggle('minimap-collapsed',mode==='collapsed');
   $('minimap-collapse').textContent=mode==='collapsed'?'›':'‹';$('minimap-toggle').setAttribute('aria-pressed',String(mode!=='closed'));
-  mapResize.disconnect();mapMutation.disconnect();if(mode==='shown'){mapResize.observe(mapPane);mapMutation.observe(mapPane,{childList:true,subtree:true});scheduleMap();}
+  mapResize.disconnect();mapMutation.disconnect();if(mode!=='closed'){mapResize.observe(mapPane);mapResize.observe(document.querySelector('main'));if(mode==='shown')mapMutation.observe(mapPane,{childList:true,subtree:true});scheduleMap();}
   if(mode==='closed'){cancelAnimationFrame(mapFrame);mapFrame=0;mapCanvas.width=mapCanvas.height=0;}
  }
  text('minimap-toggle',label('ReaderMinimap'));$('minimap-close').title=label('ReaderMinimapClose');$('minimap-collapse').title=label('ReaderMinimapCollapse');mapCanvas.setAttribute('aria-label',label('ReaderMinimap'));

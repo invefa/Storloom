@@ -41,7 +41,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
 }
 
 public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false, bool downloadQQGroupAvatars = false) {
-    private readonly int parallelism = maximumParallelism is >= 1 and <= 4 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
+    private readonly int parallelism = maximumParallelism is >= 1 and <= 8 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     public ChatExportResult Export(string source, string destination, ChatPlatform platform,
         byte[]? secret = null, IProgress<ScanProgress>? progress = null,
         CancellationToken cancellation = default) => ExportCore(source, destination, platform,

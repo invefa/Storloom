@@ -112,3 +112,8 @@ nav button.has-avatar{display:grid;grid-template-columns:28px minmax(0,1fr);colu
 @media(max-width:640px){.header-actions #archive-search{max-width:72px;overflow:hidden;text-overflow:ellipsis}.conversation-heading h1{max-width:100%}.page-footer .pagination{flex-wrap:wrap}.filter-actions{flex-wrap:wrap}#minimap{bottom:110px}}
 
 .page-footer .reading-controls{min-width:0;max-width:100%;justify-content:flex-end}.page-footer .reading-controls .check-field{white-space:normal;max-width:100%}.page-footer .pagination{max-width:100%;flex-wrap:wrap}
+
+body.dark:not(.palette-qq):not(.palette-wechat){--line:#3b414d}
+#minimap{width:60px}#minimap.collapsed{width:28px}.minimap-actions{height:28px;gap:0}.minimap-actions button{width:26px;height:26px;padding:0;font-size:18px;line-height:24px}#minimap-canvas{width:52px}.has-minimap #messages{margin-right:60px}.minimap-collapsed #messages{margin-right:28px}#page-size{width:64px}
+
+@media(max-width:640px){.chat-header{flex-wrap:wrap}.chat-header>div.conversation-heading{flex-basis:calc(100% - 40px)}.chat-header>div.header-actions{width:100%;justify-content:flex-end;flex-wrap:wrap}.header-actions #archive-search{max-width:none}}

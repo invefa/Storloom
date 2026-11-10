@@ -57,7 +57,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         this.avatars=avatars==null?new(StringComparer.Ordinal):new(avatars,StringComparer.Ordinal);
         this.downloadQQGroupAvatars=downloadQQGroupAvatars;
         this.voices = voices;
-        this.pageParallelism = pageParallelism is >= 1 and <= 4 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
+        this.pageParallelism = pageParallelism is >= 1 and <= 8 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination); work = PathPolicy.Normalize(work);
         this.source = source; this.destination = destination; this.work = work; this.contacts = contacts;
         this.verified = verified; this.cancellation = cancellation;
@@ -393,7 +393,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 progress?.Report(new("chat-pages", ++done, 0, TotalFiles: entries.Length, Detail: entry.Name));
             }
         });
-        if(downloadQQGroupAvatars){var downloaded=ChatAvatars.DownloadQQGroups(conversationIds.Keys,destination,progress,cancellation,out int failed);AvatarDownloadFailures=failed;foreach(var pair in downloaded)avatars[pair.Key]=pair.Value;}
+        if(downloadQQGroupAvatars){var downloaded=ChatAvatars.DownloadQQGroups(conversationIds.Keys,destination,progress,cancellation,out int failed,pageParallelism);AvatarDownloadFailures=failed;foreach(var pair in downloaded)avatars[pair.Key]=pair.Value;}
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));
         File.WriteAllText(Path.Combine(destination, "archive-index.js"), "window.archiveIndex=" + JsonSerializer.Serialize(new {

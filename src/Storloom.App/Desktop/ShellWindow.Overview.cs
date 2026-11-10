@@ -28,7 +28,7 @@ public sealed partial class ShellWindow {
             var progress = Progress(); storageScan = await Task.Run(() => new StorageScanner().Scan(root, progress, token));
             JsonFiles.Write(Path.Combine(dataRoot, "scans", $"storage-{DateTime.Now:yyyyMMdd-HHmmss}.json"), storageScan);
             RenderStorage(); status.Text = L.T("ScanSummary", storageScan.Files, storageScan.Bytes / 1073741824d, storageScan.Issues.Count);
-            operationView.AddLog($"Storage scan completed: files={storageScan.Files}, logicalBytes={storageScan.Bytes}, issues={storageScan.Issues.Count}.");
+            operationView.AddLog(L.T("LogStorageDone",storageScan.Files,View.Size(storageScan.Bytes),storageScan.Issues.Count));
         });
     }
     private void RenderStorage() {

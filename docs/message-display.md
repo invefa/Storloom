@@ -8,7 +8,7 @@ Available emoji reactions appear as compact emoji/count badges below the corresp
 
 ## Navigation
 
-Use first/last page, an exact page number, or top/bottom of the current page. Set 100–2,000 messages per displayed page; larger pages cost memory and rendering time. This only changes presentation and does not rewrite archive data.
+Use first/last page, an exact page number, or top/bottom of the current page. Set 10-5,000 messages per displayed page; larger pages cost memory and rendering time. This only changes presentation and does not rewrite archive data.
 
 Search by content, sender, type, dates or your own messages. Choose the current conversation or the entire open archive; the global shortcut is Ctrl+Shift+F. Search results retain a return point when opening their message context. Previous/next matching-page controls move through conversation results; archive results use bounded batches.
 

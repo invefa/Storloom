@@ -17,9 +17,9 @@ public static class ChatIncrementalBackup {
 
     public static ChatBackupUpdateResult Create(string source, string destination, string previousManifest,
         string journalDirectory, string[]? processes = null, IProgress<ScanProgress>? progress = null,
-        CancellationToken cancellation = default) {
-        var service = new TransferService();
-        var plan = service.Plan(source, destination, processes: processes, cancellation: cancellation);
+        CancellationToken cancellation = default,int workers=1) {
+        var service = new TransferService(workers);
+        var plan = service.Plan(source, destination, processes: processes, cancellation: cancellation,progress:progress);
         PathPolicy.AssertNoLinks(previousManifest);
         var previous = JsonFiles.Read<TransferJournal>(previousManifest);
         if (previous.Version != 1 || previous.Plan.Mode != TransferMode.Copy ||
@@ -50,7 +50,7 @@ public static class ChatIncrementalBackup {
         if (Directory.Exists(staging) || File.Exists(manifest)) throw new IOException("Snapshot staging already exists.");
         Directory.CreateDirectory(journalDirectory);
         string journal = Path.Combine(journalDirectory, $"transfer-{plan.Id:N}.json");
-        var receipts = new List<TransferReceipt>();
+        var receipts = new List<TransferReceipt>();var gate=new object();int completed=0;
         void Save(string state) => JsonFiles.Write(journal, new TransferJournal { Plan = plan, State = state, Receipts = receipts.ToList() });
         void Closed() {
             if (CleanupEngine.RunningProcesses(new CleanupRule { Processes = plan.Processes }).Length > 0)
@@ -59,11 +59,11 @@ public static class ChatIncrementalBackup {
         Closed(); Save("CreatingIncremental"); Directory.CreateDirectory(staging);
         long done = 0;
         try {
-            foreach (var file in plan.Files) {
+            Parallel.ForEach(plan.Files,new ParallelOptions{MaxDegreeOfParallelism=workers,CancellationToken=cancellation},file=>{
                 OperationPause.Check(cancellation); Closed();
                 string inputPath = TransferService.Child(plan.Source, file.RelativePath); PathPolicy.AssertNoLinks(inputPath);
                 if (NativeFile.ReadStamp(inputPath) != file.Stamp) throw new IOException("Account changed during backup.");
-                if (inherited.TryGetValue(file.RelativePath, out var receipt)) { receipts.Add(receipt); continue; }
+                if (inherited.TryGetValue(file.RelativePath, out var receipt)) { lock(gate)receipts.Add(receipt);Interlocked.Increment(ref completed); return; }
                 string target = TransferService.Child(staging, file.RelativePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!); PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);
                 using var input = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -71,19 +71,20 @@ public static class ChatIncrementalBackup {
                 using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
                     byte[] buffer = new byte[1024 * 1024]; int count;
                     while ((count = input.Read(buffer)) > 0) {
-                        OperationPause.Check(cancellation); output.Write(buffer, 0, count); hash.AppendData(buffer, 0, count); done += count;
-                        progress?.Report(new("transfer", receipts.Count, done, checked(copyBytes * 2), plan.Files.Count, file.RelativePath));
+                        OperationPause.Check(cancellation); output.Write(buffer, 0, count); hash.AppendData(buffer, 0, count); Interlocked.Add(ref done,count);
+                        progress?.Report(new("transfer", Volatile.Read(ref completed), Interlocked.Read(ref done), checked(copyBytes * 2), plan.Files.Count, file.RelativePath));
                     }
                     output.Flush(true);
                 }
                 if (NativeFile.ReadStamp(inputPath) != file.Stamp) throw new IOException("Account changed during copying.");
                 string digest = Convert.ToHexString(hash.GetHashAndReset());
                 using (var copied = File.OpenRead(target))
-                    if (Convert.ToHexString(TransferService.Hash(copied, cancellation, bytes => { done += bytes; progress?.Report(new("transfer", receipts.Count, done, checked(copyBytes * 2), plan.Files.Count, file.RelativePath)); })) != digest)
+                    if (Convert.ToHexString(TransferService.Hash(copied, cancellation, bytes => { Interlocked.Add(ref done,bytes); progress?.Report(new("transfer", Volatile.Read(ref completed), Interlocked.Read(ref done), checked(copyBytes * 2), plan.Files.Count, file.RelativePath)); })) != digest)
                         throw new IOException("Incremental copy verification failed.");
                 File.SetLastWriteTimeUtc(target, new DateTime(file.Stamp.WriteUtcTicks, DateTimeKind.Utc));
-                receipts.Add(new(file.RelativePath, file.Stamp.Bytes, digest));
-            }
+                lock(gate)receipts.Add(new(file.RelativePath, file.Stamp.Bytes, digest));Interlocked.Increment(ref completed);
+            });
+            receipts.Sort((a,b)=>StringComparer.Ordinal.Compare(a.RelativePath,b.RelativePath));
             // Check even reused source files again before publishing this consistent generation.
             Closed();
             foreach (var file in plan.Files) {

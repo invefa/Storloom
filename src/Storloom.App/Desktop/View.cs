@@ -13,8 +13,8 @@ internal static class View {
         var text = new TextBlock { Text = value, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         text.SetResourceReference(TextBlock.ForegroundProperty, color); return text;
     }
-    public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 32, VerticalAlignment = VerticalAlignment.Center };
-    public static PasswordBox SecretInput() => new() { MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
+    public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 28, VerticalAlignment = VerticalAlignment.Center };
+    public static PasswordBox SecretInput() => new() { MinHeight = 28, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
     public static Grid Field(string key, FrameworkElement control, double labelWidth = 112) {
         var row = new Grid { Margin = new Thickness(0, 4, 0, 8) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(labelWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -56,8 +56,8 @@ internal static class View {
         return table;
     }
     public static Button IconButton(string geometry, string tooltip, Action action) {
-        var button = Button(tooltip, action); button.Content = Icon(geometry); button.ToolTip = L.T(tooltip);
-        button.Width = 28; button.Height = button.MinHeight = 28; button.MinWidth = 28; button.Padding = new Thickness(5); button.Margin = new Thickness(0);
+        var button = Button(tooltip, action); button.Content = Icon(geometry,12); button.ToolTip = L.T(tooltip);
+        button.Width = 24; button.Height = button.MinHeight = 24; button.MinWidth = 24; button.Padding = new Thickness(4); button.Margin = new Thickness(0);
         button.BorderThickness = new Thickness(0); button.Background = Brushes.Transparent;
         System.Windows.Automation.AutomationProperties.SetName(button, L.T(tooltip)); return button;
     }
@@ -68,7 +68,8 @@ internal static class View {
         view.SortDescriptions.Clear(); view.SortDescriptions.Add(new(column.SortMemberPath, direction)); column.SortDirection = direction;
     }
     public static System.Windows.Shapes.Path Icon(string geometry, double size = 16) {
-        var icon = new System.Windows.Shapes.Path { Data = Geometry.Parse(geometry), Width = size, Height = size, Stretch = Stretch.Uniform,
+        var data=Geometry.Parse(geometry);var bounds=data.Bounds;double longest=Math.Max(bounds.Width,bounds.Height);
+        var icon = new System.Windows.Shapes.Path { Data = data, Width = longest>0?Math.Max(1,size*bounds.Width/longest):size, Height = longest>0?Math.Max(1,size*bounds.Height/longest):size, Stretch = Stretch.Fill, HorizontalAlignment=HorizontalAlignment.Center,
             StrokeThickness = 1.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, VerticalAlignment = VerticalAlignment.Center };
         icon.SetResourceReference(System.Windows.Shapes.Path.StrokeProperty, "Ink"); return icon;
     }
@@ -125,6 +126,9 @@ public class ThemeWindow : FluentWindow {
     protected override void SetWindowChrome() => System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome {
         CaptionHeight = 0, GlassFrameThickness = new Thickness(0), ResizeBorderThickness = ResizeMode == ResizeMode.NoResize ? new Thickness(0) : new Thickness(4), UseAeroCaptionButtons = false });
     public void UpdateFrame() {
+        // FluentWindow can initialize chrome before object-initializer dialog settings.
+        // Reconcile fixed dialogs once the native window exists, removing resize hit regions.
+        if(ResizeMode==ResizeMode.NoResize&&System.Windows.Shell.WindowChrome.GetWindowChrome(this) is { } chrome&&chrome.ResizeBorderThickness!=new Thickness(0))SetWindowChrome();
         var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle; if (handle == 0) return;
         var source = System.Windows.Interop.HwndSource.FromHwnd(handle);
         if (source == null || Application.Current.TryFindResource("CanvasColor") is not Color color) return;

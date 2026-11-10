@@ -111,6 +111,8 @@ public sealed class RuleAndToolTests : IDisposable {
     [InlineData("output", 0)]
     public async Task ToolExecutionRecordsExitStatusAndBoundsOutput(string mode, int expected) {
         var (rule, settings) = FixtureTool(mode);
+        // Startup under concurrent build/test I/O is not the timeout behavior under test here.
+        settings=settings with{CommandTimeoutSeconds=5};
         var engine = new CleanupEngine(new() { Rules = [rule] }, settings); var scan = engine.Scan();
         Assert.Single(scan.Commands); Assert.Empty(scan.Files);
         var results = await engine.ApplyCommands(scan, [rule.Id], Dir("journals"));

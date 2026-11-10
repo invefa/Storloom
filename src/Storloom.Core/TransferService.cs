@@ -36,9 +36,10 @@ public sealed record TransferResult(string Destination, int VerifiedFiles, int R
     public long RemovedBytes { get; init; }
 }
 
-public sealed class TransferService {
+public sealed class TransferService(int maximumParallelism=1) {
+    private readonly int workers=maximumParallelism is >=1 and <=8?maximumParallelism:throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     public TransferPlan Plan(string source, string destination, TransferMode mode = TransferMode.Copy,
-        string[]? processes = null, CancellationToken cancellation = default) {
+        string[]? processes = null, CancellationToken cancellation = default,IProgress<ScanProgress>? progress=null) {
         source = PathPolicy.Normalize(source);
         destination = PathPolicy.Normalize(destination);
         ValidateBoundaries(source, destination, mode);
@@ -46,7 +47,7 @@ public sealed class TransferService {
             throw new IOException("Destination must be a new directory; existing data is never merged.");
         AssertParents(destination);
         PathPolicy.AssertNoLinks(source);
-        var files = new List<TransferFile>();
+        var files = new List<TransferFile>();long plannedBytes=0;var planning=System.Diagnostics.Stopwatch.StartNew();double lastReport=0;progress?.Report(new("transfer-plan",0,0));
         var folders = new List<string>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pending = new Stack<string>();
@@ -65,10 +66,12 @@ public sealed class TransferService {
                 else {
                     string relative = Path.GetRelativePath(source, path);
                     if (!names.Add(relative)) throw new IOException("Case-insensitive destination collision.");
-                    files.Add(new(relative, NativeFile.ReadStamp(path)));
+                    var stamp=NativeFile.ReadStamp(path);files.Add(new(relative,stamp));plannedBytes+=stamp.Bytes;
+                    if(planning.Elapsed.TotalSeconds-lastReport>=.5){progress?.Report(new("transfer-plan",files.Count,plannedBytes));lastReport=planning.Elapsed.TotalSeconds;}
                 }
             }
         }
+        progress?.Report(new("transfer-plan",files.Count,plannedBytes));
         return new() { Source = source, Destination = destination, Mode = mode,
             Processes = processes ?? [], Files = files, EmptyDirectories = folders };
     }
@@ -94,10 +97,10 @@ public sealed class TransferService {
         foreach (string directory in plan.EmptyDirectories)
             if (directory != ".") _ = Child(plan.Destination, directory);
         long needed = plan.Files.Sum(f => f.Stamp.Bytes);
-        long workBytes = 0;
+        long workBytes = 0;int copiedFiles=0;var receiptGate=new object();
         void Advanced(int count, string detail) {
-            workBytes += count;
-            progress?.Report(new("transfer", 0, workBytes, checked(needed * 2), plan.Files.Count, detail));
+            long advanced=Interlocked.Add(ref workBytes,count);
+            progress?.Report(new("transfer", Volatile.Read(ref copiedFiles), advanced, checked(needed * 2), plan.Files.Count, detail));
         }
         if (new DriveInfo(Path.GetPathRoot(plan.Destination)!).AvailableFreeSpace < needed + 1024 * 1024)
             throw new IOException("Not enough destination space for the verified copy.");
@@ -120,8 +123,8 @@ public sealed class TransferService {
         using var eventsStream = new FileStream(eventsPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
         using var events = new StreamWriter(eventsStream);
         void Event(string state, object details) {
-            events.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { state, details, time = DateTimeOffset.UtcNow }));
-            events.Flush(); eventsStream.Flush(true);
+            lock(receiptGate){events.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { state, details, time = DateTimeOffset.UtcNow }));
+            events.Flush(); eventsStream.Flush(true);}
         }
         void Save(string state) {
             var record = new TransferJournal { Plan = plan, State = state, Receipts = receipts,
@@ -133,7 +136,7 @@ public sealed class TransferService {
         Directory.CreateDirectory(staging);
         try {
             progress?.Report(new("transfer", 0, 0, checked(needed * 2), plan.Files.Count, SourceBytes: needed));
-            foreach (var entry in plan.Files) {
+            Parallel.ForEach(plan.Files,new ParallelOptions{MaxDegreeOfParallelism=workers,CancellationToken=cancellation},entry=>{
                 OperationPause.Check(cancellation);
                 CheckProcesses(plan.Processes);
                 string source = Child(plan.Source, entry.RelativePath);
@@ -156,24 +159,25 @@ public sealed class TransferService {
                     byte[] sourceHash = sourceDigest.GetHashAndReset();
                     if (input.Length != entry.Stamp.Bytes || NativeFile.ReadStamp(source) != entry.Stamp)
                         throw new IOException("Source changed while copying.");
-                    receipts.Add(new(entry.RelativePath, entry.Stamp.Bytes, Convert.ToHexString(sourceHash)));
+                    var receipt=new TransferReceipt(entry.RelativePath,entry.Stamp.Bytes,Convert.ToHexString(sourceHash));
+                    lock(receiptGate){receipts.Add(receipt);Event("Copied",receipt);}
                 }
                 File.SetLastWriteTimeUtc(target, new DateTime(entry.Stamp.WriteUtcTicks, DateTimeKind.Utc));
-                bytes += entry.Stamp.Bytes;
-                Event("Copied", receipts[^1]);
-                progress?.Report(new("transfer", receipts.Count, workBytes, checked(needed * 2), plan.Files.Count, entry.RelativePath));
-            }
+                Interlocked.Add(ref bytes,entry.Stamp.Bytes);int countDone=Interlocked.Increment(ref copiedFiles);
+                progress?.Report(new("transfer", countDone, Interlocked.Read(ref workBytes), checked(needed * 2), plan.Files.Count, entry.RelativePath));
+            });
+            receipts.Sort((a,b)=>StringComparer.Ordinal.Compare(a.RelativePath,b.RelativePath));
             foreach (string directory in plan.EmptyDirectories)
                 Directory.CreateDirectory(directory == "." ? staging : Child(staging, directory));
             OperationPause.Check(cancellation);
             // Verify every destination against its streaming source hash before publishing the batch.
-            foreach (var entry in receipts) {
+            Parallel.ForEach(receipts,new ParallelOptions{MaxDegreeOfParallelism=workers,CancellationToken=cancellation},entry=>{
                 OperationPause.Check(cancellation);
                 using var target = File.OpenRead(Child(staging, entry.RelativePath));
                 if (Convert.ToHexString(Hash(target, cancellation,
                     count => Advanced(count, "verify batch: " + entry.RelativePath))) != entry.Sha256)
                     throw new IOException("Destination changed before publishing.");
-            }
+            });
             AssertParents(plan.Destination);
             for (int attempt = 0; ; attempt++) {
                 OperationPause.Check(cancellation); AssertParents(plan.Destination);
@@ -218,6 +222,9 @@ public sealed class TransferService {
             Save(cancellation.IsCancellationRequested ? "CancelledAfterVerification" :
                 issues.Count > 0 ? "CopiedWithRetainedSources" : "Completed");
         } catch (OperationCanceledException) { Save(published ? "CancelledAfterVerification" : "CancelledBeforeVerification");
+        } catch(AggregateException error)when(error.Flatten().InnerExceptions.Count==1){
+            Save(published ? "FailedAfterVerification" : "FailedSourcesRetained");
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.Flatten().InnerExceptions[0]).Throw();throw;
         } catch {
             Save(published ? "FailedAfterVerification" : "FailedSourcesRetained");
             throw;

@@ -39,7 +39,7 @@ public sealed partial class ShellWindow {
             var results = new List<CleanupItemResult>();
             var progress = Progress(); string journal = Path.Combine(dataRoot, "journals");
             foreach (var plan in transfers) {
-                operationView.AddLog(L.English("PhaseCopyVerify") + ": " + plan.Source);
+                operationView.AddLog(L.T("PhaseCopyVerify") + ": " + plan.Source);
                 var result = await Task.Run(() => new TransferService().Execute(plan, journal, progress, token));
                 results.Add(new(transferNames[plan.Id], L.T(plan.Mode.ToString()), null, null,
                     result.RemovedBytes, result.Issues.Count == 0 ? L.T("Complete") : L.T("Incomplete")));
@@ -62,7 +62,7 @@ public sealed partial class ShellWindow {
             }
             if (toolFailed) issues += deletes.Count;
             if (deletes.Count > 0 && !toolFailed) foreach (string id in deletes) {
-                operationView.AddLog("Delete: " + engine.Catalog.Rules.Single(r => r.Id == id).Name);
+                operationView.AddLog(L.T("LogDelete",L.RuleName(engine.Catalog.Rules.Single(r => r.Id == id))));
                 var result = await Task.Run(() => engine.Apply(snapshot, [id], journal, paths, progress, token));
                 processed += result.Deleted; issues += result.Skipped;
                 results.Add(new(L.RuleName(engine.Catalog.Rules.Single(r => r.Id == id)), L.T("Delete"), null, null,
@@ -70,7 +70,7 @@ public sealed partial class ShellWindow {
             }
             JsonFiles.Write(Path.Combine(journal, $"cleanup-summary-{Guid.NewGuid():N}.json"), results);
             cleanupPlan = null; excluded.Clear(); RenderRules(); status.Text = L.T("OperationDone", processed, toolSuccess, issues);
-            operationView.AddLog($"Cleanup completed: files={processed}, nativeCommands={toolSuccess}, issues={issues}.");
+            operationView.AddLog(L.T("LogCleanupDone",processed,toolSuccess,issues));
             new CleanupResultsWindow(results) { Owner = this }.ShowDialog();
         });
     }

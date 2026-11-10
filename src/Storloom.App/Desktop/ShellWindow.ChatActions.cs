@@ -79,7 +79,7 @@ public sealed partial class ShellWindow {
         await RunPausable(async token => {
             var progress = Progress();
             var result = await Task.Run(() => {
-                var service = new TransferService(); var plan = service.Plan(location.Directory, destination, processes: clients, cancellation: token);
+                var service = new TransferService(preferences.ChatParallelism); var plan = service.Plan(location.Directory, destination, processes: clients, cancellation: token,progress:progress);
                 return service.Execute(plan, Path.Combine(dataRoot, "journals"), progress, token);
             });
             if (result.Cancelled) { status.Text = L.T("Cancelled"); return; }
@@ -126,7 +126,7 @@ public sealed partial class ShellWindow {
         await RunPausable(async token => {
             var progress = Progress();
             var result = await Task.Run(() => ChatIncrementalBackup.Create(location.Directory, destination, previous,
-                Path.Combine(dataRoot, "journals"), location.Platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"], progress, token));
+                Path.Combine(dataRoot, "journals"), location.Platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"], progress, token,workers:preferences.ChatParallelism));
             activeManifest = result.Backup.Manifest; verifiedBackups[location.Directory] = activeManifest;
             preparedArchive = await Task.Run(() => ReadChatArchive(activeManifest, location), token);
             preferences = preferences with { BackupRoot = root }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
@@ -173,7 +173,7 @@ public sealed partial class ShellWindow {
                 latestExportResult=result;
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 operationIncomplete = !result.Complete;
-                foreach (var issue in result.Issues) operationView.AddLog($"[{issue.RuleId}] {issue.Path}: {issue.Reason}");
+                foreach (var issue in result.Issues) operationView.AddLog(L.T("LogIssue",issue.RuleId,issue.Path,issue.Reason));
                 if(protection?.Password!=null && !result.CanResume){
                     using var vault=await Task.Run(()=>ChatVault.Create(target,protection.Password.AsSpan(),token,progress),token);
                     protection.ClearSecret();

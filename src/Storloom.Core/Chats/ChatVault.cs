@@ -132,7 +132,7 @@ public sealed class ChatVault : IDisposable {
     private string Plain(Entry entry)=>TransferService.Child(root,entry.Path);
     private string Cipher(Entry entry)=>Path.Combine(store,entry.Id+".enc");
     public ChatVaultProgress Encrypt(bool includeMedia=true,int workers=2,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default) {
-        ObjectDisposedException.ThrowIf(disposed,this);if(workers is <1 or >4)throw new ArgumentOutOfRangeException(nameof(workers));
+        ObjectDisposedException.ThrowIf(disposed,this);if(workers is <1 or >8)throw new ArgumentOutOfRangeException(nameof(workers));
         using var lease=Lease(root);
         progress?.Report(new("chat-encryption-check",0,0));
         if(UnplannedFiles().Any())throw new IOException("Unplanned files were added after encryption started. They remain plaintext and must be retained separately before this plan can resume.");

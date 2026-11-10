@@ -26,11 +26,12 @@ internal sealed class PreferencesWindow : ThemeWindow {
             DockPanel.SetDock(browse, Dock.Right); panel.Children.Add(browse); panel.Children.Add(input); Field(key, panel); return input;
         }
         var backup = FolderField("BackupTo", preferences.BackupRoot); var archive = FolderField("ArchiveRoot", preferences.ArchiveRoot);
-        var workers = Options(["1", "2", "4"], preferences.ChatParallelism == 1 ? 0 : preferences.ChatParallelism == 4 ? 2 : 1); Field("ChatWorkers", workers);
+        var workers = Options(Enumerable.Range(1,8).Select(n=>n.ToString()).ToArray(),Math.Clamp(preferences.ChatParallelism,1,8)-1); Field("ChatWorkers", workers);
         Field("", View.Text(L.T("ChatWorkersHelp"), color: "Muted"));
         var motion = new CheckBox { Content = L.T("ReduceMotion"), IsChecked = preferences.ReduceMotion }; Field("MotionLabel", motion);
         var closeToTray = new CheckBox { Content = L.T("CloseToTray"), IsChecked = preferences.CloseToTray }; Field("CloseBehavior", closeToTray);
         var debugLogging = new CheckBox { Content = L.T("DebugLog"), IsChecked = preferences.DebugLogging, ToolTip = L.T("DebugLogHelp") }; Field("LoggingLabel", debugLogging);
+        var logAutoShow=new CheckBox{Content=L.T("AutoShowLog"),IsChecked=preferences.LogAutoShow};Field("",logAutoShow);
         var custom = View.Input(preferences.CustomThemeFile ?? "");
         var customRow = new DockPanel(); var choose = View.Button("Browse", () => {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Theme JSON|*.json" };
@@ -79,7 +80,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                 if (!string.IsNullOrWhiteSpace(custom.Text)) _ = Theme.ReadCustom(custom.Text);
                 Result = preferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = themeValues[themes.SelectedIndex],
                     BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatParallelism = int.Parse((string)workers.SelectedItem),
-                    ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, DebugLogging = debugLogging.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
+                    LogAutoShow=logAutoShow.IsChecked==true, ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, DebugLogging = debugLogging.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
                 foreach (var choice in choices.Where(c => pending.ContainsKey(c.Info.Id))) JsonFiles.Write(Path.Combine(customSets, choice.Info.File), pending[choice.Info.Id]);
                 JsonFiles.Write(Path.Combine(customSets, "sets.json"), new RuleSetIndex(1, choices.Where(c => c.Info.IsCustom).Select(c => c.Info).ToList()));
                 DialogResult = true;

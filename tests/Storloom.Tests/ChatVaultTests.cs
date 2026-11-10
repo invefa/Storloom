@@ -13,7 +13,7 @@ public sealed class ChatVaultTests : IDisposable {
     private byte[] Add(string path,int count){byte[] bytes=RandomNumberGenerator.GetBytes(count);string file=Path.Combine(root,path);Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllBytes(file,bytes);return bytes;}
     private static byte[] Read(Stream stream){using(stream){using var output=new MemoryStream();stream.CopyTo(output);return output.ToArray();}}
     [Theory]
-    [InlineData(1)] [InlineData(4)]
+    [InlineData(1)] [InlineData(4)] [InlineData(8)]
     public void PartialProtectionCanResumeWithPasswordAndSeekAcrossAuthenticatedChunks(int workers){
         byte[] content=Add("messages.jsonl",2*1024*1024+17),image=Add("assets/fixture.bin",512),empty=Add("empty",0);
         using(var vault=ChatVault.Create(root,Password)){

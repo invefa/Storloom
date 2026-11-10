@@ -19,7 +19,7 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
         stack.Children.Add(View.Text(L.T("VaultPassword")));stack.Children.Add(password);
         if(creating){stack.Children.Add(View.Text(L.T("VaultConfirmPassword")));stack.Children.Add(confirmation);}
         var media=new CheckBox{Content=L.T("VaultIncludeMedia"),IsChecked=true,Margin=new Thickness(0,12,0,0)};
-        var workers=new ComboBox{ItemsSource=new[]{1,2,4},SelectedItem=2,MinWidth=75,HorizontalAlignment=HorizontalAlignment.Left};
+        var workers=new ComboBox{ItemsSource=Enumerable.Range(1,8).ToArray(),SelectedItem=2,MinWidth=75,HorizontalAlignment=HorizontalAlignment.Left};
         if(encrypting){stack.Children.Add(media);stack.Children.Add(View.Text(L.T("VaultPartialHelp"),color:"Muted"));stack.Children.Add(View.Text(L.T("VaultWorkers")));stack.Children.Add(workers);}
         Func<ChatProtectionSelection?> selection=()=>null;
         if(creating&&encrypting&&directory!=null){

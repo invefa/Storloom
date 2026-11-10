@@ -111,7 +111,7 @@ public static class ChatReadingUpdate {
                 }
                 index.Execute("COMMIT");
                 if(downloadQQGroupAvatars&&platform==ChatPlatform.QQ){
-                    var downloaded=ChatAvatars.DownloadQQGroups(knownConversations,delta,progress,cancellation,out int failures);
+                    var downloaded=ChatAvatars.DownloadQQGroups(knownConversations,delta,progress,cancellation,out int failures,parallelism);
                     var avatarMap=oldIndex["avatars"] as JsonObject??new JsonObject();oldIndex["avatars"]=avatarMap;
                     var conversationMap=oldIndex["conversationAvatars"] as JsonObject??new JsonObject();oldIndex["conversationAvatars"]=conversationMap;
                     foreach(var pair in downloaded){avatarMap[pair.Key]=pair.Value;conversationMap[JsonFiles.Hash(pair.Key)[..24].ToLowerInvariant()]=pair.Value;}

@@ -50,7 +50,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     }
     private void BuildUi() {
         Body.Children.Clear(); pages.Clear();
-        var root = View.Grid(View.Auto, View.Fill, View.Auto, new GridLength(0), View.Auto);
+        var root = View.Grid(View.Auto, View.Fill, View.Auto, new GridLength(26), View.Auto);
         menu = new Menu { Padding = new Thickness(0), Margin = new Thickness(16, 0, 0, 0) };
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(menu, true);
         var file = new MenuItem { Header = L.T("FileMenu") };
@@ -87,7 +87,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         View.Add(center, sidebar, 0); sidebarDivider = SidebarSplitter("Canvas", HorizontalAlignment.Left); View.Add(center, sidebarDivider, 0, 1);
         ApplySidebar();
         pageHost = new Grid { Margin = new Thickness(12, 14, 18, 12) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
-        var logSplitter = logDivider = new GridSplitter { Height = 5, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Collapsed };
+        var logSplitter = logDivider = new GridSplitter { Height = 1, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Visible };
         var logTemplate = new ControlTemplate(typeof(GridSplitter)); var logHit = new FrameworkElementFactory(typeof(Grid));
         logHit.SetResourceReference(Panel.BackgroundProperty, "Canvas"); var logLine = new FrameworkElementFactory(typeof(Border));
         logLine.SetValue(FrameworkElement.HeightProperty, 1d); logLine.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
@@ -97,35 +97,37 @@ public sealed partial class ShellWindow : ThemeWindow {
         View.Add(root, logSplitter, 2); logRow = root.RowDefinitions[3];
         root.RowDefinitions[1].MinHeight = 260;
         void ClampLog() {
-            logRow.MaxHeight = Math.Max(40, Body.ActualHeight - 260 - root.RowDefinitions[0].ActualHeight - root.RowDefinitions[2].ActualHeight - root.RowDefinitions[4].ActualHeight);
+            logRow.MaxHeight = Math.Max(26, Body.ActualHeight - 260 - root.RowDefinitions[0].ActualHeight - root.RowDefinitions[2].ActualHeight - root.RowDefinitions[4].ActualHeight);
             if (logRow.Height.IsAbsolute && logRow.Height.Value > logRow.MaxHeight) {
                 logRow.BeginAnimation(RowDefinition.HeightProperty, null); logRow.Height = new GridLength(logRow.MaxHeight);
             }
         }
         root.LayoutUpdated += (_, _) => ClampLog();
-        operationView = new OperationPanel { Visibility = Visibility.Collapsed }; View.Add(root, operationView, 3);
+        operationView = new OperationPanel(); View.Add(root, operationView, 3);
         debugEnabled=preferences.DebugLogging;operationView.DebugToggle.IsChecked = preferences.DebugLogging;
         operationView.DebugLoggingChanged += enabled => Guard(() => { debugEnabled=enabled;preferences = preferences with { DebugLogging = enabled }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences); });
         operationView.PauseRequested += () => {
             if(operationPause==null)return;
-            if(operationPause.IsPaused){operationPause.Resume();operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14");operationView.PauseButton.ToolTip=L.T("PauseOperation");}
-            else{operationPause.Pause();operationView.PauseButton.Content=View.Icon("M 4,2 L 13,8 4,14 Z");operationView.PauseButton.ToolTip=L.T("ResumeOperation");}
+            if(operationPause.IsPaused){operationPause.Resume();operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14",12);operationView.PauseButton.ToolTip=L.T("PauseOperation");}
+            else{operationPause.Pause();operationView.PauseButton.Content=View.Icon("M 4,2 L 13,8 4,14 Z",12);operationView.PauseButton.ToolTip=L.T("ResumeOperation");}
             operationView.SetPaused(operationPause.IsPaused);
             operationView.AddLog(L.T(operationPause.IsPaused?"OperationPauseHelp":"OperationResumed"));
         };
         operationView.CancelRequested += ()=>operation?.Cancel();
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
-            double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 56;
+            double target = expanded ? Math.Clamp(preferences.LogHeight, 80, Math.Max(80, ActualHeight * .55)) : 26;
             if (!expanded && logRow.ActualHeight > 80) preferences = preferences with { LogHeight = logRow.ActualHeight };
-            AnimateLog(target); logSplitter.IsEnabled = expanded;
+            AnimateLog(target);logSplitter.IsEnabled=expanded;logSplitter.Height=expanded?3:1;
+            preferences=preferences with{LogExpanded=expanded};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);
         };
-        logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 40; };
-        var footer = statusFooter = new DockPanel { Margin = new Thickness(18, 5, 12, 5) };
-        cancel = Button("Cancel", () => operation?.Cancel()); cancel.Visibility = Visibility.Collapsed;
-        DockPanel.SetDock(cancel, Dock.Right); footer.Children.Add(cancel);
-        status = View.Text(L.T("CatalogSummary", engine.Catalog.Rules.Count), color: "Muted"); status.Margin = new Thickness(0);
-        status.TextWrapping = TextWrapping.NoWrap; status.TextTrimming = TextTrimming.CharacterEllipsis; footer.Children.Add(status); View.Add(root, footer, 4);
+        logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 26; };
+        // The persistent log/status panel is the sole status surface, including at startup.
+        statusFooter=new DockPanel{Visibility=Visibility.Collapsed};cancel=Button("Cancel",()=>operation?.Cancel());cancel.Visibility=Visibility.Collapsed;
+        status=operationView.StatusText;status.Text=L.T("CatalogSummary",engine.Catalog.Rules.Count);
+        operationView.WrapToggle.IsChecked=preferences.LogWrap;operationView.AutoShowToggle.IsChecked=preferences.LogAutoShow;
+        operationView.OptionsChanged+=()=>{preferences=preferences with{LogWrap=operationView.WrapToggle.IsChecked==true,LogAutoShow=operationView.AutoShowToggle.IsChecked==true};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);};
+        if(preferences.LogExpanded)operationView.ToggleExpanded();
         Body.Children.Add(root); BuildOverview(); BuildRules(); BuildChats();
         navigation.SelectedIndex = currentPage == "overview" ? 0 : currentPage == "chats" ? 2 : 1;
     }
@@ -202,8 +204,8 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (picker.ShowDialog(this) == true) operationView.ExportLog(picker.FileName);
     }
     private void Error(Exception ex) {
-        status.Text = ex.Message; operationView.AddLog(ex.Message);
-        operationView.AddException(ex);
+        status.Text = L.T("OperationFailureLog",ex.Message); operationView.AddLog(status.Text);
+        if(debugEnabled)operationView.AddException(ex);
         try { JsonFiles.Write(Path.Combine(dataRoot, "errors", $"error-{Guid.NewGuid():N}.json"), new { time = DateTimeOffset.UtcNow, error = ex.ToString() }); }
         catch (Exception failure) when (failure is IOException or UnauthorizedAccessException) { }
         Notice.Show(this, L.T("Error"), ex.Message);
@@ -223,10 +225,11 @@ public sealed partial class ShellWindow : ThemeWindow {
         object? previousContent = operationButton?.Content;
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
-        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 56);
-        operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14");operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;
-        status.Visibility = Visibility.Collapsed; statusFooter.Visibility=Visibility.Collapsed;
-        status.Text = L.T("OperationStarting"); bool complete = false;
+        if(operationView.AutoShowToggle.IsChecked==true&&!operationView.Expanded)operationView.ToggleExpanded();
+        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight,80,Math.Max(80,ActualHeight*.55)) : 26);
+        operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14",12);operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;
+        statusFooter.Visibility=Visibility.Collapsed;
+        status.Text = L.T("OperationStarting");if(debugEnabled)operationView.AddDebugDetail("task.options",$"workers: {preferences.ChatParallelism} | page: {currentPage} | auto_open_log: {preferences.LogAutoShow}"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete; }
         catch (OperationCanceledException) { status.Text = L.T("Cancelled"); if(debugEnabled)operationView.AddDiagnostic(new("operation.cancelled")); }
         catch (Exception ex) { Error(ex); }

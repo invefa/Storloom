@@ -67,7 +67,7 @@ public sealed partial class ShellWindow {
         chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray();
         if (locations.Count == 1) chatList.SelectedIndex = 0; status.Text = L.T(locations.Count == 0 ? "NoAccounts" : "SelectAccount");
         accountNotice.Text = L.T(locations.Count == 0 ? "DiscoveryEmpty" : "DiscoveryFound", locations.Count);
-        operationView.AddLog($"Account discovery completed: {locations.Count} account(s) found.");
+        operationView.AddLog(L.T("LogAccountsDone",locations.Count));
         if (locations.Count > 0) View.Sort(chatList, "Bytes");
     });
     private sealed record AccountRow(ChatLocation Location) {
@@ -83,7 +83,7 @@ public sealed partial class ShellWindow {
         browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
         chatContent.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = View.Stack(View.Text(L.T("BackupStepTitle"), 23), View.Text(L.T("BackupStepLead"), color: "Muted"),
-                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination)) });
+                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination),View.Field("ChatWorkers",ChatWorkerSelector())) });
         chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat, true));
         chatFooter.Children.Add(AsyncButton("IncrementalBackup", IncrementalBackupChat));
         if (verifiedBackups.TryGetValue(account.Directory, out string? previous) && File.Exists(previous))
@@ -98,7 +98,7 @@ public sealed partial class ShellWindow {
         chatContent.Children.Add(new ScrollViewer { Content=stack, VerticalScrollBarVisibility=ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled, HorizontalContentAlignment=HorizontalAlignment.Stretch,
             Style=(Style)FindResource("EditorScrollViewer") });
-        stack.Children.Add(View.Text(L.T("ExportAccessSection"),16));
+        var accessTitle=View.Text(L.T("ExportAccessSection"),15);accessTitle.Margin=new Thickness(0,14,0,8);stack.Children.Add(accessTitle);
         stack.Children.Add(View.Text(L.T(!encrypted ? "PlainStep" : capturedKey != null ? "KeyReady" : "KeyAcquireHelp"),color:"Muted"));
         if (encrypted) {
             var methods = View.Row();
@@ -117,7 +117,7 @@ public sealed partial class ShellWindow {
         }
         var protection=new CheckBox{Content=L.T("EncryptAfterExport"),IsChecked=encryptAfterExport,Margin=new Thickness(0,12,0,4)};
         protection.Checked+=(_,_)=>encryptAfterExport=true;protection.Unchecked+=(_,_)=>encryptAfterExport=false;
-        stack.Children.Add(View.Text(L.T("ExportOptionsSection"),16));stack.Children.Add(protection);
+        var optionsTitle=View.Text(L.T("ExportOptionsSection"),15);optionsTitle.Margin=new Thickness(0,18,0,8);stack.Children.Add(optionsTitle);stack.Children.Add(protection);
         stack.Children.Add(View.Text(L.T("EncryptAfterExportHelp"),color:"Muted"));
         if(Account().Platform==ChatPlatform.QQ){
             var avatars=new CheckBox{Content=L.T("DownloadQQGroupAvatars"),IsChecked=preferences.DownloadQQGroupAvatars,Margin=new Thickness(0,10,0,4),ToolTip=L.T("DownloadQQGroupAvatarsHelp")};
@@ -126,6 +126,7 @@ public sealed partial class ShellWindow {
         var verify = new CheckBox { Content = L.T("VerifyBackupBeforeExport"), IsChecked = verifyChatBackup, Margin = new Thickness(0, 12, 0, 4) };
         verify.Checked += (_, _) => verifyChatBackup = true;
         verify.Unchecked += (_, _) => verifyChatBackup = false;
+        stack.Children.Add(View.Field("ChatWorkers",ChatWorkerSelector()));
         stack.Children.Add(verify);
         var help=new Expander{Header=L.T("ExportHelpTitle"),Margin=new Thickness(0,10,0,0),HorizontalContentAlignment=HorizontalAlignment.Stretch,
             Content=View.Stack(View.Text(L.T("VerifyBackupHelp"),color:"Muted"),View.Text(L.T("UpdateReadingHelp"),color:"Muted"),View.Text(L.T("ResumeReadingHelp"),color:"Muted"))};
@@ -138,6 +139,7 @@ public sealed partial class ShellWindow {
             chatStep = 3; readingDirectory = exportReport = null; SetCapturedKey(null); RenderChatStage();
         })); chatFooter.Children.Add(Button("GoBack", () => { chatStep = 1; RenderChatStage(); }));
     }
+    private ComboBox ChatWorkerSelector(){var choice=new ComboBox{ItemsSource=Enumerable.Range(1,8).ToArray(),SelectedItem=Math.Clamp(preferences.ChatParallelism,1,8),Width=72,HorizontalAlignment=HorizontalAlignment.Left,ToolTip=L.T("ChatWorkersHelp")};choice.SelectionChanged+=(_,_)=>{if(choice.SelectedItem is int count)preferences=preferences with{ChatParallelism=count};};return choice;}
     private void UpdateExportEnabled(bool encrypted) {
         chatNext.IsEnabled = !encrypted || capturedKey != null || (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password));
         if (chatResume != null) chatResume.IsEnabled = chatNext.IsEnabled;
