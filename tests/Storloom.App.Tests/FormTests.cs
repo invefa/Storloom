@@ -732,6 +732,15 @@ public sealed class FormTests {
             Query("document.querySelector('#filter-toggle').click();document.querySelector('#message-search').value='absent';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();document.querySelector('#stop-search').click();true");
             Assert.Equal("false",Query("document.querySelector('#find-page').disabled"));Assert.Contains("stopped",Query("document.querySelector('#filter-status').textContent"));
             Query("document.querySelector('#reset-filter').click();true");Until("document.querySelectorAll('.message').length","201");
+            Query("document.querySelector('#search-scope').value='conversation';document.querySelector('#search-scope').dispatchEvent(new Event('change'));document.querySelector('#page-size').value='100';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","100");
+            Assert.Equal("\"1 / 3\"",Query("document.querySelector('#page').textContent"));
+            Query("document.querySelector('#next').click();true");Until("document.querySelector('#page').textContent","\"2 / 3\"");
+            Query("document.querySelector('#find-previous').click();true");Until("document.querySelector('#page').textContent","\"1 / 3\"");
+            Query("document.querySelector('#minimap-toggle').click();true");Until("document.querySelector('#minimap-canvas').width>0","true");
+            Query("document.querySelector('#minimap-collapse').click();true");Assert.Equal("true",Query("document.querySelector('#minimap').classList.contains('collapsed')&&document.querySelector('#minimap-canvas').width>0"));
+            Query("document.querySelector('#minimap-close').click();true");Assert.Equal("true",Query("document.querySelector('#minimap').hidden&&document.querySelector('#minimap-canvas').width===0"));
+            Query("document.querySelector('#chat-title').click();true");Assert.Equal("true",Query("document.querySelector('#conversation-details').open"));Assert.Contains("Archived senders",Query("document.querySelector('#conversation-details-body').textContent"));
+            Query("document.querySelector('#conversation-details-close').click();document.querySelector('#page-size').value='300';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","201");
             using var screenshot=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,screenshot)));
             DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
             File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-compact-search.png"),screenshot.ToArray());
@@ -978,7 +987,14 @@ public sealed class FormTests {
                 Assert.Equal(((SolidColorBrush)Application.Current.Resources["Ink"]).Color,((SolidColorBrush)secret.Foreground).Color);
                 Capture(window,"manual-key-"+theme+"-"+focus);
             }
-            Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("QQDatabaseKeyHelp"));
+            Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("DatabaseKeyEntryHelp"));
+            foreach(double width in new[]{760d,1100d}){window.Width=width;Pump();window.UpdateLayout();
+                var viewport=Descendants(window).OfType<ScrollViewer>().First(v=>v.Content is StackPanel panel&&Descendants(panel).OfType<PasswordBox>().Any());
+                var bounds=viewport.TransformToAncestor(window).TransformBounds(new Rect(0,0,viewport.ActualWidth,viewport.ActualHeight));
+                foreach(var control in Descendants(viewport).OfType<Control>().Where(c=>c.IsVisible&&c is TextBox or PasswordBox or Button)){
+                    var box=control.TransformToAncestor(window).TransformBounds(new Rect(0,0,control.ActualWidth,control.ActualHeight));Assert.True(box.Right<=bounds.Right+1);
+                }
+            }
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
 
@@ -1096,9 +1112,9 @@ public sealed class FormTests {
             panel.AddDiagnostic(new("candidate=must-never-appear"));panel.AddException(new InvalidOperationException("private-input-must-never-appear"));
             panel.ToggleExpanded();Assert.True(Descendants(panel).OfType<Button>().Single(b=>b.Name=="export_log").IsVisible);
             string path=Path.Combine(fixture,"session.log");panel.ExportLog(path);string text=File.ReadAllText(path);
-            Assert.Contains("Storloom ",text);Assert.Contains("first-fixture-entry",text);Assert.Contains("scannedBytes=123456",text);Assert.Contains("candidates=6",text);
+            Assert.Contains("Storloom ",text);Assert.Contains("first-fixture-entry",text);Assert.Contains(L.T("DebugBytes","120.6 KiB"),text);Assert.Contains(L.T("DebugCandidates",6),text);
             Assert.Contains("System.InvalidOperationException",text);Assert.DoesNotContain("must-never-appear",text);Assert.DoesNotContain("key.passive.exhausted",text);
-            panel.Start();panel.ExportLog(path);Assert.DoesNotContain("first-fixture-entry",File.ReadAllText(path));
+            panel.DebugToggle.IsChecked=false;panel.Start();panel.ExportLog(path);Assert.Contains("first-fixture-entry",File.ReadAllText(path));Assert.Contains(L.T("DebugDisabled"),File.ReadAllText(path));
             Capture(window,"diagnostic-log-"+locale);
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
@@ -1164,6 +1180,32 @@ public sealed class FormTests {
                 }
         }finally{window.Close();Directory.Delete(fixture,true);Theme.Apply(new AppPreferences{ReduceMotion=true});}
     });
+    [Fact]
+    public void MainWindowRemembersNarrowSizeWithoutChangingExistingSettings() => OnUi(()=>{
+        string fixture=Fixture();var first=new ShellWindow(fixture){ShowInTaskbar=false};
+        first.Show();first.Width=740;first.Height=560;Pump();first.Close();
+        var second=new ShellWindow(fixture){ShowInTaskbar=false};
+        try{second.Show();Pump();Assert.Equal(740,second.Width);Assert.Equal(560,second.Height);Assert.True(second.MinWidth<=640);}
+        finally{second.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]
+    public void ProtectionPasswordDialogFitsContentAndAcceptsEightCharacters() => OnUi(()=>{
+        L.SetLanguage("en");Theme.Apply(new AppPreferences{ReduceMotion=true});
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.VaultPasswordWindow")!;
+        var window=(Window)Activator.CreateInstance(type,new object?[]{true,true,null})!;window.ShowInTaskbar=false;
+        window.Loaded+=(_,_)=>window.Dispatcher.BeginInvoke(new Action(()=>{
+            var passwords=Descendants(window).OfType<PasswordBox>().ToArray();Assert.Equal(2,passwords.Length);
+            foreach(var password in passwords)password.Password="eight123";
+            var accept=Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("VaultEncrypt")));
+            var position=accept.TransformToAncestor(window).Transform(new Point(0,accept.ActualHeight));
+            Assert.True(window.ActualHeight-position.Y<60,"Unexpected unused bottom space");
+            accept.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }));
+        Assert.True(window.ShowDialog());
+        Assert.Equal("eight123",type.GetProperty("Password",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window));
+        type.GetMethod("ClearSecret",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);
+    });
+
     [Fact]
     public void ProtectedReaderDecryptsContentInPrivateProfileWithoutPlaintextExtraction() => OnUi(()=>{
         string fixture=Fixture(),source=Path.Combine(fixture,"account"),reading=Path.Combine(fixture,"reading");Directory.CreateDirectory(source);

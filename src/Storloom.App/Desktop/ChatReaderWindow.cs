@@ -17,6 +17,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
     internal string? LastClipboardError { get; private set; }
     internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
     public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false) : base(L.T("ChatArchive"), 1200, 820) {
+        WindowGeometry.Attach(this,dataRoot,"reader",480,360);
         Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); };
         Loaded += async (_, _) => {
             try {

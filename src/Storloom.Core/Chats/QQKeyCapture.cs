@@ -41,15 +41,15 @@ public static class QQKeyCapture {
         if (location.Platform != ChatPlatform.QQ) throw new InvalidOperationException("QQ capture requires a QQ archive.");
         if (CleanupEngine.RunningProcesses(new CleanupRule { Processes = ["QQ"] }).Length > 0) throw new IOException(L.T("ClientMustClose", "QQ"));
         var clock = Stopwatch.StartNew();
-        diagnostics?.Report(new("qq.capture.inspect"));
+        if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("qq.capture.inspect"));
         var target = Inspect(executable);
-        diagnostics?.Report(new("qq.capture.signature-and-function-verified", ElapsedSeconds: clock.Elapsed.TotalSeconds));
+        if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("qq.capture.signature-and-function-verified", ElapsedSeconds: clock.Elapsed.TotalSeconds));
         using var input = new FileStream(location.Database, FileMode.Open, FileAccess.Read, FileShare.Read);
         byte[] prefix = new byte[Math.Min(input.Length, 5120)]; input.ReadExactly(prefix);
         cancellation.ThrowIfCancellationRequested();
         var extractor = new KeyExtractor(target.Executable, target.FunctionRva, target.Wrapper, target.CodePrefix,
             candidate => ChatCipher.Detect(prefix, candidate, ChatPlatform.QQ) != null,
-            (stage, count) => diagnostics?.Report(new(stage, Processes: 1, Candidates: count, ElapsedSeconds: clock.Elapsed.TotalSeconds)), 90);
+            (stage, count) => {if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new(stage, Processes: 1, Candidates: count, ElapsedSeconds: clock.Elapsed.TotalSeconds));}, 90);
         string found = extractor.ExtractKey();
         byte[] key = string.IsNullOrEmpty(found) ? [] : Encoding.ASCII.GetBytes(found);
         if (cancellation.IsCancellationRequested) { CryptographicOperations.ZeroMemory(key); cancellation.ThrowIfCancellationRequested(); }

@@ -1,6 +1,6 @@
 # Password-protected reading copies
 
-In Chat Archives, choose **Encrypt / resume reader encryption**, select a completed reading-copy directory, and set a separate password of at least ten characters. The confirmation identifies the directory and explains plaintext removal. No password or encryption key is saved. There is no password recovery.
+In Chat Archives, choose **Encrypt / resume reader encryption**, select a completed reading-copy directory, and set a separate password of at least eight characters. The confirmation identifies the directory and explains plaintext removal. No password or encryption key is saved. There is no password recovery.
 
 Choose whether to include media. With media disabled, message pages, source JSONL, names, indexes and reports are protected first; images, voices, videos and files remain readable on disk. The title and completion message distinguish partial protection from completion. Original raw backups and other copies are separate and remain unchanged.
 
@@ -19,3 +19,5 @@ Important limits:
 - This is a new file format with automated corruption/recovery tests; it has not undergone an independent security audit. A damaged or lost vault, or a lost password, can prevent recovery. Keep an appropriate independent backup.
 
 Pause / Resume is also available during raw backups, incremental backups and exports. It is cooperative: workers finish their current bounded operation before waiting. Cancellation remains available while paused. Pausing a backup retains its running process; it does not add restart-resume support to a raw-backup transfer. Interrupted reading exports retain their existing export checkpoint workflow.
+
+Protection may also be selected in export settings. Fine-grained scope combines conversations, message types, content, sender or message IDs. Whole matching pages plus shared originals are recommended for speed and reduced quote-leak risk. Strict mode publishes sanitized public pages with selected messages removed and quote previews withheld, while unlock serves the full encrypted originals. It takes longer initially. Shared source records, indexes, reports and rollback copies are always protected; selected shared media affects every reference. A scoped operation does not protect the whole archive; unselected data may remain plaintext. Resume uses the saved scope.

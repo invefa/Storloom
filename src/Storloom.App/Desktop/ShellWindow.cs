@@ -13,6 +13,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private CleanupPlan? cleanupPlan;
     private CancellationTokenSource? operation;
     private OperationPause? operationPause;
+    private volatile bool debugEnabled;
     private bool operationIncomplete;
     private byte[]? capturedKey;
     private readonly Dictionary<string, Grid> pages = [];
@@ -34,13 +35,14 @@ public sealed partial class ShellWindow : ThemeWindow {
     private int sidebarTransition;
     private string currentPage = "cleanup";
     public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
-        MinWidth = 1040; MinHeight = 640; WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        MinWidth = 640; MinHeight = 480; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         dataRoot = Path.GetFullPath(dataDirectory ?? Path.Combine(AppContext.BaseDirectory, "data"));
         string prefs = Path.Combine(dataRoot, "preferences.json");
         if (File.Exists(prefs)) preferences = JsonFiles.Read<AppPreferences>(prefs);
         string backups = Path.Combine(dataRoot, "chat-backups.json");
         if (File.Exists(backups)) foreach (var pair in JsonFiles.Read<Dictionary<string, string>>(backups)) verifiedBackups[pair.Key] = pair.Value;
         L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
+        WindowGeometry.Attach(this,dataRoot,"main",640,480);
         Closing += HandleClosing; Closed += (_, _) => tray?.Dispose();
         if (preferences.CloseToTray) EnsureTray();
         InputBindings.Add(new KeyBinding(new ActionCommand(() => operationView.ToggleFollowing()), new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
@@ -102,15 +104,16 @@ public sealed partial class ShellWindow : ThemeWindow {
         }
         root.LayoutUpdated += (_, _) => ClampLog();
         operationView = new OperationPanel { Visibility = Visibility.Collapsed }; View.Add(root, operationView, 3);
-        operationView.DebugToggle.IsChecked = preferences.DebugLogging;
-        operationView.DebugLoggingChanged += enabled => Guard(() => { preferences = preferences with { DebugLogging = enabled }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences); });
+        debugEnabled=preferences.DebugLogging;operationView.DebugToggle.IsChecked = preferences.DebugLogging;
+        operationView.DebugLoggingChanged += enabled => Guard(() => { debugEnabled=enabled;preferences = preferences with { DebugLogging = enabled }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences); });
         operationView.PauseRequested += () => {
             if(operationPause==null)return;
-            if(operationPause.IsPaused){operationPause.Resume();operationView.PauseButton.Content=L.T("PauseOperation");}
-            else{operationPause.Pause();operationView.PauseButton.Content=L.T("ResumeOperation");}
+            if(operationPause.IsPaused){operationPause.Resume();operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14");operationView.PauseButton.ToolTip=L.T("PauseOperation");}
+            else{operationPause.Pause();operationView.PauseButton.Content=View.Icon("M 4,2 L 13,8 4,14 Z");operationView.PauseButton.ToolTip=L.T("ResumeOperation");}
             operationView.SetPaused(operationPause.IsPaused);
             operationView.AddLog(L.T(operationPause.IsPaused?"OperationPauseHelp":"OperationResumed"));
         };
+        operationView.CancelRequested += ()=>operation?.Cancel();
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
             double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 56;
@@ -221,13 +224,13 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 56);
-        operationView.Start(); operationView.PauseButton.Content=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
-        status.Visibility = Visibility.Collapsed; statusFooter.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
+        operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14");operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;
+        status.Visibility = Visibility.Collapsed; statusFooter.Visibility=Visibility.Collapsed;
         status.Text = L.T("OperationStarting"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete; }
-        catch (OperationCanceledException) { status.Text = L.T("Cancelled"); operationView.AddDiagnostic(new("operation.cancelled")); }
+        catch (OperationCanceledException) { status.Text = L.T("Cancelled"); if(debugEnabled)operationView.AddDiagnostic(new("operation.cancelled")); }
         catch (Exception ex) { Error(ex); }
-        finally { operationPause=null;operationView.PauseButton.Visibility=Visibility.Collapsed; operation = null; navigation.IsEnabled = menu.IsEnabled = true;
+        finally { operationPause=null;operationView.PauseButton.Visibility=operationView.CancelButton.Visibility=Visibility.Collapsed; operation = null; navigation.IsEnabled = menu.IsEnabled = true;
             foreach (var control in disabled) control.IsEnabled = true;
             if (operationButton != null) { operationButton.Content = previousContent; operationButton.IsEnabled = previousEnabled; }
             cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
@@ -247,8 +250,10 @@ public sealed partial class ShellWindow : ThemeWindow {
     private void ShowPreferences(bool ruleSets = false) {
         var dialog = new PreferencesWindow(preferences, rulesDirectory, dataRoot, engine.Settings, ruleSets) { Owner = this };
         if (dialog.ShowDialog() != true) return;
+        var history=operationView;
         preferences = dialog.Result; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
         SetCapturedKey(null); L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
+        operationView.RestoreHistory(history);operationView.AddLog(L.T(preferences.DebugLogging?"DebugEnabled":"DebugDisabled"));
         if (preferences.CloseToTray) EnsureTray(); tray?.Refresh();
     }
     private void ShowHelp(int? topic = null, string? document = null) => new HelpWindow(topic ?? (currentPage == "chats" ? 2 : currentPage == "overview" ? 5 : 0), document) { Owner = this }.ShowDialog();

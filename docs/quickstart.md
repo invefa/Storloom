@@ -18,15 +18,13 @@ Enable Application cleanup commands. Supported recipes are NuGet HTTP cache, npm
 
 Scan previews the executable, fixed arguments, and executable SHA-256 without cleaning. Review the command before confirming. Native commands apply to the tool's whole configured cache, so per-file exclusions and age/size filters do not apply. Choose either a file rule or a native rule for the same cache; running both can make the later operation find no files. uv prune may also remove shared project environments, which can need rebuilding. There is no arbitrary shell/script execution. Timeout defaults to 300 seconds (`commandTimeoutSeconds`, 1..3600). Cancellation/timeout ends only the child process tree started for that command; tool changes already completed are not rolled back. Output and exit status remain in private records.
 
-## Archive QQ or WeChat
+## Chat backup and export
 
-1. Open Chats. Click Find accounts or Choose account folder. Select the complete account folder containing databases and media, select its row, then Next.
-2. Set Backup location. Quit QQ/WeChat and click Back up original data. This copies the complete folder and verifies it; no decryption key is needed. Originals remain.
-3. The reading-copy page appears after verification. For encrypted data, reopen the client and log in to the same account, then Read key > Read from logged-in client. It authenticates candidates against the archived database. The original client can stay open during offline export. Plain SQLite needs no key.
-4. If QQ read-only lookup fails, use Start QQ login capture. Exit daily QQ first, select the installed Tencent-signed QQ.exe, and log in in the newly started instance. A matching signed wrapper.node and supported key-function layout are required; the captured key must authenticate the selected backup. For a supported WeChat 4.x client, Start WeChat login capture is the separate alternative. Close daily WeChat first and select installed Weixin.exe, then log in to the new child. The isolated worker/client exits at capture/cancellation/timeout. Client signatures and code fingerprints are checked.
-5. Click Export reading copy. Database keys are checked first. Leave the full backup recheck enabled for integrity assurance, or uncheck it to save time at the risk of missing later file changes; the export report records the choice. Use Open reading copy and Open export report. Keep the raw backup, which contains media; HTML does not guarantee full message/media playback. Inspect incomplete results rather than treating them as complete backups.
+Select a complete account directory in Chats. Close the source client and create a verified raw backup. Existing verified backups can be reopened without copying the account again.
 
-Keep raw backup only finishes without decryption. Use previous verified backup lets you continue after restarting Storloom. File > Open chat backup opens the sidecar manifest for an archive even when its original source is no longer present. These workflows do not delete chat originals or rewrite client paths. Export keys stay in memory; process crashes can leave temporary decrypted `.work-*` files in the export directory. Account layouts and client versions can change; see [compatibility](chat-exporters.md).
+Encrypted backups require a matching database key. Read one from a logged-in client, explicitly start the separate login-capture flow, enter a retained key or load a key file. Follow the client-close and login instructions. The verified-key menu supports explicit copy/export; keys are never saved automatically. Store plaintext key files separately and securely.
+
+Export settings can enable password protection after finalization; unfinished exports remain plaintext. Resume continues the same immutable backup. Update reading copy merges a newer backup. Keep raw data and manifests. See [chat backups](chat-exporters.md) and [password protection](chat-encryption.md).
 
 ## Debugging and exporting logs
 
@@ -44,7 +42,7 @@ The operation area shows phases, throughput, estimated remaining time when a tot
 
 ## Conversation reader
 
-Use Open reading archive after export, or File > Open reading archive to select messages.html. Search conversations on the left, read sender-labelled bubbles on the right, and move through chronological 300-message pages. Message search covers the current page. Move the entire reading directory, including its JS/CSS, conversations, and assets. The embedded viewer needs Microsoft Edge WebView2 Runtime; a browser can open the same HTML offline.
+Use Open reading archive after export, or File > Open reading archive to select messages.html. Search conversations on the left, read sender-labelled bubbles on the right, and move through chronological configurable message pages. Message search covers the current page. Move the entire reading directory, including its JS/CSS, conversations, and assets. The embedded viewer needs Microsoft Edge WebView2 Runtime; a browser can open the same HTML offline.
 
 Contact names prefer remarks, nicknames, aliases, then IDs when supported metadata is available. Recognized local images, legacy XOR image containers, and browser-supported local media can be shown. New encrypted images requiring a separate key, unsupported resource indexes, SILK voice, and unsupported contact tables remain visibly unavailable. Reading copies do not replace raw backups.
 
@@ -64,7 +62,7 @@ The sidebar menu icon switches between labels and icons; each icon has a tooltip
 
 While an operation runs, its initiating button becomes Cancel in the same location. The log can be collapsed with its chevron and resized using the thin divider. Log messages generated by Storloom use English regardless of the interface language; resource names, paths and external tool output retain their original text.
 
-Find accounts searches common QQ/WeChat locations and registered WeChat/Weixin storage paths. A selected or known root containing a directory link is resolved to its physical local location; nested links remain excluded. If none are found, the page says so. Use Choose account folder for another location, selecting the complete account directory rather than an individual database or media subfolder.
+Find accounts searches common chat clients locations and registered chat clients storage paths. A selected or known root containing a directory link is resolved to its physical local location; nested links remain excluded. If none are found, the page says so. Use Choose account folder for another location, selecting the complete account directory rather than an individual database or media subfolder.
 
 Right-click a table header to fit that column, fit every resizable column, or restore the original widths. Hover a table cell to read its full value. Double-click a row in a checklist to toggle its checkbox; directory rows in storage analysis still open that directory. Icon actions have tooltips and no visible border.
 

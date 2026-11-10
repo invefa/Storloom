@@ -102,3 +102,13 @@ nav button.has-avatar{display:grid;grid-template-columns:28px minmax(0,1fr);colu
 .message-tools{justify-content:flex-start;gap:18px}.message-tools>.source{flex:0 1 auto}.message-tools:has(.source[open])>.source{flex:1 1 100%}
 .identity-portrait{display:block;width:64px;height:64px;object-fit:cover;border-radius:50%;cursor:zoom-in;margin:8px 0}
 .identity-version img{cursor:zoom-in}.avatar[data-profile]{cursor:pointer}.identity-panel{max-width:min(420px,75vw)}
+
+#chat-title[role=button]{cursor:pointer}#chat-title[role=button]:hover{text-decoration:underline}
+#conversation-details{width:min(540px,92vw);max-height:80vh;padding:0;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px}
+#conversation-details header{padding:10px 16px;border-bottom:1px solid var(--line)}#conversation-details-body{padding:16px;overflow:auto;max-height:65vh}.conversation-facts{display:grid;grid-template-columns:auto 1fr;gap:5px 15px}.conversation-facts dd{margin:0;overflow-wrap:anywhere}.conversation-members{display:flex;flex-direction:column;gap:8px;margin-top:10px}.conversation-members .identity-panel{position:relative;top:auto;left:auto;right:auto;box-shadow:none;max-height:none}.conversation-members>.identity-details{display:block}
+.reaction-badge{display:inline-flex;align-items:center;gap:3px;border:0;border-radius:4px;padding:2px 6px;background:var(--selected);min-height:23px}.reaction-badge .inline-face{width:20px;height:20px;object-fit:contain;vertical-align:middle}.reaction-badge.own{box-shadow:inset 0 0 0 1px var(--accent)}
+#minimap{position:absolute;right:0;top:46px;bottom:73px;width:82px;background:var(--sidebar);z-index:5;border-left:1px solid var(--line)}#minimap[hidden]{display:none}#minimap.collapsed{width:25px}#minimap.collapsed canvas,#minimap.collapsed #minimap-close{display:none}.minimap-actions{display:flex;gap:2px;justify-content:center;height:30px}.minimap-actions button{border:0;background:transparent;min-width:0;padding:2px 5px}#minimap-canvas{display:block;width:72px;touch-action:none;cursor:crosshair}.has-minimap #messages{margin-right:82px}
+.reading-controls select{width:66px}.reading-controls #page-size-label{font-size:11px}
+@media(max-width:640px){.header-actions #archive-search{max-width:72px;overflow:hidden;text-overflow:ellipsis}.conversation-heading h1{max-width:100%}.page-footer .pagination{flex-wrap:wrap}.filter-actions{flex-wrap:wrap}#minimap{bottom:110px}}
+
+.page-footer .reading-controls{min-width:0;max-width:100%;justify-content:flex-end}.page-footer .reading-controls .check-field{white-space:normal;max-width:100%}.page-footer .pagination{max-width:100%;flex-wrap:wrap}

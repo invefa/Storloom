@@ -71,9 +71,9 @@ public static class PassiveKeyReader {
         var scans = new List<MemoryScan>();
         long scannedBytes = 0; int regionCount = 0, candidateCount = 0; double lastReport = -1;
         void Report(string stage, bool force = false) {
-            if (diagnostics == null || !force && clock.Elapsed.TotalSeconds - lastReport < 1) return;
+            if (!ChatDiagnostic.Enabled(diagnostics) || !force && clock.Elapsed.TotalSeconds - lastReport < 1) return;
             lastReport = clock.Elapsed.TotalSeconds;
-            diagnostics.Report(new(stage, scannedBytes, scans.Count, regionCount, candidateCount, lastReport));
+            diagnostics!.Report(new(stage, scannedBytes, scans.Count, regionCount, candidateCount, lastReport));
         }
         Report("key.passive.start", true);
         try {

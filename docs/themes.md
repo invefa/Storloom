@@ -2,7 +2,7 @@
 
 Storloom's desktop frontend uses WPF + WPF UI. Theme resources cover the application title bar, navigation, controls, menus, dialogs, text selection, and scrollbars. Windows-owned folder/file pickers, UAC, and OS shell surfaces follow Windows settings.
 
-The built-in Light theme is grayscale. Dark (OneDark) uses a dark blue-gray palette. Open Tools > Preferences to select a theme, reduce animation, or choose an optional private JSON theme file. The path belongs in local preferences, not public rule files. Clear it to return to the built-in palette. Never load external XAML or executable code as a theme.
+The built-in Light theme is grayscale. Dark is grayscale; OneDark uses a dark blue-gray palette. Open Tools > Preferences to select a theme, reduce animation, or choose an optional private JSON theme file. The path belongs in local preferences, not public rule files. Clear it to return to the built-in palette. Never load external XAML or executable code as a theme.
 
 A theme file overrides any subset of these colors with six-digit `#RRGGBB` strings:
 
@@ -36,7 +36,7 @@ Sidebar transitions keep icon positions fixed. The log divider is constrained to
 
 Confirmation and information notices use compact, non-resizable windows sized to their content, with a bounded scrolling message area for lengthy details and actions at the bottom right. Chat backup and result forms label account, raw-backup and reading-copy paths on the left with consistent row spacing. Custom scrollbar tracks and thumbs share the same minimum-size metrics so long documents do not clip the thumb at either end.
 
-Built-in palettes separate accent fills from accent-colored text and control outlines. Text pairs are checked at a contrast ratio of at least 4.5, with input outlines at least 3 against their surfaces. Primary-button press feedback moves the background away from its foreground color. Reader checks cover Default, WeChat and QQ in light/dark modes, including secondary text in sent-message bubbles and placeholders on their own backgrounds. Custom overrides remain user-defined; the built-in contrast checks do not certify arbitrary custom palettes.
+Built-in palettes separate accent fills from accent-colored text and control outlines. Text pairs are checked at a contrast ratio of at least 4.5, with input outlines at least 3 against their surfaces. Primary-button press feedback moves the background away from its foreground color. Reader checks cover every built-in layout in light/dark modes, including secondary text in sent-message bubbles and placeholders on their own backgrounds. Custom overrides remain user-defined; the built-in contrast checks do not certify arbitrary custom palettes.
 
 
 Built-in themes are ordered Light, Dark (grayscale), OneDark. Filled primary buttons use their background contrast without an idle outline. A separate focus ring appears for keyboard navigation. Existing OneDark preferences retain their meaning.

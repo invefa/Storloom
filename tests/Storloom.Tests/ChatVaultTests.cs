@@ -44,7 +44,7 @@ public sealed class ChatVaultTests : IDisposable {
     [Fact]
     public void CorruptedCiphertextFailsAuthenticationAndModifiedSourcesAreRetained(){
         Add("message.txt",512);using(var vault=ChatVault.Create(root,Password)){vault.Encrypt();}
-        string cipher=Directory.GetFiles(Path.Combine(root,".vault"),"*.enc").Single(p=>new FileInfo(p).Length==52+512+28);
+        string cipher=Directory.GetFiles(Path.Combine(root,".vault"),"*.enc").Single(p=>new FileInfo(p).Length==52+512+28&&File.ReadAllBytes(p).AsSpan(0,8).SequenceEqual("SLVAULT1"u8));
         using(var edit=new FileStream(cipher,FileMode.Open,FileAccess.ReadWrite)){edit.Position=65;int value=edit.ReadByte();edit.Position=65;edit.WriteByte((byte)(value^1));}
         using(var vault=ChatVault.Open(root,Password)){Assert.ThrowsAny<CryptographicException>(()=>Read(vault.OpenRead("message.txt")));}
     }

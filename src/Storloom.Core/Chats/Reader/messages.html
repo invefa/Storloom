@@ -11,10 +11,10 @@
 <main>
 <header class="chat-header">
 <button id="sidebar-toggle" type="button">☰</button><div class="conversation-heading"><h1 id="chat-title"></h1><small id="chat-meta"></small></div>
-<div class="header-actions"><button id="back-results" hidden></button><button id="filter-toggle" type="button" aria-controls="filter-panel" aria-expanded="false"><span id="filter-label"></span></button></div>
+<div class="header-actions"><button id="back-results" hidden></button><button id="archive-search"></button><button id="minimap-toggle"></button><button id="filter-toggle" type="button" aria-controls="filter-panel" aria-expanded="false"><span id="filter-label"></span></button></div>
 </header>
 <details id="filter-panel"><summary class="filter-summary"></summary>
-<div class="filter-toolbar"><label id="scope-label" for="search-scope"></label><select id="search-scope"><option value="conversation"></option><option value="archive"></option></select><div class="filter-actions"><button id="stop-search" hidden></button><button id="reset-filter"></button><button id="find-page"></button></div></div>
+<div class="filter-toolbar"><label id="scope-label" for="search-scope"></label><select id="search-scope"><option value="conversation"></option><option value="archive"></option></select><div class="filter-actions"><button id="stop-search" hidden></button><button id="reset-filter"></button><button id="find-previous"></button><button id="find-page"></button></div></div>
 <div class="filters">
 <div class="filter-field content-search"><label id="content-label" for="message-search"></label><input id="message-search" type="search"></div>
 <div class="filter-field"><label id="sender-label" for="sender-filter"></label><input id="sender-filter" type="search"></div>
@@ -25,8 +25,10 @@
 </div><div class="filter-hint"><span id="search-scope-note"></span><span id="filter-status" role="status"></span></div>
 </details>
 <div id="notice" role="status"></div><section id="messages" aria-live="polite"></section>
-<footer class="page-footer"><div class="pagination"><button id="first"></button><button id="previous"></button><span id="page"></span><button id="next"></button><button id="last"></button><span class="page-jump"><label id="jump-label" for="page-input"></label><input id="page-input" type="number" min="1" step="1"><button id="page-go"></button></span></div><div class="reading-controls"><button id="page-bottom"></button><label class="check-field"><input id="auto-bottom" type="checkbox"><span id="auto-bottom-label"></span></label><label class="check-field"><input id="auto-last" type="checkbox"><span id="auto-last-label"></span></label></div></footer>
+<footer class="page-footer"><div class="pagination"><button id="first"></button><button id="previous"></button><span id="page"></span><button id="next"></button><button id="last"></button><span class="page-jump"><label id="jump-label" for="page-input"></label><input id="page-input" type="number" min="1" step="1"><button id="page-go"></button></span></div><div class="reading-controls"><label id="page-size-label" for="page-size"></label><select id="page-size"><option>100</option><option>300</option><option>500</option><option>1000</option><option>2000</option></select><button id="page-top"></button><button id="page-bottom"></button><label class="check-field"><input id="auto-bottom" type="checkbox"><span id="auto-bottom-label"></span></label><label class="check-field"><input id="auto-last" type="checkbox"><span id="auto-last-label"></span></label></div></footer>
+<div id="minimap" hidden><div class="minimap-actions"><button id="minimap-collapse">‹</button><button id="minimap-close">×</button></div><canvas id="minimap-canvas" tabindex="0"></canvas></div>
 </main>
+<dialog id="conversation-details"><header><strong id="conversation-details-title"></strong><button id="conversation-details-close">×</button></header><div id="conversation-details-body"></div></dialog>
 <dialog id="image-preview"><header id="image-window-header"><span id="image-title"></span><div class="image-navigation"><button id="image-previous"></button><button id="image-next"></button></div><button id="image-close"></button></header><div id="image-stage"><img id="preview-image" alt=""></div><footer><button id="image-locate"></button><button id="rotate-left">↶</button><button id="rotate-right">↷</button><button id="image-copy"></button><button id="zoom-out">-</button><button id="zoom-fit"></button><button id="zoom-original">100%</button><button id="zoom-in">+</button><span id="zoom-value"></span><button id="image-save"></button></footer></dialog>
 <div id="reader-menu" role="menu" hidden></div><div id="action-status" role="status" aria-live="polite"></div>
 </body></html>

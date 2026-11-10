@@ -57,7 +57,7 @@ public static class WeChatKeyCapture {
             throw new IOException("Close WeChat before starting its separate key-capture instance.");
         executable = PathPolicy.Normalize(executable);
         var clock = Stopwatch.StartNew();
-        diagnostics?.Report(new("wechat.capture.inspect"));
+        if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("wechat.capture.inspect"));
         if (!Path.GetFileName(executable).Equals("Weixin.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Select the installed Weixin.exe for a supported WeChat 4.x client.");
         ValidateTencentSignature(executable);
@@ -72,13 +72,13 @@ public static class WeChatKeyCapture {
         byte[] image = File.ReadAllBytes(library);
         ulong[] rvas = Locator.FindKeySetFunctionRvas(image, _ => { });
         if (rvas.Length == 0) throw new InvalidDataException("Unsupported client signature.");
-        diagnostics?.Report(new("wechat.capture.signature-and-function-verified", ElapsedSeconds: clock.Elapsed.TotalSeconds));
+        if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("wechat.capture.signature-and-function-verified", ElapsedSeconds: clock.Elapsed.TotalSeconds));
         byte[] firstPage = new byte[ChatCipher.PageSize];
         using (var input = new FileStream(location.Database, FileMode.Open, FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete)) input.ReadExactly(firstPage);
         cancellation.ThrowIfCancellationRequested();
         var extractor = new KeyExtractor(executable, rvas, firstPage,
-            marker => { if (marker == "CHATLOG_KEY_RECOVERY_CLIENT_OPEN_V1") diagnostics?.Report(new("wechat.capture.started", Processes: 1, ElapsedSeconds: clock.Elapsed.TotalSeconds)); }, _ => { }, 180);
+            marker => { if (marker == "CHATLOG_KEY_RECOVERY_CLIENT_OPEN_V1" && ChatDiagnostic.Enabled(diagnostics)) diagnostics!.Report(new("wechat.capture.started", Processes: 1, ElapsedSeconds: clock.Elapsed.TotalSeconds)); }, _ => { }, 180);
         string found = extractor.ExtractKey();
         byte[] key = string.IsNullOrWhiteSpace(found) ? [] : Convert.FromHexString(found);
         if (cancellation.IsCancellationRequested) {
@@ -89,6 +89,6 @@ public static class WeChatKeyCapture {
             CryptographicOperations.ZeroMemory(key);
             throw new CryptographicException("The captured value did not authenticate the selected account database.");
         }
-        diagnostics?.Report(new("wechat.capture.verified", Processes: 1, ElapsedSeconds: clock.Elapsed.TotalSeconds)); return key;
+        if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("wechat.capture.verified", Processes: 1, ElapsedSeconds: clock.Elapsed.TotalSeconds)); return key;
     }
 }

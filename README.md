@@ -1,6 +1,6 @@
 # Storloom
 
-A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local QQ/WeChat archives. C# and WPF, English and Simplified Chinese.
+A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local chat clients archives. C# and WPF, English and Simplified Chinese.
 
 [简体中文](README.zh-CN.md) · [Getting started](docs/quickstart.md) · [Rule reference](docs/rules.md) · [AI rule guide](docs/ai-rules.md) · [Chat compatibility](docs/chat-exporters.md)
 
@@ -42,7 +42,7 @@ Unknown junctions/symlinks stay blocked. A relocated cache can be handled by pri
 
 Archive destinations must be new and non-overlapping. Selected files are copied and SHA-256 verified as a complete batch before any Move removes originals; each source/target pair is checked again before removal. Existing folders are not merged. File content, modification times, and empty directories (for full-folder backups) are preserved, not ACLs/alternate streams or a bootable system image. Interrupted partial directories and journals remain; automatic resume/merge is not implemented. Empty source directories remain after moves.
 
-Chat backup/export never removes originals, creates junctions, or rewrites client storage settings. Readable export does not replace the raw archive or guarantee all contact names/media playback/client versions. Inspect incomplete reports and test restore separately with an appropriate client version. Keys stay in memory; process crashes can leave decrypted `.work-*` files in the chosen export folder. The optional WeChat login capture runs in an isolated signed-client worker; see [compatibility](docs/chat-exporters.md).
+Chat backup/export never removes originals, creates junctions, or rewrites client storage settings. Readable export does not replace the raw archive or guarantee all contact names/media playback/client versions. Inspect incomplete reports and test restore separately with an appropriate client version. Keys are not automatically saved; process crashes can leave decrypted `.work-*` files in the chosen export folder. The optional chat client login capture runs in an isolated signed-client worker; see [compatibility](docs/chat-exporters.md).
 
 Paths must be canonical absolute drive paths. UNC is unsupported; mapped drives can be explicitly selected for analysis/transfers. No automatic elevation, scheduled cleanup, telemetry, or cloud AI is configured. Windows system SQLite provides read-only message queries.
 
@@ -62,13 +62,13 @@ The package script copies only public binaries, rules, documentation, and notice
 
 Tests cover identity/boundary guards, copy/move/archive verification, native-recipe tampering/output/cancellation/timeout using a separate test executable, synthetic encrypted chat/WAL data, a complete verified-backup GUI export, locale parity, and bilingual page/dialog rendering. Fixture tests do not certify every real client version, login capture, or restorability.
 
-MIT. See [third-party notices](THIRD-PARTY-NOTICES.md) for the adapted WeChat capture component and ZstdSharp. Exact .NET runtime license/notice files accompany self-contained packages.
+MIT. See [third-party notices](THIRD-PARTY-NOTICES.md) for the adapted chat client capture component and ZstdSharp. Exact .NET runtime license/notice files accompany self-contained packages.
 
 ## Appearance, progress, and reading archives
 
 Preferences offer Light and One Dark Pro themes and 1, 2, or 4 chat database workers. Prefer 1 on a hard drive and try bounded parallelism on an SSD. Operations show phase progress, throughput, estimated remaining time when a denominator is known, and a collapsible local log. The WPF frontend uses virtualized tables. Drag the log divider to resize it; manual scrolling or selecting text pauses following. Toggle Follow latest or press Ctrl+Shift+L to resume/pause. Color and panel transitions are brief; Preferences can reduce motion.
 
-Account sizes include databases, images, video, and attachments. Reading archives provide named conversations, chronological 300-message pages, search within the current page, and recognized local media. The embedded viewer needs Microsoft Edge WebView2 Runtime; the same messages.html works offline in a browser with its adjacent assets. Names fall back to IDs when contact metadata is unavailable. WeChat XOR, validated V1, and V2 JPEG/PNG/GIF/WebP images can be decoded when the required local configuration is available. Packed media references improve image/video matching. WxAM/HEVC images, missing local assets, SILK voice and unsupported schemas still have explicit placeholders; the raw backup remains authoritative.
+Account sizes include databases and media. Reading copies provide conversation navigation, configurable pages, conversation/archive search and recognized local media. Missing or unsupported resources remain explicit. The embedded viewer uses Microsoft Edge WebView2 Runtime; ordinary reading copies also support a local browser. See [message display](docs/message-display.md).
 
 Native cleanup rules can measure tool-discovered directories or explicit directory roots. Results show each deletion's processed logical bytes and each native command's before/after difference. Unknown or partial measurements are not reported as zero. See the rule reference for configuration.
 
@@ -76,10 +76,10 @@ Native cleanup rules can measure tool-discovered directories or explicit directo
 
 The main frontend uses WPF and WPF UI 4.3.0; WebView2 is only initialized for the offline conversation reader. The light theme uses grayscale, and One Dark Pro covers native controls, menus, dialogs, and the custom title bar. Preferences support a validated JSON color override file, reduced motion, and persisted sidebar/log dimensions. See [themes](docs/themes.md).
 
-New reading exports derive typed message parts for WeChat and NTQQ, retain mixed-segment order, and collapse all original payloads behind View original content. Quotes, payments, media, files, cards, locations, forwarding and system records have display cards or explicit placeholders. Unsupported message counts and missing/unsupported media are reported separately. This does not promise recovery of unavailable assets or compatibility with every client schema. See [message coverage and research](docs/message-display.md). Existing exports keep their existing reader files; re-export a verified raw backup to use the updated parser.
+New reading exports derive typed message parts for chat clients, retain mixed-segment order, and collapse all original payloads behind View original content. Quotes, payments, media, files, cards, locations, forwarding and system records have display cards or explicit placeholders. Unsupported message counts and missing/unsupported media are reported separately. This does not promise recovery of unavailable assets or compatibility with every client schema. See [message coverage and research](docs/message-display.md). Existing exports keep their existing reader files; re-export a verified raw backup to use the updated parser.
 
 The close button can hide the app to its notification icon when enabled in Preferences. Tasks continue while hidden; use the icon to restore the window or exit. Closing during a task asks for confirmation, and a confirmed exit waits for cancellation to finish.
 
-The reading toolbar offers Default, WeChat and QQ color schemes, each with light and dark variants. Scheme choice is remembered separately from brightness. Chat bubbles, quoted blocks and original-content bubbles use compact padding.
+The reading toolbar offers several compact chat layouts, each with light and dark variants. Layout choice is remembered separately from brightness.
 
 The desktop preview supplies the current reader interface for existing exports without changing their files. Re-export is needed for new parsing or to refresh standalone HTML.

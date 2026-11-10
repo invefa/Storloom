@@ -7,14 +7,15 @@ public sealed partial class ShellWindow {
         if(operation!=null)return;
         string directory=View.Folder(this);if(directory=="")return;
         bool creating=!ChatVault.Exists(directory);
-        var password=new VaultPasswordWindow(creating,true){Owner=this};if(password.ShowDialog()!=true||password.Password==null)return;
+        var password=new VaultPasswordWindow(creating,true,creating?directory:null){Owner=this};if(password.ShowDialog()!=true||password.Password==null)return;
         // This confirmation describes the concrete in-place mutation before any plaintext is removed.
-        if(!Confirm(L.T("VaultEncryptConfirm",directory)))return;
-        await RunPausable(async token=>{
-            using var vault=await Task.Run(()=>creating?ChatVault.Create(directory,password.Password.AsSpan(),token):ChatVault.Open(directory,password.Password.AsSpan()),token);
+        if(!Confirm(L.T("VaultEncryptConfirm",directory))){password.ClearSecret();return;}
+        try{await RunPausable(async token=>{
+            var progress=Progress();progress.Report(new("chat-encryption-open",0,0));
+            using var vault=await Task.Run(()=>creating?ChatVault.Create(directory,password.Password.AsSpan(),token,progress,password.Selection):ChatVault.Open(directory,password.Password.AsSpan()),token);
             password.ClearSecret();
-            var progress=Progress();var result=await Task.Run(()=>vault.Encrypt(password.IncludeMedia,password.Workers,progress,token),token);
-            status.Text=L.T(result.Complete?"VaultComplete":"VaultPartial",result.ProtectedFiles,result.TotalFiles);
-        });
+            var result=await Task.Run(()=>vault.Encrypt(password.IncludeMedia,password.Workers,progress,token),token);
+            status.Text=L.T(result.Complete?"VaultComplete":result.SelectionComplete?"VaultScopeComplete":"VaultPartial",result.ProtectedFiles,result.TotalFiles);
+        });}finally{password.ClearSecret();}
     }
 }

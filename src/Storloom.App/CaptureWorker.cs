@@ -5,7 +5,7 @@ using Storloom.Core.Chats;
 
 namespace Storloom.App;
 
-internal sealed record CaptureRequest(ChatLocation Location, string Executable);
+internal sealed record CaptureRequest(ChatLocation Location, string Executable, bool Debug=false);
 internal sealed record CaptureResponse(string? Key, string? Error, ChatDiagnostic? Diagnostic = null);
 
 // The inherited native debugger expects process exit to end its fresh debuggee tree.
@@ -15,7 +15,8 @@ internal static class CaptureWorker {
         try {
             var request = JsonSerializer.Deserialize<CaptureRequest>(Console.ReadLine() ?? "") ??
                 throw new InvalidDataException("Missing capture request.");
-            var diagnostics = new WorkerDiagnostics(value => Console.WriteLine(JsonSerializer.Serialize(new CaptureResponse(null, null, value))));
+            var diagnostics = new WorkerDiagnostics(request.Debug,value => Console.WriteLine(JsonSerializer.Serialize(new CaptureResponse(null, null, value))));
+            _=Task.Run(()=>{while(Console.ReadLine() is string command)diagnostics.Enabled=command=="debug:on";});
             byte[] key = request.Location.Platform == ChatPlatform.QQ ? QQKeyCapture.Capture(request.Location, request.Executable, diagnostics: diagnostics) : WeChatKeyCapture.Capture(request.Location, request.Executable, diagnostics: diagnostics);
             try { Console.WriteLine(JsonSerializer.Serialize(new CaptureResponse(Convert.ToHexString(key), null))); }
             finally { CryptographicOperations.ZeroMemory(key); }
@@ -31,16 +32,18 @@ internal static class CaptureWorker {
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         start.ArgumentList.Add("--capture-worker");
         using var process = Process.Start(start) ?? throw new IOException("Cannot start the capture worker.");
+        using var controls=new CancellationTokenSource();Task controlTask=Task.CompletedTask;
         try {
-            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new CaptureRequest(location, executable)));
-            process.StandardInput.Close();
+            bool initial=ChatDiagnostic.Enabled(diagnostics);
+            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new CaptureRequest(location, executable,initial)));
+            controlTask=Task.Run(async()=>{bool previous=initial;try{while(!controls.IsCancellationRequested){await Task.Delay(250,controls.Token);bool value=ChatDiagnostic.Enabled(diagnostics);if(value!=previous){await process.StandardInput.WriteLineAsync(value?"debug:on":"debug:off");previous=value;}}}catch(Exception ex)when(ex is OperationCanceledException or IOException or ObjectDisposedException){}});
             var errors = process.StandardError.ReadToEndAsync(cancellation);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromMinutes(4));
             CaptureResponse? response = null;
             while (await process.StandardOutput.ReadLineAsync(timeout.Token) is string line) {
                 var frame = JsonSerializer.Deserialize<CaptureResponse>(line) ?? throw new InvalidDataException("Invalid capture worker frame.");
-                if (frame.Diagnostic != null) { diagnostics?.Report(frame.Diagnostic); continue; }
+                if (frame.Diagnostic != null) { if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(frame.Diagnostic); continue; }
                 response = frame; break;
             }
             await process.WaitForExitAsync(timeout.Token);
@@ -50,9 +53,14 @@ internal static class CaptureWorker {
                 throw new InvalidOperationException(response.Error ?? "Capture did not authenticate a key.");
             return Convert.FromHexString(response.Key);
         } finally {
+            controls.Cancel();await controlTask;
             // Exiting the debugger worker also ends only the child clients it created.
             if (!process.HasExited) { process.Kill(); await process.WaitForExitAsync(); }
         }
     }
-    private sealed class WorkerDiagnostics(Action<ChatDiagnostic> report) : IProgress<ChatDiagnostic> { public void Report(ChatDiagnostic value) => report(value); }
+    private sealed class WorkerDiagnostics(bool enabled,Action<ChatDiagnostic> report) : IChatDiagnosticSwitch {
+        private volatile bool active=enabled;
+        public bool Enabled{get=>active;set=>active=value;}
+        public void Report(ChatDiagnostic value){if(active)report(value);}
+    }
 }

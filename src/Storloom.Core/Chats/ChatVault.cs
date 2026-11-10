@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace Storloom.Core.Chats;
 
-public sealed record ChatVaultProgress(int ProtectedFiles,int TotalFiles,long ProtectedBytes,long TotalBytes,bool Complete);
+public sealed record ChatVaultProgress(int ProtectedFiles,int TotalFiles,long ProtectedBytes,long TotalBytes,bool Complete){public bool SelectionComplete{get;init;}public int SelectedFiles{get;init;}}
 
 /// <summary>Password-protected, resumable encryption of a completed derived reading copy.</summary>
 public sealed class ChatVault : IDisposable {
@@ -13,49 +13,72 @@ public sealed class ChatVault : IDisposable {
     private const int Chunk=1024*1024, HeaderSize=52, Iterations=600000;
     private static readonly byte[] Magic="SLVAULT1"u8.ToArray();
     private sealed record Configuration(int Version,string Salt,int Iterations);
-    private sealed record Entry(string Path,string Id,FileStamp Stamp);
+    private sealed record Entry(string Path,string Id,FileStamp Stamp,bool Selected=true,string? PublicFile=null,FileStamp? PublicStamp=null);
     private sealed record Commit(string Id,string Sha256);
     private readonly string root,store;
     private readonly byte[] key;
-    private readonly Entry[] entries;
+    private Entry[] entries;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string,string> committed=new(StringComparer.Ordinal);
-    private readonly Dictionary<string,Entry> paths;
+    private Dictionary<string,Entry> paths;
     private readonly object gate=new();
     private bool disposed;
     public static bool Exists(string directory)=>File.Exists(Path.Combine(directory,Marker));
     private ChatVault(string directory,byte[] secret,Entry[] plan){root=directory;store=Path.Combine(root,".vault");key=secret;entries=plan;paths=entries.ToDictionary(e=>e.Path,StringComparer.Ordinal);}
-    public static ChatVault Create(string directory,ReadOnlySpan<char> password,CancellationToken cancellation=default) {
-        if(password.Length<10)throw new ArgumentException("Use a password of at least 10 characters.");
+    public static ChatVault Create(string directory,ReadOnlySpan<char> password,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null,ChatProtectionSelection? selection=null) {
+        if(password.Length<8)throw new ArgumentException("Use a password of at least 8 characters.");
         directory=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(directory);
         if(Exists(directory)||Directory.Exists(Path.Combine(directory,".vault")))throw new IOException("An encryption task already exists.");
         var report=JsonFiles.Read<ChatExportResult>(Path.Combine(directory,"export-report.json"));
         if(report.CanResume||File.Exists(Path.Combine(directory,".reading-update-pending.json")))throw new IOException("Finish the export or update before encrypting.");
         using var lease=Lease(directory);
-        var plan=new List<Entry>();
-        foreach(string file in Directory.EnumerateFiles(directory,"*",SearchOption.AllDirectories)) {
-            OperationPause.Check(cancellation);PathPolicy.AssertNoLinks(file);var stamp=NativeFile.ReadStamp(file);
+        var plan=new List<Entry>();var clock=System.Diagnostics.Stopwatch.StartNew();long plannedBytes=0;double lastReport=0;
+        progress?.Report(new("chat-encryption-plan",0,0));
+        foreach(string file in EnumeratePlainFiles(directory)) {
+            OperationPause.Check(cancellation);var stamp=NativeFile.ReadStamp(file);
             if(stamp.Links!=1)throw new IOException("Shared files cannot be encrypted in place.");
             string relative=Path.GetRelativePath(directory,file).Replace('\\','/');
             if(relative==".export.lock")continue;
             if(relative.Split('/').Any(p=>p.StartsWith(".work-",StringComparison.Ordinal)||p.StartsWith(".reading-update-",StringComparison.Ordinal)))throw new IOException("An unfinished task remains in this reading copy.");
-            plan.Add(new(relative,Guid.NewGuid().ToString("N"),stamp));
+            plan.Add(new(relative,Guid.NewGuid().ToString("N"),stamp));plannedBytes+=stamp.Bytes;
+            if(clock.Elapsed.TotalSeconds-lastReport>=.5){progress?.Report(new("chat-encryption-plan",plan.Count,plannedBytes));lastReport=clock.Elapsed.TotalSeconds;}
         }
+        progress?.Report(new("chat-encryption-derive",plan.Count,plannedBytes));
         byte[] salt=RandomNumberGenerator.GetBytes(32),secret=Rfc2898DeriveBytes.Pbkdf2(password,salt,Iterations,HashAlgorithmName.SHA256,32);
         var vault=new ChatVault(directory,secret,plan.ToArray());
         try {
+            progress?.Report(new("chat-encryption-save-plan",plan.Count,plannedBytes));
             Directory.CreateDirectory(vault.store);
+            if(selection!=null){
+                var selected=ChatProtectionPlanner.Build(directory,selection,progress,cancellation);
+                vault.entries=vault.entries.Select(entry=>{
+                    bool protect=entry.Path.StartsWith("assets/",StringComparison.Ordinal)?selected.Media.Contains(entry.Path):
+                        System.Text.RegularExpressions.Regex.IsMatch(entry.Path,"^conversations/[a-f0-9]{24}-[0-9]+\\.js$")?selected.Pages.Contains(entry.Path):true;
+                    string? publicFile=selected.PublicPages.GetValueOrDefault(entry.Path);
+                    return entry with{Selected=protect,PublicFile=publicFile,PublicStamp=publicFile==null?null:NativeFile.ReadStamp(Path.Combine(vault.store,publicFile))};
+                }).ToArray();vault.paths=vault.entries.ToDictionary(e=>e.Path,StringComparer.Ordinal);
+            }
             byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(vault.entries);
             if(bytes.Length>256*1024*1024)throw new InvalidDataException("Too many files for this vault format.");
             try{WriteEnvelope(Path.Combine(vault.store,"plan.enc"),secret,bytes,"plan");}finally{CryptographicOperations.ZeroMemory(bytes);}
-            JsonFiles.Write(Path.Combine(directory,Marker),new Configuration(1,Convert.ToBase64String(salt),Iterations));
+            JsonFiles.Write(Path.Combine(directory,Marker),new Configuration(selection==null?1:2,Convert.ToBase64String(salt),Iterations));
             return vault;
-        }catch{vault.Dispose();throw;}
+        }catch{
+            vault.Dispose();
+            // No originals are removed during preparation. Remove only this failed attempt's
+            // newly created metadata/stages so cancellation or an empty filter can be retried.
+            if(!Exists(directory)&&Directory.Exists(vault.store)){
+                PathPolicy.AssertNoLinks(vault.store);
+                var staged=Directory.GetFiles(vault.store);
+                if(staged.All(p=>Path.GetFileName(p)=="plan.enc"||System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(p),"^[a-f0-9]{32}\\.public$"))){foreach(string file in staged){PathPolicy.AssertNoLinks(file);File.Delete(file);}Directory.Delete(vault.store);}
+            }
+            throw;
+        }
     }
     public static ChatVault Open(string directory,ReadOnlySpan<char> password) {
         directory=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(directory);
         string marker=Path.Combine(directory,Marker);PathPolicy.AssertNoLinks(marker);
         var config=JsonFiles.Read<Configuration>(marker);
-        if(config.Version!=1||config.Iterations!=Iterations)throw new InvalidDataException("Unsupported vault format.");
+        if(config.Version is not (1 or 2)||config.Iterations!=Iterations)throw new InvalidDataException("Unsupported vault format.");
         byte[] salt=Convert.FromBase64String(config.Salt);if(salt.Length!=32)throw new InvalidDataException("Invalid vault salt.");
         byte[] secret=Rfc2898DeriveBytes.Pbkdf2(password,salt,config.Iterations,HashAlgorithmName.SHA256,32);
         try {
@@ -64,8 +87,19 @@ public sealed class ChatVault : IDisposable {
             try{plan=JsonSerializer.Deserialize<Entry[]>(bytes)??throw new InvalidDataException("Invalid encryption plan.");}finally{CryptographicOperations.ZeroMemory(bytes);}
             var ids=new HashSet<string>(StringComparer.Ordinal);
             foreach(var entry in plan){_=TransferService.Child(directory,entry.Path);if(!System.Text.RegularExpressions.Regex.IsMatch(entry.Id,"^[a-f0-9]{32}$")||!ids.Add(entry.Id)||entry.Stamp.Bytes<0)throw new InvalidDataException("Invalid vault entry.");}
+            foreach(var entry in plan)if(entry.PublicFile!=null&&(!System.Text.RegularExpressions.Regex.IsMatch(entry.PublicFile,"^[a-f0-9]{32}\\.public$")||entry.PublicStamp==null))throw new InvalidDataException("Invalid public page entry.");
             var vault=new ChatVault(directory,secret,plan);vault.LoadCommits();return vault;
         }catch{CryptographicOperations.ZeroMemory(secret);throw;}
+    }
+    private static IEnumerable<string> EnumeratePlainFiles(string directory,string? excluded=null){
+        var pending=new Stack<string>();pending.Push(directory);
+        while(pending.TryPop(out string? folder)){
+            PathPolicy.AssertNoLinks(folder);
+            foreach(var item in new DirectoryInfo(folder).EnumerateFileSystemInfos()){
+                if((item.Attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("Linked paths cannot be encrypted.");
+                if((item.Attributes&FileAttributes.Directory)!=0){if(!item.FullName.Equals(excluded,StringComparison.OrdinalIgnoreCase))pending.Push(item.FullName);}else yield return item.FullName;
+            }
+        }
     }
     private static FileStream Lease(string root){string path=Path.Combine(root,".export.lock");if(File.Exists(path))PathPolicy.AssertNoLinks(path);return new(path,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);}
     private void LoadCommits() {
@@ -78,15 +112,19 @@ public sealed class ChatVault : IDisposable {
         // Only a final incomplete append is ignored; complete records must authenticate.
     }
     private long validLogLength;
-    public ChatVaultProgress Status {
-        get{lock(gate){long done=entries.Where(e=>committed.ContainsKey(e.Id)&&File.Exists(Cipher(e))&&!File.Exists(Plain(e))).Sum(e=>e.Stamp.Bytes);int count=entries.Count(e=>committed.ContainsKey(e.Id)&&File.Exists(Cipher(e))&&!File.Exists(Plain(e)));var extras=UnplannedFiles().ToArray();return new(count,entries.Length+extras.Length,done,entries.Sum(e=>e.Stamp.Bytes)+extras.Sum(p=>new FileInfo(p).Length),count==entries.Length&&extras.Length==0);}}
+    public ChatVaultProgress Status=>InspectStatus();
+    private ChatVaultProgress InspectStatus(IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default){
+        lock(gate){long done=0,total=0;int count=0,selected=0,selectedDone=0,scanned=0;
+            foreach(var entry in entries){OperationPause.Check(cancellation);bool ready=Protected(entry);total+=entry.Stamp.Bytes;if(ready){count++;done+=entry.Stamp.Bytes;}if(entry.Selected){selected++;if(ready)selectedDone++;}
+                if(++scanned%1024==0)progress?.Report(new("chat-encryption-check",scanned,0,TotalFiles:entries.Length));
+            }
+            var extras=UnplannedFiles().ToArray();return new(count,entries.Length+extras.Length,done,total+extras.Sum(p=>new FileInfo(p).Length),count==entries.Length&&extras.Length==0&&entries.All(e=>e.PublicFile==null)){SelectionComplete=extras.Length==0&&selectedDone==selected,SelectedFiles=selected};
+        }
     }
+    private bool Protected(Entry e)=>committed.ContainsKey(e.Id)&&File.Exists(Cipher(e))&&
+        (e.PublicStamp==null?!File.Exists(Plain(e)):File.Exists(Plain(e))&&PublicMatches(e,Plain(e)));
     private IEnumerable<string> UnplannedFiles(){
-        var pending=new Stack<string>();pending.Push(root);
-        while(pending.TryPop(out string? directory))foreach(string path in Directory.EnumerateFileSystemEntries(directory)){
-            if(path.Equals(store,StringComparison.OrdinalIgnoreCase))continue;
-            PathPolicy.AssertNoLinks(path);
-            if(Directory.Exists(path)){pending.Push(path);continue;}
+        foreach(string path in EnumeratePlainFiles(root,store)){
             string relative=Path.GetRelativePath(root,path).Replace('\\','/');
             if(relative!=Marker&&relative!=".export.lock"&&!paths.ContainsKey(relative))yield return path;
         }
@@ -96,31 +134,46 @@ public sealed class ChatVault : IDisposable {
     public ChatVaultProgress Encrypt(bool includeMedia=true,int workers=2,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default) {
         ObjectDisposedException.ThrowIf(disposed,this);if(workers is <1 or >4)throw new ArgumentOutOfRangeException(nameof(workers));
         using var lease=Lease(root);
+        progress?.Report(new("chat-encryption-check",0,0));
         if(UnplannedFiles().Any())throw new IOException("Unplanned files were added after encryption started. They remain plaintext and must be retained separately before this plan can resume.");
         string log=Path.Combine(store,"commits.enc");if(File.Exists(log)){PathPolicy.AssertNoLinks(log);using var tail=new FileStream(log,FileMode.Open,FileAccess.Write,FileShare.Read);tail.SetLength(validLogLength);}
-        var selected=entries.Where(e=>includeMedia||!e.Path.StartsWith("assets/",StringComparison.Ordinal)).ToArray();
-        long done=Status.ProtectedBytes,total=entries.Sum(e=>e.Stamp.Bytes);int files=Status.ProtectedFiles;
+        var selected=entries.Where(e=>e.Selected&&(includeMedia||!e.Path.StartsWith("assets/",StringComparison.Ordinal))).ToArray();
+        var initial=InspectStatus(progress,cancellation);long done=initial.ProtectedBytes,total=initial.TotalBytes;int files=initial.ProtectedFiles;
         Parallel.ForEach(selected,new ParallelOptions{MaxDegreeOfParallelism=workers,CancellationToken=cancellation},entry=>{
             OperationPause.Check(cancellation);string source=Plain(entry),cipher=Cipher(entry);
             if(committed.TryGetValue(entry.Id,out var expected)){
                 if(!File.Exists(cipher))throw new IOException("A committed encrypted file is missing.");
-                if(!File.Exists(source))return;
+                if(entry.PublicStamp!=null&&File.Exists(source)&&PublicMatches(entry,source))return;
+                if(!File.Exists(source)){PublishPublic(entry);return;}
                 using(var verify=OpenProtected(entry)){if(Convert.ToHexString(TransferService.Hash(verify,cancellation))!=expected)throw new IOException("Encrypted file changed before plaintext removal.");}
-                RemovePlain(entry);return;
+                RemovePlain(entry);PublishPublic(entry);return;
             }
             PathPolicy.AssertNoLinks(source);if(NativeFile.ReadStamp(source)!=entry.Stamp)throw new IOException("Reading copy changed before encryption.");
             using var original=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);
             string digest=Protect(entry,original,cipher,cancellation,bytes=>{long value=Interlocked.Add(ref done,bytes);progress?.Report(new("chat-encrypt",Volatile.Read(ref files),value,total,entries.Length));});
+            original.Dispose();
             if(NativeFile.ReadStamp(source)!=entry.Stamp)throw new IOException("Reading copy changed while encrypting.");
             using(var verify=OpenProtected(entry)){if(Convert.ToHexString(TransferService.Hash(verify,cancellation))!=digest)throw new CryptographicException("Encrypted file verification failed.");}
             OperationPause.Check(cancellation);
             lock(gate){byte[] plain=JsonSerializer.SerializeToUtf8Bytes(new Commit(entry.Id,digest)),record=Seal(key,plain,"commit");CryptographicOperations.ZeroMemory(plain);
                 using var journal=new FileStream(log,FileMode.Append,FileAccess.Write,FileShare.Read);using var writer=new BinaryWriter(journal);writer.Write(record.Length);writer.Write(record);writer.Flush();journal.Flush(true);validLogLength=journal.Length;committed[entry.Id]=digest;}
-            RemovePlain(entry);Interlocked.Increment(ref files);
+            RemovePlain(entry);PublishPublic(entry);Interlocked.Increment(ref files);
         });
-        return Status;
+        return InspectStatus(progress,cancellation);
     }
     private void RemovePlain(Entry entry){string path=Plain(entry);if(!File.Exists(path))return;PathPolicy.AssertNoLinks(path);if(NativeFile.ReadStamp(path)!=entry.Stamp)throw new IOException("Plaintext changed; retained both versions.");NativeFile.DeleteVerified(new("chat-vault",root,path,entry.Stamp));}
+    private static bool PublicMatches(Entry entry,string path){
+        if(entry.PublicStamp==null)return false;var stamp=NativeFile.ReadStamp(path);
+        // NTFS file tunnelling can restore the destination's creation time on rename.
+        // Identity, volume, link count, write time and size must still match the staged file.
+        return stamp with{CreationUtcTicks=entry.PublicStamp.CreationUtcTicks}==entry.PublicStamp;
+    }
+    private void PublishPublic(Entry entry){
+        if(entry.PublicFile==null)return;string stage=Path.Combine(store,entry.PublicFile),target=Plain(entry);
+        if(File.Exists(target)){if(PublicMatches(entry,target))return;throw new IOException("Public page changed; both versions retained.");}
+        PathPolicy.AssertNoLinks(stage);if(!PublicMatches(entry,stage))throw new IOException("Public page changed before publication.");
+        File.Move(stage,target);
+    }
     private string Protect(Entry entry,FileStream input,string target,CancellationToken cancellation,Action<int> advanced) {
         byte[] header=new byte[HeaderSize];bool exists=File.Exists(target);
         if(exists)PathPolicy.AssertNoLinks(target);

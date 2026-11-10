@@ -16,7 +16,9 @@ public sealed class OperationPanel : Grid {
     public CheckBox DebugToggle { get; } = new() { Content = L.T("DebugLog"), ToolTip = L.T("DebugLogHelp"), VerticalAlignment = VerticalAlignment.Center };
     public event Action? ExportRequested;
     public event Action? PauseRequested;
-    public Button PauseButton { get; } = new() { Name="pause_operation", Content=L.T("PauseOperation"), Visibility=Visibility.Collapsed, Padding=new Thickness(8,2,8,2), Margin=new Thickness(0,0,8,0) };
+    public event Action? CancelRequested;
+    public Button PauseButton { get; }
+    public Button CancelButton { get; }
     public event Action<bool>? DebugLoggingChanged;
     public bool Follow => FollowToggle.IsChecked == true;
     public bool Expanded { get; private set; } = true;
@@ -35,14 +37,15 @@ public sealed class OperationPanel : Grid {
     private int retainedCharacters;
     private bool earlierLinesDropped;
     public OperationPanel() {
+        PauseButton=View.IconButton("M 4,2 L 4,14 M 10,2 L 10,14","PauseOperation",()=>PauseRequested?.Invoke());PauseButton.Name="pause_operation";PauseButton.Visibility=Visibility.Collapsed;
+        CancelButton=View.IconButton("M 3,3 L 13,13 M 13,3 L 3,13","Cancel",()=>CancelRequested?.Invoke());CancelButton.Name="cancel_operation";CancelButton.Visibility=Visibility.Collapsed;
         Margin = new Thickness(16, 3, 16, 5); ControlFeedback.SetEnabled(Log, false);
         RowDefinitions.Add(new RowDefinition { Height = View.Auto }); RowDefinitions.Add(new RowDefinition { Height = View.Auto });
         RowDefinitions.Add(new RowDefinition { Height = View.Fill });
         var row = new DockPanel(); collapse = View.IconButton("M 1,5 L 7,11 13,5", "HideOperationLog", ToggleExpanded);
         collapse.Name = "toggle_log"; collapse.Margin = new Thickness(8, 0, 0, 0);
         var export = View.IconButton("M 7,1 L 7,10 M 3,6 L 7,10 11,6 M 1,11 L 1,14 13,14 13,11", "ExportLog", () => ExportRequested?.Invoke()); export.Name = "export_log";
-        PauseButton.Click += (_,_) => PauseRequested?.Invoke();
-        foreach (var control in new UIElement[] { collapse, export, FollowToggle, DebugToggle, PauseButton, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
+        foreach (var control in new UIElement[] { collapse, export, FollowToggle, DebugToggle, CancelButton, PauseButton, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
         state.TextTrimming = TextTrimming.CharacterEllipsis; state.TextWrapping = TextWrapping.NoWrap;
         state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
         row.Children.Add(state); View.Add(this, row, 0); View.Add(this, progress, 1); View.Add(this, Log, 2);
@@ -53,8 +56,8 @@ public sealed class OperationPanel : Grid {
         Log.PreviewMouseLeftButtonDown += (_, _) => PauseFollowing();
         Log.PreviewKeyDown += (_, e) => { if (e.Key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End) PauseFollowing(); };
         timer.Tick += (_, _) => RefreshTiming(); Unloaded += (_, _) => timer.Stop();
-        DebugToggle.Checked += (_, _) => { AddLog("[debug] debug.enabled"); DebugLoggingChanged?.Invoke(true); };
-        DebugToggle.Unchecked += (_, _) => { AddLog("[debug] debug.disabled"); DebugLoggingChanged?.Invoke(false); };
+        DebugToggle.Checked += (_, _) => { AddLog(L.T("DebugEnabled")); DebugLoggingChanged?.Invoke(true); };
+        DebugToggle.Unchecked += (_, _) => { AddLog(L.T("DebugDisabled")); DebugLoggingChanged?.Invoke(false); };
     }
     public void ToggleFollowing() => FollowToggle.IsChecked = !Follow;
     public void PauseFollowing() => FollowToggle.IsChecked = false;
@@ -80,11 +83,21 @@ public sealed class OperationPanel : Grid {
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { followPending = false; if (Follow) Log.ScrollToEnd(); }));
         } else if (!Follow) Log.ScrollToVerticalOffset(offset);
     }
+    public void RestoreHistory(OperationPanel previous){
+        Log.Text=previous.Log.Text;retained.Clear();foreach(string line in previous.retained)retained.Enqueue(line);
+        retainedCharacters=previous.retainedCharacters;earlierLinesDropped=previous.earlierLinesDropped;
+    }
     public void AddDiagnostic(ChatDiagnostic diagnostic) {
         if (DebugToggle.IsChecked != true) return;
         // Stage IDs are fixed code identifiers, never free-form native callback output.
         if (!System.Text.RegularExpressions.Regex.IsMatch(diagnostic.Stage, "^[a-z0-9.-]{1,64}$")) return;
-        AddLog(string.Create(CultureInfo.InvariantCulture, $"[debug] {diagnostic.Stage}; processes={diagnostic.Processes}; regions={diagnostic.Regions}; scannedBytes={diagnostic.Bytes}; candidates={diagnostic.Candidates}; elapsedSeconds={diagnostic.ElapsedSeconds:F3}"));
+        var fields=new List<string>();
+        if(diagnostic.Processes>0)fields.Add(L.T("DebugProcesses",diagnostic.Processes));
+        if(diagnostic.Regions>0)fields.Add(L.T("DebugRegions",diagnostic.Regions));
+        if(diagnostic.Bytes>0)fields.Add(L.T("DebugBytes",View.Size(diagnostic.Bytes)));
+        if(diagnostic.Candidates>0)fields.Add(L.T("DebugCandidates",diagnostic.Candidates));
+        if(diagnostic.ElapsedSeconds>0)fields.Add(L.T("DebugSeconds",diagnostic.ElapsedSeconds.ToString("F2",CultureInfo.InvariantCulture)));
+        AddLog("[debug] "+diagnostic.Stage+(fields.Count>0?" · "+string.Join(" · ",fields):""));
     }
     public void AddException(Exception error) {
         if (DebugToggle.IsChecked == true) AddLog($"[debug] exceptionType={error.GetType().FullName}; hresult=0x{error.HResult:X8}; stack={error.StackTrace}");
@@ -100,16 +113,16 @@ public sealed class OperationPanel : Grid {
     public void SetPaused(bool value){paused=value;if(value)clock.Stop();else clock.Start();RefreshTiming();}
     public void Start() {
         paused=false;
-        latest = null; phase = detail = ""; phaseStart = 0; Log.Clear(); retained.Clear(); retainedCharacters = 0; earlierLinesDropped = false; clock.Restart(); timer.Start();
+        latest = null; phase = detail = ""; phaseStart = 0; clock.Restart(); timer.Start();
         progress.BeginAnimation(ProgressBar.ValueProperty, null); progress.Value = 0;
         progress.Tag = Theme.ReduceMotion ? "reduced" : "animate";
         progress.Visibility = Visibility.Visible; progress.IsIndeterminate = true; state.Text = L.T("OperationStarting"); AddLog(L.English("OperationStarting"));
-        AddDiagnostic(new("operation.start"));
+        if(DebugToggle.IsChecked==true)AddDiagnostic(new("operation.start"));
         if (DebugToggle.IsChecked == true) AddLog($"[debug] Storloom={ProductInfo.Version}; runtime={Environment.Version}; process64Bit={Environment.Is64BitProcess}");
     }
     public void Report(ScanProgress value) {
         latest = value;
-        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes != null ? value.Bytes : value.Files; AddLog(L.English(PhaseKey(phase))); AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
+        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes != null ? value.Bytes : value.Files; AddLog(L.T(PhaseKey(phase))); if(DebugToggle.IsChecked==true)AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; AddLog(detail); }
         state.Text = Phase(phase) + (value.TotalBytes is long bytes ? $" | {View.Size(value.Bytes)} / {View.Size(bytes)}" : value.TotalFiles is int files ? $" | {value.Files:N0} / {files:N0}" : "");
         long total = value.TotalBytes ?? value.TotalFiles ?? 0, done = value.TotalBytes != null ? value.Bytes : value.Files;
@@ -137,10 +150,11 @@ public sealed class OperationPanel : Grid {
         timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
         progress.Visibility = Visibility.Collapsed;
         if (complete) progress.Value = 1; state.Text = summary; timing.Text = L.T("ElapsedOnly", clock.Elapsed.ToString(@"hh\:mm\:ss")); AddLog(complete ? "Operation completed." : "Operation stopped. Review the reported results.");
-        AddDiagnostic(new(complete ? "operation.complete" : "operation.stopped", ElapsedSeconds: clock.Elapsed.TotalSeconds));
+        if(DebugToggle.IsChecked==true)AddDiagnostic(new(complete ? "operation.complete" : "operation.stopped", ElapsedSeconds: clock.Elapsed.TotalSeconds));
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
+        "chat-encryption-open"=>"PhaseEncryptionOpen","chat-encryption-check"=>"PhaseEncryptionCheck","chat-encryption-select"=>"PhaseEncryptionSelect","chat-encryption-plan"=>"PhaseEncryptionPlan","chat-encryption-derive"=>"PhaseEncryptionDerive","chat-encryption-save-plan"=>"PhaseEncryptionSavePlan",
         "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-resume" => "PhaseResumeExport", "chat-discovery" => "FindAccounts",
         "chat-encrypt" => "Phase_chat-encrypt", "chat-avatars" => "PhaseGroupAvatars", "chat-update-index" => "PhaseUpdateIndex", "chat-update-merge" => "PhaseUpdateMerge", "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
 }

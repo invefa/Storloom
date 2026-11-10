@@ -107,7 +107,10 @@ public sealed partial class ShellWindow {
             SetCapturedKey(key); RenderChatStage(); status.Text = L.T("KeyReady");
         });
     }
-    private IProgress<ChatDiagnostic> ChatDiagnostics() => new Progress<ChatDiagnostic>(value => { if (operation != null) operationView.AddDiagnostic(value); });
+    private IProgress<ChatDiagnostic> ChatDiagnostics()=>new DiagnosticSink(()=>debugEnabled,new Progress<ChatDiagnostic>(value=>{if(operation!=null&&debugEnabled)operationView.AddDiagnostic(value);}));
+    private sealed class DiagnosticSink(Func<bool> enabled,IProgress<ChatDiagnostic> target):IChatDiagnosticSwitch{
+        public bool Enabled=>enabled();public void Report(ChatDiagnostic value){if(Enabled)target.Report(value);}
+    }
 
     private async Task IncrementalBackupChat() {
         var location = Account(); string root = backupInput?.Text.Trim() ?? "";
@@ -143,16 +146,17 @@ public sealed partial class ShellWindow {
     private async Task ExportChatTo(string? resumeDirectory, bool update = false) {
         var account = Account(); string raw = ArchiveDirectory();
         string target = resumeDirectory ?? raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
+        VaultPasswordWindow? protection=null;
+        if(encryptAfterExport){
+            protection=new VaultPasswordWindow(true,true){Owner=this};
+            if(protection.ShowDialog()!=true||protection.Password==null)return;
+        }
         byte[]? key = capturedKey?.ToArray();
         try {
             if (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password)) {
                 if (key != null) CryptographicOperations.ZeroMemory(key);
-                string text = keyInput.Password;
-                bool valid = account.Platform == ChatPlatform.QQ
-                    ? text.Length is 16 or 32 && text.All(c => c is >= ' ' and <= '~')
-                    : text.Trim().Length == 64 && text.Trim().All(Uri.IsHexDigit);
-                if (!valid) throw new InvalidOperationException(L.T("KeyFormatInvalid"));
-                key = account.Platform == ChatPlatform.QQ ? Encoding.ASCII.GetBytes(text) : Convert.FromHexString(text.Trim());
+                try{key=ChatDatabaseKey.Parse(keyInput.Password,account.Platform);}
+                catch(FormatException){throw new InvalidOperationException(L.T("KeyFormatInvalid"));}
             }
             if (NeedsKey() && key == null) throw new InvalidOperationException(L.T("ExportKeyMissing"));
             keyInput?.Clear();
@@ -166,14 +170,20 @@ public sealed partial class ShellWindow {
                         verifyChatBackup, useLocalConfiguration: true, progress: progress, cancellation: token, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars);
                     return JsonFiles.Read<ChatExportResult>(Path.Combine(target, "export-report.json"));
                 });
+                latestExportResult=result;
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 operationIncomplete = !result.Complete;
                 foreach (var issue in result.Issues) operationView.AddLog($"[{issue.RuleId}] {issue.Path}: {issue.Reason}");
+                if(protection?.Password!=null && !result.CanResume){
+                    using var vault=await Task.Run(()=>ChatVault.Create(target,protection.Password.AsSpan(),token,progress),token);
+                    protection.ClearSecret();
+                    await Task.Run(()=>vault.Encrypt(protection.IncludeMedia,protection.Workers,progress,token),token);
+                }
                 chatStep = 3; SetCapturedKey(null); RenderChatStage();
                 status.Text = updateResult == null ? L.T("ExportDone", result.Messages, result.Databases, L.T(result.Complete ? "Complete" : "Incomplete"), exportReport)
                     : L.T("UpdateReadingDone", updateResult.Added, updateResult.Changed, updateResult.Unchanged, updateResult.Conversations);
             });
-        } finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
+        } finally { protection?.ClearSecret(); if (key != null) CryptographicOperations.ZeroMemory(key); }
     }
 
 }
