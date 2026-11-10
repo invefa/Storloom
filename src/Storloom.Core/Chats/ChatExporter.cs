@@ -36,7 +36,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
     public bool CanResume { get; init; }
 }
 
-public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false) {
+public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false, bool downloadQQGroupAvatars = false) {
     private readonly int parallelism = maximumParallelism is >= 1 and <= 4 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     public ChatExportResult Export(string source, string destination, ChatPlatform platform,
         byte[]? secret = null, IProgress<ScanProgress>? progress = null,
@@ -45,7 +45,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
 
     public ChatExportResult ExportVerifiedBackup(string manifestPath, string destination,
         ChatPlatform platform, byte[]? secret = null, IProgress<ScanProgress>? progress = null,
-        CancellationToken cancellation = default, bool verifyBackup = true, bool resume = false) {
+        CancellationToken cancellation = default, bool verifyBackup = true, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null) {
         cancellation.ThrowIfCancellationRequested();
         var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
         var verificationClock = System.Diagnostics.Stopwatch.StartNew();
@@ -62,7 +62,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             if (!received.Add(entry.RelativePath) || !expected.TryGetValue(entry.RelativePath, out var planned) ||
                 planned.Stamp.Bytes != entry.Bytes)
                 throw new InvalidDataException("Backup receipts do not match the planned files.");
-            string path = TransferService.Child(manifest.Plan.Destination, entry.RelativePath);
+            string path = ChatIncrementalBackup.Resolve(manifest.Plan.Destination, entry);
             PathPolicy.AssertNoLinks(path);
             if (new FileInfo(path).Length != entry.Bytes) throw new InvalidDataException("The archived copy changed since verification.");
         }
@@ -82,7 +82,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         }
         if (verifyBackup) foreach (var entry in manifest.Receipts) {
             cancellation.ThrowIfCancellationRequested();
-            using var input = File.OpenRead(TransferService.Child(manifest.Plan.Destination, entry.RelativePath));
+            using var input = File.OpenRead(ChatIncrementalBackup.Resolve(manifest.Plan.Destination, entry));
             if (input.Length != entry.Bytes || Convert.ToHexString(TransferService.Hash(input, cancellation, count => {
                 verifiedBytes += count;
                 progress?.Report(new("chat-verify", verifiedFiles, verifiedBytes, totalBytes, manifest.Receipts.Count, entry.RelativePath));
@@ -90,12 +90,12 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             verifiedFiles++;
         }
         return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false,
-            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume);
+            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume, selectMessage, includeDatabase);
     }
 
     private ChatExportResult ExportCore(string source, string destination, ChatPlatform platform,
         byte[]? secret, IProgress<ScanProgress>? progress, CancellationToken cancellation,
-        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false) {
+        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination);
         if (PathPolicy.Under(destination, source) || PathPolicy.Under(source, destination) ||
@@ -108,8 +108,8 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         if (resume && (verified == null || !Directory.Exists(destination))) throw new InvalidDataException("Resume requires an existing checkpoint and verified backup.");
         if (resume && !File.Exists(Path.Combine(destination, "export-progress.json")))
             throw new InvalidDataException("This export has no supported checkpoint. Exports started by older versions cannot be resumed.");
-        string[] databases = FindDatabases(source, platform).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (databases.Length == 0) throw new InvalidDataException("No supported message databases found.");
+        string[] databases = FindDatabases(source, platform).Where(p => includeDatabase == null || includeDatabase(Path.GetRelativePath(source, p))).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (databases.Length == 0 && includeDatabase == null) throw new InvalidDataException("No supported message databases found.");
         Directory.CreateDirectory(destination); PathPolicy.AssertNoLinks(destination);
         string lockPath = Path.Combine(destination, ".export.lock"); if (File.Exists(lockPath)) PathPolicy.AssertNoLinks(lockPath);
         using var lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -199,7 +199,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
             if (verified != null && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
             using var voices = platform == ChatPlatform.WeChat ? new WeChatVoices(source, work, secret, cancellation) : null;
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism, voices, avatars);
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism, voices, avatars, downloadQQGroupAvatars);
             progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {
@@ -208,12 +208,14 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                     cancellation.ThrowIfCancellationRequested();
                     if (assembled++ < archive.ProcessedMessages) continue;
                     var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid parsed message.");
-                    archive.Add(message);
+                    if (selectMessage != null) message = selectMessage(message);
+                    if (message != null) archive.Add(message);
                     if (assembled % 300 == 0) progress?.Report(new("chat-reader", (int)Math.Min(assembled, int.MaxValue), 0,
-                        TotalFiles: (int)Math.Min(messages, int.MaxValue), Detail: message.Conversation));
+                        TotalFiles: (int)Math.Min(messages, int.MaxValue), Detail: message?.Conversation));
                 }
             }
             archive.Finish(progress);
+            if(archive.AvatarDownloadFailures>0)issues.Add(new("chat-avatars","",L.T("GroupAvatarUnavailableCount",archive.AvatarDownloadFailures)));
             readerFinished = true;
         } catch (OperationCanceledException) {
             archive?.SaveSafeProgress();

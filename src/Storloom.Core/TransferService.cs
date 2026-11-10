@@ -16,7 +16,11 @@ public sealed record TransferPlan {
     public List<TransferFile> Files { get; init; } = [];
     public List<string> EmptyDirectories { get; init; } = [];
 }
-public sealed record TransferReceipt(string RelativePath, long Bytes, string Sha256);
+public sealed record TransferReceipt(string RelativePath, long Bytes, string Sha256) {
+    // Incremental chat snapshots can refer directly to a verified, immutable older generation.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? StorageRoot { get; init; }
+}
 public sealed record TransferJournal {
     public int Version { get; init; } = 1;
     public TransferPlan Plan { get; init; } = new();

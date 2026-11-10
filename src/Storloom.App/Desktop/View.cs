@@ -129,7 +129,7 @@ public class ThemeWindow : FluentWindow {
         var source = System.Windows.Interop.HwndSource.FromHwnd(handle);
         if (source == null || Application.Current.TryFindResource("CanvasColor") is not Color color) return;
         source.CompositionTarget.BackgroundColor = color;
-        int dark = Theme.Current == AppTheme.OneDark ? 1 : 0, border = color.R | color.G << 8 | color.B << 16;
+        int dark = Theme.IsDark ? 1 : 0, border = color.R | color.G << 8 | color.B << 16;
         _ = DwmSetWindowAttribute(source.Handle, 20, ref dark, sizeof(int));
         _ = DwmSetWindowAttribute(source.Handle, 34, ref border, sizeof(int));
     }

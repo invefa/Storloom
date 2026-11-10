@@ -58,6 +58,7 @@ public sealed class FormTests {
     [InlineData("zh-CN",AppTheme.Light)]
     [InlineData("en",AppTheme.OneDark)]
     [InlineData("zh-CN",AppTheme.OneDark)]
+    [InlineData("zh-CN",AppTheme.Dark)]
     public void NativePagesResizeAndShareTheTitleBarPalette(string locale,AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language=locale,Theme=theme,ReduceMotion=true});
         var window=new ShellWindow(fixture){ShowInTaskbar=false};
@@ -610,7 +611,7 @@ public sealed class FormTests {
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);"+string.Join("",Enumerable.Range(0,301).Select(i=>$"INSERT INTO MSG VALUES(1,{1700000000+i},'fixture','{(i==300?"Unique last-page fixture":"Fixture text") }');")));
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
         var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.WeChat);
-        byte[] png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII=");string image="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png)).ToLowerInvariant()+".png";Directory.CreateDirectory(Path.Combine(export.Directory,"assets"));File.WriteAllBytes(Path.Combine(export.Directory,image),png);
+        byte[] png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGP4/x8AAwAB//wl3FEAAAAASUVORK5CYII=");string image="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png)).ToLowerInvariant()+".png";Directory.CreateDirectory(Path.Combine(export.Directory,"assets"));File.WriteAllBytes(Path.Combine(export.Directory,image),png);
         var window=new ChatReaderWindow(export.Directory,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
         try {
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string s)=>Wait(core.ExecuteScriptAsync(s));
@@ -644,9 +645,33 @@ public sealed class FormTests {
             Query("document.querySelector('#zoom-original').click();true");Assert.Contains("100%",Query("document.querySelector('#zoom-value').textContent"));
             Query("document.querySelector('#rotate-right').click();true");Assert.Contains("rotate(90deg)",Query("document.querySelector('#preview-image').style.transform"));
             Query("document.querySelector('#rotate-left').click();true");Assert.Contains("rotate(0deg)",Query("document.querySelector('#preview-image').style.transform"));
-            Query("document.querySelector('#image-copy').click();true");var copiedUntil=DateTime.UtcNow.AddSeconds(5);while(DateTime.UtcNow<copiedUntil&&!Query("document.querySelector('#action-status').textContent").Contains("Copied")){Pump();Thread.Sleep(10);}Assert.Contains("Copied",Query("document.querySelector('#action-status').textContent"));Assert.True(Clipboard.ContainsImage());
+            BitmapSource? copiedBitmap=null;
+            typeof(ChatReaderWindow).GetProperty("ImageClipboardWriter",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,new Action<BitmapSource>(bitmap=>copiedBitmap=bitmap));
+            Query("document.querySelector('#image-copy').click();true");var copiedUntil=DateTime.UtcNow.AddSeconds(5);while(DateTime.UtcNow<copiedUntil&&!Query("document.querySelector('#action-status').textContent").Contains("Copied")){Pump();Thread.Sleep(10);}
+            Assert.Contains("Copied",Query("document.querySelector('#action-status').textContent"));Assert.NotNull(copiedBitmap);Assert.True(copiedBitmap!.IsFrozen);Assert.Equal(1,copiedBitmap.PixelWidth);Assert.Equal(1,copiedBitmap.PixelHeight);
             Query("document.querySelector('#preview-image').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));true");Assert.Equal("false",Query("document.querySelector('#reader-menu').hidden"));Assert.Contains("Save image",Query("document.querySelector('#reader-menu').textContent"));
             Query("document.querySelector('#image-close').click();true");Assert.Equal("false",Query("document.querySelector('#image-preview').open"));
+            Query("document.querySelector('#reset-filter').click();true");
+            byte[] variantPng;
+            using(var stream=new MemoryStream()){var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(2,1,96,96,PixelFormats.Bgra32,null,new byte[]{0,0,255,255,0,255,0,255},8)));encoder.Save(stream);variantPng=stream.ToArray();}
+            string variant="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(variantPng)).ToLowerInvariant()+".png";File.WriteAllBytes(Path.Combine(export.Directory,variant),variantPng);
+            byte[] wave=Convert.FromHexString("524946462600000057415645666D74201000000001000100401F0000803E00000200100064617461020000000000");
+            string voice="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(wave)).ToLowerInvariant()+".wav";File.WriteAllBytes(Path.Combine(export.Directory,voice),wave);
+            const string logical="0123456789abcdef0123456789abcdef";
+            string mediaItems=System.Text.Json.JsonSerializer.Serialize(new[]{
+                new ChatMessage("QQ","direct:fixture","fixture",1700000000,2,""){Parts=[new("image",MediaKeys:[logical])],Media=[new(image,"image",logical+".jpg"){Key=logical},new(variant,"image",logical+".png"){Key=logical}]},
+                new ChatMessage("QQ","direct:fixture","fixture",1700000001,2,""){Parts=[new("audio",Title:"internal-voice.amr",MediaKeys:["voice"])],Media=[new(voice,"audio","internal-voice.amr"){Key="voice"}]}
+            });
+            Query("window.receivePage(window.archiveIndex.conversations[0].id,1,"+mediaItems+");true");
+            Assert.Equal("1",Query("document.querySelectorAll('img.previewable').length"));Assert.Equal("1",Query("document.querySelectorAll('.image-source-switch').length"));
+            Query("document.querySelector('.image-source-switch').click();true");Assert.Contains(variant,Query("document.querySelector('img.previewable').dataset.asset"));
+            Query("document.querySelector('.image-source-all').click();true");Assert.Equal("2",Query("document.querySelectorAll('img.previewable').length"));
+            Query("document.querySelector('.image-source-all').click();true");Assert.Equal("1",Query("document.querySelectorAll('img.previewable').length"));
+            Assert.Equal("1",Query("document.querySelectorAll('.audio-only audio').length"));Assert.Equal("0",Query("document.querySelectorAll('.audio-only .kind-title,.audio-only strong').length"));
+            Assert.Equal("true",Query("document.querySelector('.audio-only').getBoundingClientRect().width<330"));
+            Query("document.querySelector('.audio-only').closest('.content').querySelector('.source').open=true;true");Pump();
+            Assert.Equal("true",Query("(()=>{const c=document.querySelector('.audio-only').closest('.content');return c.querySelector('.source').getBoundingClientRect().width>c.querySelector('.bubble').getBoundingClientRect().width+100})()"));
+
             Query("document.querySelector('#reset-filter').click();document.querySelector('#filter-panel').open=true;true");Pump();
             using var screenshot=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,screenshot)));
             DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
@@ -666,6 +691,11 @@ public sealed class FormTests {
             void Until(string q,string expected){var limit=DateTime.UtcNow.AddSeconds(20);while(DateTime.UtcNow<limit&&Query(q)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(q));}
             Until("document.querySelectorAll('.message').length","201");
             Assert.Equal("false",Query("document.querySelector('#filter-panel').open"));
+            Assert.Equal("0",Query("document.querySelector('#filter-panel').getBoundingClientRect().height"));
+            Query("document.querySelector('#filter-toggle').click();true");
+            Assert.Equal("true",Query("document.querySelector('#filter-panel').getBoundingClientRect().height>0"));
+            Query("document.querySelector('#filter-toggle').click();true");
+            Assert.Equal("0",Query("document.querySelector('#filter-panel').getBoundingClientRect().height"));
             Assert.Equal("true",Query("Math.abs(document.querySelector('main').getBoundingClientRect().right-document.querySelector('#filter-toggle').getBoundingClientRect().right-12)<2"));
             Assert.Equal("true",Query("(()=>{const b=document.querySelector('#sidebar-toggle').getBoundingClientRect(),t=document.querySelector('#chat-title').getBoundingClientRect(),m=document.querySelector('#chat-meta').getBoundingClientRect();return Math.abs(b.top+b.height/2-t.top-t.height/2)<5&&Math.abs(t.bottom-m.bottom)<6&&document.querySelector('.chat-header').getBoundingClientRect().height<60})()"));
             Assert.Equal("true",Query("Math.abs(document.querySelector('.pagination').getBoundingClientRect().left-document.querySelector('main').getBoundingClientRect().left-12)<2"));
@@ -1075,6 +1105,7 @@ public sealed class FormTests {
     [Theory]
     [InlineData(AppTheme.Light)]
     [InlineData(AppTheme.OneDark)]
+    [InlineData(AppTheme.Dark)]
     public void NativePaletteKeepsTextControlsAndPressedPrimaryActionsReadable(AppTheme theme) => OnUi(() => {
         Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
         Color ColorOf(string key)=>((SolidColorBrush)Theme.Brush(key)).Color;
@@ -1083,15 +1114,44 @@ public sealed class FormTests {
                 Assert.True(Contrast(ColorOf(foreground),ColorOf(background))>=4.5,$"{theme} {foreground}/{background}");
         foreach(var pair in new[]{("OnAccent","Accent"),("SelectedText","TextSelection"),("Danger","Surface"),("Danger","Canvas")})
             Assert.True(Contrast(ColorOf(pair.Item1),ColorOf(pair.Item2))>=4.5,$"{theme} {pair}");
-        Assert.True(Contrast(ColorOf("ControlBorder"),ColorOf("Surface"))>=3);
+        // Idle outlines follow the subtle dividers; focus remains visibly accented.
+        Assert.Equal(ColorOf("Line"),ColorOf("ControlBorder"));
+        Assert.True(Contrast(ColorOf("AccentText"),ColorOf("Surface"))>=3);
         var button=new Button{Style=(Style)Application.Current.Resources["PrimaryButton"],Content="Primary fixture"};
         var window=new ThemeWindow("Palette fixture",600,350){ShowInTaskbar=false};window.Body.Children.Add(button);
         try {
             window.Show();Pump();var pressed=(DependencyProperty)typeof(ControlFeedback).GetField("PressedProperty",BindingFlags.NonPublic|BindingFlags.Static)!.GetValue(null)!;
+            var frameBefore=(Border)button.Template.FindName("frame",button);
+            Assert.Equal(0,((SolidColorBrush)frameBefore.BorderBrush).Color.A);
+            button.Focus();Pump();
+            Assert.Equal(0,((SolidColorBrush)frameBefore.BorderBrush).Color.A);
+            Assert.NotNull(button.FocusVisualStyle);
             button.SetValue(pressed,true);ControlFeedback.Refresh(button);
             var frame=(Border)button.Template.FindName("frame",button);
             Assert.True(Contrast(((SolidColorBrush)button.Foreground).Color,((SolidColorBrush)frame.Background).Color)>=4.5);
         }finally{window.Close();Theme.Apply(new AppPreferences{ReduceMotion=true});}
+    });
+    [Theory]
+    [InlineData(AppTheme.Light,0)]
+    [InlineData(AppTheme.Dark,1)]
+    [InlineData(AppTheme.OneDark,2)]
+    public void ThemeChoicesKeepGrayscaleDarkBeforeOneDarkAndRoundTrip(AppTheme theme,int selected) => OnUi(() => {
+        string fixture=Fixture();L.SetLanguage("zh-CN");Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.PreferencesWindow")!;
+        var window=(Window)Activator.CreateInstance(type,new object?[]{new AppPreferences{Theme=theme},Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false})!;
+        try {
+            window.ShowInTaskbar=false;window.Show();Pump();
+            var combo=Descendants(window).OfType<ComboBox>().Single(c=>c.Items.Count==3 && Equals(c.Items[2],"OneDark"));
+            Assert.Equal(new[]{"浅色","深色","OneDark"},combo.Items.Cast<string>());
+            Assert.Equal(selected,combo.SelectedIndex);
+            string path=Path.Combine(fixture,"preferences.json");JsonFiles.Write(path,new AppPreferences{Theme=theme});
+            Assert.Equal(theme,JsonFiles.Read<AppPreferences>(path).Theme);
+            Assert.Equal(theme != AppTheme.Light,Theme.IsDark);
+            if(theme==AppTheme.Dark)
+                foreach(string key in new[]{"Canvas","Surface","Sidebar","Ink","Muted","Line","Accent","OnAccent","Selection","Hover","ControlBorder"}) {
+                    var color=((SolidColorBrush)Theme.Brush(key)).Color;Assert.Equal(color.R,color.G);Assert.Equal(color.G,color.B);
+                }
+        }finally{window.Close();Directory.Delete(fixture,true);Theme.Apply(new AppPreferences{ReduceMotion=true});}
     });
     private static double Contrast(Color foreground,Color background) {
         static double Luminance(Color c) {static double Linear(byte channel){double x=channel/255d;return x<=.04045?x/12.92:Math.Pow((x+.055)/1.055,2.4);}return .2126*Linear(c.R)+.7152*Linear(c.G)+.0722*Linear(c.B);}

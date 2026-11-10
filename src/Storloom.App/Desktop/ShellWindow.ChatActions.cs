@@ -109,12 +109,38 @@ public sealed partial class ShellWindow {
     }
     private IProgress<ChatDiagnostic> ChatDiagnostics() => new Progress<ChatDiagnostic>(value => { if (operation != null) operationView.AddDiagnostic(value); });
 
+    private async Task IncrementalBackupChat() {
+        var location = Account(); string root = backupInput?.Text.Trim() ?? "";
+        if (string.IsNullOrEmpty(root)) throw new InvalidOperationException(L.T("NoRoot"));
+        string? previous = verifiedBackups.GetValueOrDefault(location.Directory);
+        if (previous == null || !File.Exists(previous)) {
+            var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("ChooseIncrementalBase") };
+            if (picker.ShowDialog(this) != true) return; previous = picker.FileName;
+        }
+        string destination = Path.Combine(PathPolicy.Normalize(root), location.Platform.ToString(), location.Account,
+            DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6] + "-raw");
+        if (!Confirm(L.T("IncrementalBackupConfirm", previous, destination))) return;
+        await Run(async token => {
+            var progress = Progress();
+            var result = await Task.Run(() => ChatIncrementalBackup.Create(location.Directory, destination, previous,
+                Path.Combine(dataRoot, "journals"), location.Platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"], progress, token));
+            activeManifest = result.Backup.Manifest; verifiedBackups[location.Directory] = activeManifest;
+            preparedArchive = await Task.Run(() => ReadChatArchive(activeManifest, location), token);
+            preferences = preferences with { BackupRoot = root }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
+            JsonFiles.Write(Path.Combine(dataRoot, "chat-backups.json"), verifiedBackups);
+            chatStep = 2; RenderChatStage(); status.Text = L.T("IncrementalBackupDone", result.ReusedFiles, View.Size(result.ReusedBytes), View.Size(result.Backup.Bytes));
+        });
+    }
+    private async Task UpdateChatReading() {
+        string directory = View.Folder(this);
+        if (directory != "" && Confirm(L.T("UpdateReadingConfirm", directory))) await ExportChatTo(directory, update: true);
+    }
     private Task ExportChat() => ExportChatTo(null);
     private async Task ResumeChat() {
         string directory = View.Folder(this);
         if (directory != "") await ExportChatTo(directory);
     }
-    private async Task ExportChatTo(string? resumeDirectory) {
+    private async Task ExportChatTo(string? resumeDirectory, bool update = false) {
         var account = Account(); string raw = ArchiveDirectory();
         string target = resumeDirectory ?? raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
         byte[]? key = capturedKey?.ToArray();
@@ -130,14 +156,22 @@ public sealed partial class ShellWindow {
             }
             if (NeedsKey() && key == null) throw new InvalidOperationException(L.T("ExportKeyMissing"));
             keyInput?.Clear();
+            JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);
             await Run(async token => {
-                var progress = Progress(); var result = await Task.Run(() => new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true).ExportVerifiedBackup(
-                    activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup, resume: resumeDirectory != null));
+                var progress = Progress(); ChatReadingUpdateResult? updateResult = null;
+                var result = await Task.Run(() => {
+                    if (!update) return new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars).ExportVerifiedBackup(
+                        activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup, resume: resumeDirectory != null);
+                    updateResult = ChatReadingUpdate.Update(activeManifest!, target, account.Platform, key, preferences.ChatParallelism,
+                        verifyChatBackup, useLocalConfiguration: true, progress: progress, cancellation: token, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars);
+                    return JsonFiles.Read<ChatExportResult>(Path.Combine(target, "export-report.json"));
+                });
                 readingDirectory = target; exportReport = Path.Combine(target, "export-report.json"); readingComplete = result.Complete;
                 operationIncomplete = !result.Complete;
                 foreach (var issue in result.Issues) operationView.AddLog($"[{issue.RuleId}] {issue.Path}: {issue.Reason}");
                 chatStep = 3; SetCapturedKey(null); RenderChatStage();
-                status.Text = L.T("ExportDone", result.Messages, result.Databases, L.T(result.Complete ? "Complete" : "Incomplete"), exportReport);
+                status.Text = updateResult == null ? L.T("ExportDone", result.Messages, result.Databases, L.T(result.Complete ? "Complete" : "Incomplete"), exportReport)
+                    : L.T("UpdateReadingDone", updateResult.Added, updateResult.Changed, updateResult.Unchanged, updateResult.Conversations);
             });
         } finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
     }

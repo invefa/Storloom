@@ -16,7 +16,7 @@ public sealed partial class ShellWindow {
     private Border[] chatStepFrames = [];
     private TextBlock accountNotice = null!;
     private Button chatNext = null!;
-    private Button? chatResume;
+    private Button? chatResume, chatUpdate;
     private TextBox? backupInput;
     private PasswordBox? keyInput;
     private bool verifyChatBackup = true;
@@ -40,7 +40,7 @@ public sealed partial class ShellWindow {
         View.Add(layout, chatFooter, 3); RenderChatStage();
     }
     private void RenderChatStage() {
-        chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null;
+        chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null; chatUpdate = null;
         for (int i = 0; i < chatSteps.Length; i++) { chatStepFrames[i].SetResourceReference(Border.BackgroundProperty, i == Math.Min(chatStep, 2) ? "Selection" : "Canvas"); }
         if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
         chatFooter.Children.Add(Button("QuickStart", () => ShowHelp(2))); Theme.Enter(chatContent);
@@ -84,6 +84,7 @@ public sealed partial class ShellWindow {
             Content = View.Stack(View.Text(L.T("BackupStepTitle"), 23), View.Text(L.T("BackupStepLead"), color: "Muted"),
                 View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination)) });
         chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat, true));
+        chatFooter.Children.Add(AsyncButton("IncrementalBackup", IncrementalBackupChat));
         if (verifiedBackups.TryGetValue(account.Directory, out string? previous) && File.Exists(previous))
             chatFooter.Children.Add(AsyncButton("UsePreviousBackup", () => UseChatBackup(previous)));
         chatFooter.Children.Add(Button("GoBack", () => { chatStep = 0; RenderChatStage(); }));
@@ -106,20 +107,27 @@ public sealed partial class ShellWindow {
             manual.Unchecked += (_, _) => { keyInput.Clear(); manualFields.Visibility = keyInput.Visibility = Visibility.Collapsed; UpdateExportEnabled(encrypted); };
             keyInput.PasswordChanged += (_, _) => UpdateExportEnabled(encrypted); stack.Children.Add(manual); stack.Children.Add(manualFields);
         }
+        if(Account().Platform==ChatPlatform.QQ){
+            var avatars=new CheckBox{Content=L.T("DownloadQQGroupAvatars"),IsChecked=preferences.DownloadQQGroupAvatars,Margin=new Thickness(0,10,0,4),ToolTip=L.T("DownloadQQGroupAvatarsHelp")};
+            avatars.Checked+=(_,_)=>preferences=preferences with{DownloadQQGroupAvatars=true};avatars.Unchecked+=(_,_)=>preferences=preferences with{DownloadQQGroupAvatars=false};stack.Children.Add(avatars);
+        }
         var verify = new CheckBox { Content = L.T("VerifyBackupBeforeExport"), IsChecked = verifyChatBackup, Margin = new Thickness(0, 12, 0, 4) };
         verify.Checked += (_, _) => verifyChatBackup = true;
         verify.Unchecked += (_, _) => verifyChatBackup = false;
         stack.Children.Add(verify); stack.Children.Add(View.Text(L.T("VerifyBackupHelp"), color: "Muted"));
         chatNext = AsyncButton("ExportReading", ExportChat, true); chatNext.Name = "chat_export"; chatNext.IsEnabled = !encrypted || capturedKey != null;
         chatResume = AsyncButton("ResumeReading", ResumeChat); chatResume.IsEnabled = chatNext.IsEnabled;
+        chatUpdate = AsyncButton("UpdateReading", UpdateChatReading); chatUpdate.IsEnabled = chatNext.IsEnabled;
+        stack.Children.Add(View.Text(L.T("UpdateReadingHelp"), color: "Muted"));
         stack.Children.Add(View.Text(L.T("ResumeReadingHelp"), color: "Muted"));
-        chatFooter.Children.Add(chatNext); chatFooter.Children.Add(chatResume); chatFooter.Children.Add(Button("FinishRawOnly", () => {
+        chatFooter.Children.Add(chatNext); chatFooter.Children.Add(chatResume); chatFooter.Children.Add(chatUpdate); chatFooter.Children.Add(Button("FinishRawOnly", () => {
             chatStep = 3; readingDirectory = exportReport = null; SetCapturedKey(null); RenderChatStage();
         })); chatFooter.Children.Add(Button("GoBack", () => { chatStep = 1; RenderChatStage(); }));
     }
     private void UpdateExportEnabled(bool encrypted) {
         chatNext.IsEnabled = !encrypted || capturedKey != null || (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password));
         if (chatResume != null) chatResume.IsEnabled = chatNext.IsEnabled;
+        if (chatUpdate != null) chatUpdate.IsEnabled = chatNext.IsEnabled;
     }
     private void BuildChatFinished() {
         var report = exportReport != null && File.Exists(exportReport) ? JsonFiles.Read<ChatExportResult>(exportReport) : null;

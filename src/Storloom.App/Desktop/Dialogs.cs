@@ -19,7 +19,8 @@ internal sealed class PreferencesWindow : ThemeWindow {
         }
         ComboBox Options(string[] values, int index) { var combo = new ComboBox(); foreach (string value in values) combo.Items.Add(value); combo.SelectedIndex = index; return combo; }
         var language = Options(["English", "简体中文"], preferences.Language == "en" ? 0 : 1); Field("LanguageLabel", language);
-        var themes = Options([L.T("ThemeLight"), L.T("ThemeDark")], (int)preferences.Theme); Field("ThemeLabel", themes);
+        AppTheme[] themeValues = [AppTheme.Light, AppTheme.Dark, AppTheme.OneDark];
+        var themes = Options([L.T("ThemeLight"), L.T("ThemeGrayscaleDark"), L.T("ThemeDark")], Array.IndexOf(themeValues, preferences.Theme)); Field("ThemeLabel", themes);
         TextBox FolderField(string key, string initial) {
             var input = View.Input(initial); var panel = new DockPanel(); var browse = View.Button("Browse", () => { string path = View.Folder(this, input.Text); if (path != "") input.Text = path; });
             DockPanel.SetDock(browse, Dock.Right); panel.Children.Add(browse); panel.Children.Add(input); Field(key, panel); return input;
@@ -76,7 +77,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                     File.Exists(localRules) ? JsonFiles.Read<RuleCatalog>(localRules) : null);
                 if (catalog.Rules.Count == 0) throw new InvalidDataException(L.T("NoRuleSets")); _ = new CleanupEngine(catalog, settings);
                 if (!string.IsNullOrWhiteSpace(custom.Text)) _ = Theme.ReadCustom(custom.Text);
-                Result = preferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = (AppTheme)themes.SelectedIndex,
+                Result = preferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = themeValues[themes.SelectedIndex],
                     BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatParallelism = int.Parse((string)workers.SelectedItem),
                     ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, DebugLogging = debugLogging.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
                 foreach (var choice in choices.Where(c => pending.ContainsKey(c.Info.Id))) JsonFiles.Write(Path.Combine(customSets, choice.Info.File), pending[choice.Info.Id]);

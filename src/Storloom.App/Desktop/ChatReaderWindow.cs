@@ -10,6 +10,8 @@ namespace Storloom.App;
 public sealed class ChatReaderWindow : ThemeWindow {
     public WebView2 Browser { get; } = new();
     private bool closed;
+    internal string? LastClipboardError { get; private set; }
+    internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
     public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false) : base(L.T("ChatArchive"), 1200, 820) {
         Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); };
         Loaded += async (_, _) => {
@@ -20,7 +22,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 var core = Browser.CoreWebView2;
                 core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = true;
                 core.Settings.AreDefaultContextMenusEnabled = false;
-                core.WebMessageReceived += (_,args) => {
+                core.WebMessageReceived += async (_,args) => {
                     if(args.Source!="https://reader.storloom.invalid/messages.html" && !args.Source.StartsWith("https://reader.storloom.invalid/messages.html#",StringComparison.Ordinal))return;
                     bool copyingImage=false;
                     try {
@@ -28,8 +30,8 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
                         string? action=root.GetProperty("action").GetString();
                         if(action!="clipboard-image"&&args.WebMessageAsJson.Length>1024*1024)return;
-                        if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)Clipboard.SetText(value);core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
-                        if(action=="clipboard-image"){copyingImage=true;Clipboard.SetImage(DecodeClipboardImage(root.GetProperty("data").GetString()));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
+                        if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)await WriteClipboardAsync(()=>Clipboard.SetText(value));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
+                        if(action=="clipboard-image"){copyingImage=true;var bitmap=DecodeClipboardImage(root.GetProperty("data").GetString());await WriteClipboardAsync(()=>ImageClipboardWriter(bitmap));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action is not ("save-image" or "save-file"))return;
                         string? path=root.GetProperty("path").GetString();string source=action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
                         string name=Path.GetFileName(root.TryGetProperty("name",out var valueName)?valueName.GetString():null)??"image";
@@ -39,7 +41,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         if(picker.ShowDialog(this)!=true)return;
                         SaveResourceFile(source,picker.FileName);
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
-                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException){if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
+                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException){if(copyingImage)LastClipboardError=ex.GetType().Name+":"+ex.HResult.ToString("X");if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
                 };
                 core.Settings.AreDefaultScriptDialogsEnabled = false; core.Settings.AreDevToolsEnabled = false; core.Settings.IsStatusBarEnabled = false;
                 core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
@@ -66,7 +68,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                     }
                 };
                 if (reduceMotion) await core.AddScriptToExecuteOnDocumentCreatedAsync("document.addEventListener('DOMContentLoaded',()=>document.documentElement.classList.add('reduce-motion'));");
-                core.Navigate("https://reader.storloom.invalid/messages.html" + (Theme.Current == AppTheme.OneDark ? "#dark" : "#light"));
+                core.Navigate("https://reader.storloom.invalid/messages.html" + (Theme.IsDark ? "#dark" : "#light"));
             } catch (Exception ex) when (!closed) {
                 Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T("ReaderRuntimeMissing") + "\n" + ex.Message));
             }
@@ -95,6 +97,13 @@ public sealed class ChatReaderWindow : ThemeWindow {
         if(relative==null||!System.Text.RegularExpressions.Regex.IsMatch(relative,"^assets/[a-f0-9]{64}\\.(pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv)$"))throw new InvalidDataException("Invalid archive resource.");
         string path=TransferService.Child(directory,relative);PathPolicy.AssertNoLinks(path);
         if(!File.Exists(path))throw new FileNotFoundException("Archive resource is missing.");return path;
+    }
+    private async Task WriteClipboardAsync(Action write) {
+        for (int attempt = 0; ; attempt++) {
+            if (closed) throw new InvalidOperationException("The reading window was closed.");
+            try { write(); return; }
+            catch (System.Runtime.InteropServices.ExternalException) when (attempt < 3) { await Task.Delay(60); }
+        }
     }
     internal static string ResolveImagePath(string directory,string? relative) {
         if(relative==null||!System.Text.RegularExpressions.Regex.IsMatch(relative,"^assets/[a-f0-9]{64}\\.(png|jpg|jpeg|gif|webp|bmp)$"))throw new InvalidDataException("Invalid archive image.");

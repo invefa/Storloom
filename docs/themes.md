@@ -37,3 +37,6 @@ Sidebar transitions keep icon positions fixed. The log divider is constrained to
 Confirmation and information notices use compact, non-resizable windows sized to their content, with a bounded scrolling message area for lengthy details and actions at the bottom right. Chat backup and result forms label account, raw-backup and reading-copy paths on the left with consistent row spacing. Custom scrollbar tracks and thumbs share the same minimum-size metrics so long documents do not clip the thumb at either end.
 
 Built-in palettes separate accent fills from accent-colored text and control outlines. Text pairs are checked at a contrast ratio of at least 4.5, with input outlines at least 3 against their surfaces. Primary-button press feedback moves the background away from its foreground color. Reader checks cover Default, WeChat and QQ in light/dark modes, including secondary text in sent-message bubbles and placeholders on their own backgrounds. Custom overrides remain user-defined; the built-in contrast checks do not certify arbitrary custom palettes.
+
+
+Built-in themes are ordered Light, Dark (grayscale), OneDark. Filled primary buttons use their background contrast without an idle outline. A separate focus ring appears for keyboard navigation. Existing OneDark preferences retain their meaning.

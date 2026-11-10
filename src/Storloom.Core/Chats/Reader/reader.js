@@ -139,6 +139,7 @@
   if(sourceRow)resultContext({conversation,page:target.page,message:{Id:target.id}},block);else showContext(target.id,target.page);
  }
  const safeAsset = path => /^assets\/[a-f0-9]{64}\.(png|jpg|jpeg|gif|webp|bmp|mp4|webm|mp3|wav|ogg|m4a|pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv)$/.test(path);
+ const logicalImage=media=>{for(const name of [media.Key,media.Name]){const hash=/(?:^|[^a-f0-9])([a-f0-9]{32})(?![a-f0-9])/i.exec(name||'');if(hash)return 'md5:'+hash[1].toLowerCase();}return (media.Path||'').replace(/\.[a-z0-9]+$/i,'');};
  const assetIdentity=media=>(media.Kind||'image')+':'+(media.Path||'').replace(/\.[a-z0-9]+$/i,'');
  function layoutReferences() {
   for (const slot of document.querySelectorAll('.quote-slot')) {
@@ -317,6 +318,21 @@
    const time = element('div', (system ? '' : sender + '  ') + (m.Timestamp>0 && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : label('ReaderUnknownTime')), 'timestamp');
    const bubble = element('div', '', 'bubble'), referenceZone = element('div', '', 'reference-zone');
    if(parts.length&&parts.every(p=>['image','video','sticker'].includes(p.Kind)&&!face(p))&&mediaEntries.some(media=>safeAsset(media.Path)))bubble.classList.add('visual-only');
+   if(parts.length&&parts.every(p=>p.Kind==='audio')&&mediaEntries.some(media=>media.Kind==='audio'&&safeAsset(media.Path)))bubble.classList.add('audio-only');
+   const tools=element('div','','message-tools'),sourceTools=element('div','','image-source-tools');
+   tools.append(sourceDisclosure(m),sourceTools);
+   const imageGroups=new Map(),renderedGroups=new Set();
+   for(const media of mediaEntries.filter(media=>media.Kind==='image'&&safeAsset(media.Path))){const id=logicalImage(media),group=imageGroups.get(id)||[];if(!group.some(item=>item.Path===media.Path))group.push(media);imageGroups.set(id,group);}
+   function appendMedia(block,media,kind){
+    if(media.Kind!=='image'){block.append(renderMedia(media,kind));return;}
+    const id=logicalImage(media);if(renderedGroups.has(id))return;renderedGroups.add(id);
+    const variants=[...(imageGroups.get(id)||[media])].sort((a,b)=>(a.Quality==='thumbnail')-(b.Quality==='thumbnail'));
+    const host=element('span','','image-source-view');block.append(host);let selected=0,all=false;
+    const switcher=element('button','','image-source-switch'),toggle=element('button',label('ReaderAllImageSources'),'image-source-all');
+    function display(){host.replaceChildren();for(const value of (all?variants:[variants[selected]])){const node=renderMedia(value,kind);host.append(node);}switcher.textContent=label('ReaderImageSource').replace('{0}',selected+1).replace('{1}',variants.length);toggle.textContent=label(all?'ReaderOneImageSource':'ReaderAllImageSources');toggle.setAttribute('aria-pressed',String(all));}
+    if(variants.length>1){switcher.type=toggle.type='button';switcher.title=label('ReaderNextImageSource');switcher.onclick=()=>{selected=(selected+1)%variants.length;all=false;display();};toggle.onclick=()=>{all=!all;display();};sourceTools.append(switcher,toggle);}
+    display();
+   }
    const used = new Set(), reserved = new Set();
    function reserve(items) { for (const p of items) { for (const key of p.MediaKeys || []) reserved.add(key.toLowerCase()); for (const entry of p.Forwarded || []) reserve(entry.Parts || []); } }
    reserve(parts);
@@ -327,6 +343,7 @@
      mediaMatches(part.MediaKeys,media) || (parts.length === 1 && depth === 0 && kind !== 'forward')));
     const candidates = matched.some(media => media.Quality !== 'thumbnail') ? matched.filter(media => media.Quality !== 'thumbnail') : matched;
     const visual=['image','video','sticker'].includes(kind)&&candidates.length>0;
+    const playableAudio=kind==='audio'&&candidates.some(media=>media.Kind==='audio');if(playableAudio)block.classList.add('playable-audio');
     if(visual&&candidates.every(media=>used.has(assetIdentity(media))))return document.createDocumentFragment();
     const rich = /<[^>]+>|&lt;\/?\w+/.test(part.Text || '');
     if (kind === 'reply') {
@@ -338,7 +355,7 @@
      if (depth === 0) { const slot = element('div', '', 'quote-slot'); slot.quote = quote; slot.append(quote); block.append(slot); }
      else block.append(quote);
     }
-    if (!['text','reply','system','markdown','poke','reaction'].includes(kind)&&!visual) {
+    if (!['text','reply','system','markdown','poke','reaction'].includes(kind)&&!visual&&!playableAudio) {
      block.append(element('div', label('ReaderKind_' + kind), 'kind-title'));
      if (part.Title) block.append(element('strong', part.Title));
     }
@@ -370,20 +387,20 @@
     const shown = new Set();
     for (const media of candidates) {
      if (shown.has(assetIdentity(media)) || depth===0&&used.has(assetIdentity(media))) continue; shown.add(assetIdentity(media));
-     used.add(assetIdentity(media)); block.append(renderMedia(media, kind));
+     used.add(assetIdentity(media)); appendMedia(block,media,kind);
      if (media.Quality === 'thumbnail') block.append(element('small', label('ReaderThumbnail')));
     }
     if (['image','video','audio','sticker','file'].includes(kind) && !candidates.length) block.append(element('div',
      label(part.MediaState === 'unsupported-format' ? 'ReaderUnsupportedFormat' : 'ReaderFileMissing'), 'placeholder'));
     if (kind === 'unsupported' || kind === 'unparsed' || rich) block.append(element('div', label('ReaderSourceHint'), 'card-detail'));
-    return block;
+    return visual&&!block.hasChildNodes()?document.createDocumentFragment():block;
    }
    for (const part of parts) bubble.append(partView(part));
    for (const media of mediaEntries) {
-    if (safeAsset(media.Path) && !used.has(assetIdentity(media)) && !reserved.has((media.Key||'').toLowerCase()) && !reserved.has((media.Name||'').toLowerCase())) { used.add(assetIdentity(media)); bubble.append(renderMedia(media, media.Kind)); }
+    if (safeAsset(media.Path) && !used.has(assetIdentity(media)) && !reserved.has((media.Key||'').toLowerCase()) && !reserved.has((media.Name||'').toLowerCase())) { used.add(assetIdentity(media)); appendMedia(bubble,media,media.Kind); }
    }
    if(archiveResults)content.append(element('div',(index.conversations.find(c=>c.id===row.conversation)?.name||'')+' · '+(row.page+1),'result-location'));
-   content.append(time, bubble, referenceZone, sourceDisclosure(m));
+   content.append(time, bubble, referenceZone, tools);
    if((hasFilters||archiveResults)&&!contextMode){const context=element('button',label('ReaderShowContext'),'show-context');context.onclick=()=>archiveResults?resultContext(row,context):showContext(m.Id,page,context);content.append(context);}
    if (!system) article.append(avatar); article.append(content); fragment.append(article);
   }

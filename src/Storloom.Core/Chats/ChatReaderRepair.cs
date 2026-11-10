@@ -89,7 +89,7 @@ public static class ChatReaderRepair {
             foreach(var pair in avatars){if(!System.Text.RegularExpressions.Regex.IsMatch(pair.Value,"^assets/[a-f0-9]{64}\\.(png|jpg|jpeg|gif|webp|bmp)$"))throw new InvalidDataException("Invalid avatar image.");string path=TransferService.Child(directory,pair.Value);PathPolicy.AssertNoLinks(path);if(!File.Exists(path))throw new FileNotFoundException("Avatar image is missing.");mapped[pair.Key]=pair.Value;}
             index["avatars"]=mapped;
             var ids=index["conversations"]!.AsArray().Select(c=>c!["id"]!.GetValue<string>()).ToHashSet();var conversationAvatars=new Dictionary<string,string>();
-            foreach(var pair in mapped){foreach(string native in new[]{pair.Key,"direct:"+pair.Key}){string id=JsonFiles.Hash(native)[..24].ToLowerInvariant();if(ids.Contains(id))conversationAvatars[id]=pair.Value!.GetValue<string>();}}
+            foreach(var pair in mapped){foreach(string native in new[]{pair.Key,"direct:"+pair.Key,"group:"+pair.Key}){string id=JsonFiles.Hash(native)[..24].ToLowerInvariant();if(ids.Contains(id))conversationAvatars[id]=pair.Value!.GetValue<string>();}}
             index["conversationAvatars"]=JsonSerializer.SerializeToNode(conversationAvatars);
         }
         if (resourceMedia != null) {

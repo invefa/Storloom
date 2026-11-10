@@ -26,6 +26,17 @@ public sealed class ChatReaderTests : IDisposable {
         using var repaired=JsonDocument.Parse(File.ReadAllText(indexPath)["window.archiveIndex=".Length..].TrimEnd(';'));Assert.Equal(path,repaired.RootElement.GetProperty("avatars").GetProperty("alias").GetString());
     }
     [Fact]
+    public void QQGroupAvatarsMapToGroupConversationsWithoutUsingTheSameNumberAsAPerson() {
+        string source=Path.Combine(root,"group-account");Directory.CreateDirectory(source);
+        Database(Path.Combine(source,"nt_msg.db"),"CREATE TABLE group_msg_table(\"40021\",\"40033\",\"40050\",\"40800\");INSERT INTO group_msg_table VALUES(12345,54321,1700000000,'group fixture');");
+        var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"group-raw")),Path.Combine(root,"journals"));
+        var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"group-reading"),ChatPlatform.QQ);
+        string asset="assets/"+Convert.ToHexString(SHA256.HashData(Png)).ToLowerInvariant()+".png";Directory.CreateDirectory(Path.Combine(result.Directory,"assets"));File.WriteAllBytes(Path.Combine(result.Directory,asset),Png);
+        ChatReaderRepair.Refresh(result.Directory,avatars:new Dictionary<string,string>{{"group:12345",asset}});
+        using var index=JsonDocument.Parse(File.ReadAllText(Path.Combine(result.Directory,"archive-index.js"))["window.archiveIndex=".Length..].TrimEnd(';'));
+        string id=JsonFiles.Hash("group:12345")[..24].ToLowerInvariant();Assert.Equal(asset,index.RootElement.GetProperty("conversationAvatars").GetProperty(id).GetString());
+    }
+    [Fact]
     public void WeChatTerminalPaddingAndLiteralMarkupKeepTheOriginalBody() {
         const string xml="<msg><appmsg><type>57</type><title>reply text</title><refermsg><type>1</type><content>quoted fixture</content><svrid>123</svrid></refermsg></appmsg></msg>\0\0";
         var message=new ChatMessage("WeChat","fixture","sender",1700000000,244813135921,xml);

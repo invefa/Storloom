@@ -3,6 +3,30 @@ using System.Security.Cryptography;
 namespace Storloom.Core.Chats;
 
 internal static class ChatAvatars {
+    internal static Dictionary<string,string> DownloadQQGroups(IEnumerable<string> groups,string destination,IProgress<ScanProgress>? progress,CancellationToken cancellation,out int failed) {
+        string[] ids=groups.Where(g=>System.Text.RegularExpressions.Regex.IsMatch(g,"^group:[1-9][0-9]{4,14}$")).Distinct(StringComparer.Ordinal).ToArray();
+        var result=new System.Collections.Concurrent.ConcurrentDictionary<string,string>(StringComparer.Ordinal);int done=0;
+        using var client=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}){Timeout=TimeSpan.FromSeconds(10)};
+        Parallel.ForEach(ids,new ParallelOptions{MaxDegreeOfParallelism=4,CancellationToken=cancellation},id=>{
+            try {
+                using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                string number=id[6..];using var request=new HttpRequestMessage(HttpMethod.Get,$"https://p.qlogo.cn/gh/{number}/{number}/640");
+                using var response=client.Send(request,HttpCompletionOption.ResponseHeadersRead,timeout.Token);response.EnsureSuccessStatusCode();
+                using var input=response.Content.ReadAsStream(timeout.Token);using var bytes=new MemoryStream();byte[] buffer=new byte[32*1024];int count;
+                while((count=input.ReadAsync(buffer.AsMemory(),timeout.Token).AsTask().GetAwaiter().GetResult())>0){if(bytes.Length+count>8*1024*1024)throw new InvalidDataException("Avatar exceeds size limit.");bytes.Write(buffer,0,count);}
+                byte[] image=bytes.ToArray();string? extension=WeChatImages.Format(image);if(extension is not (".png" or ".jpg" or ".gif" or ".webp" or ".bmp"))throw new InvalidDataException("Unsupported group avatar.");
+                string assets=Path.Combine(destination,"assets");Directory.CreateDirectory(assets);PathPolicy.AssertNoLinks(assets);
+                string filename=Convert.ToHexString(SHA256.HashData(image)).ToLowerInvariant()+extension,target=Path.Combine(assets,filename);
+                lock(result){
+                    if(File.Exists(target)){PathPolicy.AssertNoLinks(target);if(!File.ReadAllBytes(target).AsSpan().SequenceEqual(image))throw new InvalidDataException("Avatar asset changed.");}
+                    else {using var output=new FileStream(target,FileMode.CreateNew,FileAccess.Write);output.Write(image);}
+                    result[id]="assets/"+filename;
+                }
+            } catch(Exception ex)when(ex is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException){cancellation.ThrowIfCancellationRequested();}
+            progress?.Report(new("chat-avatars",Interlocked.Increment(ref done),0,TotalFiles:ids.Length));
+        });
+        failed=ids.Length-result.Count;return new(result,StringComparer.Ordinal);
+    }
     internal static Dictionary<string,string> Read(SqliteReader reader,string destination,CancellationToken cancellation=default) {
         var result=new Dictionary<string,string>(StringComparer.Ordinal);
         var tables=reader.Query("SELECT name FROM sqlite_master WHERE type='table'",cancellation).Select(r=>r[0]?.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
