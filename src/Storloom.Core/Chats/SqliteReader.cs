@@ -59,7 +59,7 @@ public sealed class SqliteReader : IDisposable {
         if (code != 0) throw new InvalidDataException($"SQLite query preparation failed ({code}).");
         try {
             while ((code = sqlite3_step(statement)) == 100) {
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 var row = new object?[sqlite3_column_count(statement)];
                 for (int i = 0; i < row.Length; i++) {
                     int type = sqlite3_column_type(statement, i);

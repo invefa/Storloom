@@ -15,6 +15,8 @@ public sealed class OperationPanel : Grid {
     public CheckBox FollowToggle { get; } = new() { Content = L.T("FollowLog"), IsChecked = true, ToolTip = "Ctrl+Shift+L", VerticalAlignment = VerticalAlignment.Center };
     public CheckBox DebugToggle { get; } = new() { Content = L.T("DebugLog"), ToolTip = L.T("DebugLogHelp"), VerticalAlignment = VerticalAlignment.Center };
     public event Action? ExportRequested;
+    public event Action? PauseRequested;
+    public Button PauseButton { get; } = new() { Name="pause_operation", Content=L.T("PauseOperation"), Visibility=Visibility.Collapsed, Padding=new Thickness(8,2,8,2), Margin=new Thickness(0,0,8,0) };
     public event Action<bool>? DebugLoggingChanged;
     public bool Follow => FollowToggle.IsChecked == true;
     public bool Expanded { get; private set; } = true;
@@ -39,7 +41,8 @@ public sealed class OperationPanel : Grid {
         var row = new DockPanel(); collapse = View.IconButton("M 1,5 L 7,11 13,5", "HideOperationLog", ToggleExpanded);
         collapse.Name = "toggle_log"; collapse.Margin = new Thickness(8, 0, 0, 0);
         var export = View.IconButton("M 7,1 L 7,10 M 3,6 L 7,10 11,6 M 1,11 L 1,14 13,14 13,11", "ExportLog", () => ExportRequested?.Invoke()); export.Name = "export_log";
-        foreach (var control in new UIElement[] { collapse, export, FollowToggle, DebugToggle, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
+        PauseButton.Click += (_,_) => PauseRequested?.Invoke();
+        foreach (var control in new UIElement[] { collapse, export, FollowToggle, DebugToggle, PauseButton, timing }) { DockPanel.SetDock(control, Dock.Right); row.Children.Add(control); }
         state.TextTrimming = TextTrimming.CharacterEllipsis; state.TextWrapping = TextWrapping.NoWrap;
         state.Margin = new Thickness(0); timing.Margin = new Thickness(0, 0, 12, 0);
         row.Children.Add(state); View.Add(this, row, 0); View.Add(this, progress, 1); View.Add(this, Log, 2);
@@ -93,7 +96,10 @@ public sealed class OperationPanel : Grid {
         output.WriteLine("Scope: current operation; retained log tail is bounded to 16 Mi characters.");
         output.WriteLine(); foreach (string line in retained) output.Write(line);
     }
+    private bool paused;
+    public void SetPaused(bool value){paused=value;if(value)clock.Stop();else clock.Start();RefreshTiming();}
     public void Start() {
+        paused=false;
         latest = null; phase = detail = ""; phaseStart = 0; Log.Clear(); retained.Clear(); retainedCharacters = 0; earlierLinesDropped = false; clock.Restart(); timer.Start();
         progress.BeginAnimation(ProgressBar.ValueProperty, null); progress.Value = 0;
         progress.Tag = Theme.ReduceMotion ? "reduced" : "animate";
@@ -119,6 +125,7 @@ public sealed class OperationPanel : Grid {
     }
     private void RefreshTiming() {
         string elapsed = clock.Elapsed.ToString(@"hh\:mm\:ss");
+        if(paused){timing.Text=L.T("PauseOperation")+" | "+L.T("ElapsedOnly",elapsed);return;}
         if (latest == null) { timing.Text = L.T("ElapsedOnly", elapsed); return; }
         double seconds = Math.Max(0.1, clock.Elapsed.TotalSeconds - phaseStart);
         long total = latest.TotalBytes ?? latest.TotalFiles ?? 0, done = latest.TotalBytes != null ? latest.Bytes : latest.Files;
@@ -135,7 +142,7 @@ public sealed class OperationPanel : Grid {
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
         "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-resume" => "PhaseResumeExport", "chat-discovery" => "FindAccounts",
-        "chat-avatars" => "PhaseGroupAvatars", "chat-update-index" => "PhaseUpdateIndex", "chat-update-merge" => "PhaseUpdateMerge", "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
+        "chat-encrypt" => "Phase_chat-encrypt", "chat-avatars" => "PhaseGroupAvatars", "chat-update-index" => "PhaseUpdateIndex", "chat-update-merge" => "PhaseUpdateMerge", "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
 }
 
 internal sealed class ActionCommand(Action action) : ICommand {

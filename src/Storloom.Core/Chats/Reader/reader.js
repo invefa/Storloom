@@ -15,14 +15,16 @@
   const current=identityOf(m),details=element('details','','identity-details'),summary=element('summary',nameOf(m)||label('ReaderUnknownSender'));
   details.append(summary);const panel=element('div','','identity-panel');details.append(panel);
   panel.append(element('strong',label('ReaderIdentity')));
-  const rows=[['ReaderAccount',m.Sender],['ReaderNickname',current.Nickname],['ReaderFriendRemark',current.FriendRemark],['ReaderGroupCard',current.GroupCard]];
+  if(current.Avatar&&safeAsset(current.Avatar)){const portrait=element('img','','identity-portrait');portrait.src=archiveBase+current.Avatar;portrait.alt=nameOf(m);portrait.tabIndex=0;portrait.setAttribute('role','button');portrait.title=label('ReaderPreviewImage');portrait.onclick=()=>openImage(current.Avatar,nameOf(m));portrait.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();portrait.click();}};panel.append(portrait);}
+
+  const rows=[['ReaderPlatform',m.Platform],['ReaderConversation',m.ConversationName||m.Conversation],['ReaderAccount',m.Sender],['ReaderNickname',current.Nickname],['ReaderFriendRemark',current.FriendRemark],['ReaderGroupCard',current.GroupCard]];
   if(current.RecordedName)rows.push(['ReaderRecordedName',current.RecordedName]);
   const table=element('dl');for(const [name,value] of rows)table.append(element('dt',label(name)),element('dd',value||label('ReaderNotRecorded')));panel.append(table);
   panel.append(element('small',label('ReaderIdentityProvenance')));
   const versions=(identityHistory.get(m.Sender)||[]).filter(p=>!p.Conversation||p.Conversation===m.Conversation);
   if(versions.length){panel.append(element('strong',label('ReaderIdentityHistory')));const list=element('div','','identity-history');panel.append(list);
    for(const version of versions){const item=element('div','','identity-version');
-    if(version.Avatar&&safeAsset(version.Avatar)){const img=element('img');img.src=archiveBase+version.Avatar;img.alt='';item.append(img);}
+    if(version.Avatar&&safeAsset(version.Avatar)){const img=element('img');img.src=archiveBase+version.Avatar;img.alt=label('ReaderPreviewImage');img.tabIndex=0;img.setAttribute('role','button');img.onclick=()=>openImage(version.Avatar,nameOf(m));img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();img.click();}};item.append(img);}
     const values=[['ReaderNickname',version.Nickname],['ReaderFriendRemark',version.FriendRemark],['ReaderGroupCard',version.GroupCard],['ReaderRecordedName',version.RecordedName]].filter(([,v])=>v).map(([k,v])=>label(k)+': '+v);
     item.append(element('span',values.join(' · ')||label('ReaderNotRecorded')));
     if(version.ObservedAt)item.append(element('small',label('ReaderObservedAt')+': '+new Date(version.ObservedAt).toLocaleString()));
@@ -341,7 +343,8 @@
    const content = element('div', '', 'content'), date = new Date(m.Timestamp * 1000);
    const sender=displayName && displayName!=='0'?displayName:label('ReaderUnknownSender');
    const time = element('div', (system ? '' : sender + '  ') + (m.Timestamp>0 && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : label('ReaderUnknownTime')), 'timestamp');
-   if(!system)time.replaceChildren(identityDetails(m),document.createTextNode('  '+(m.Timestamp>0&&!Number.isNaN(date.valueOf())?date.toLocaleString():label('ReaderUnknownTime'))));
+   if(!system){const info=identityDetails(m);time.replaceChildren(info,document.createTextNode('  '+(m.Timestamp>0&&!Number.isNaN(date.valueOf())?date.toLocaleString():label('ReaderUnknownTime'))));avatar.tabIndex=0;avatar.setAttribute('role','button');avatar.title=label('ReaderIdentity');avatar.dataset.profile='true';avatar.onclick=()=>{for(const other of document.querySelectorAll('.identity-details[open]'))if(other!==info)other.open=false;info.open=!info.open;};avatar.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();avatar.click();}};}
+
    const bubble = element('div', '', 'bubble'), referenceZone = element('div', '', 'reference-zone');
    if(parts.length&&parts.every(p=>['image','video','sticker'].includes(p.Kind)&&!face(p))&&mediaEntries.some(media=>safeAsset(media.Path)))bubble.classList.add('visual-only');
    if(parts.length&&parts.every(p=>p.Kind==='audio')&&mediaEntries.some(media=>media.Kind==='audio'&&safeAsset(media.Path)))bubble.classList.add('audio-only');
@@ -440,6 +443,10 @@
  function go(n){if(archiveResults){searchArchive(n);return;}if(!current)return;stopSearch();page=Math.max(0,Math.min(current.pages-1,n));load();}
  $('previous').onclick=()=>go(archiveResults?archiveSearch.batch-1:page-1);$('next').onclick=()=>go(archiveResults?archiveSearch.batch+1:page+1);$('first').onclick=()=>go(0);$('last').onclick=()=>{if(current)go(archiveResults?archiveSearch.endBatch:current.pages-1);};
  $('page-go').onclick=()=>{if(!current)return;const n=Number($('page-input').value);if(Number.isInteger(n)&&n>=1&&n<=(archiveResults?archiveSearch.starts.length:current.pages))go(n-1);else $('page-input').reportValidity();};$('page-input').onkeydown=e=>{if(e.key==='Enter')$('page-go').click();};
+ document.addEventListener('pointerdown',e=>{if(!e.target.closest('.identity-details,.avatar[data-profile]'))for(const card of document.querySelectorAll('.identity-details[open]'))card.open=false;});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')for(const card of document.querySelectorAll('.identity-details[open]'))card.open=false;});
+ document.addEventListener('focusin',e=>{if(!e.target.closest('.identity-details,.avatar[data-profile]'))for(const card of document.querySelectorAll('.identity-details[open]'))card.open=false;});
+ document.addEventListener('toggle',e=>{if(e.target.matches?.('.identity-details[open]'))for(const other of document.querySelectorAll('.identity-details[open]'))if(other!==e.target)other.open=false;},true);
  const preview=$('image-preview'),picture=$('preview-image'),stage=$('image-stage');let imagePath='',imageName='',scale=1,x=0,y=0,drag=null,rotation=0,imageOrigin=null;
  const split=$('sidebar-splitter');let sideDrag=null,windowDrag=null;
  function sideWidth(value){return Math.max(180,Math.min(480,innerWidth-320,Number(value)||290));}

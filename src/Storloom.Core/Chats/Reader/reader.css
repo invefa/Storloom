@@ -98,3 +98,7 @@ nav button.has-avatar{display:grid;grid-template-columns:28px minmax(0,1fr);colu
 .reaction-badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
 .reaction-badge{border:1px solid var(--line);border-radius:12px;padding:1px 7px;background:var(--surface);font-size:12px}
 .reaction-badge.own{background:var(--selected)}
+
+.message-tools{justify-content:flex-start;gap:18px}.message-tools>.source{flex:0 1 auto}.message-tools:has(.source[open])>.source{flex:1 1 100%}
+.identity-portrait{display:block;width:64px;height:64px;object-fit:cover;border-radius:50%;cursor:zoom-in;margin:8px 0}
+.identity-version img{cursor:zoom-in}.avatar[data-profile]{cursor:pointer}.identity-panel{max-width:min(420px,75vw)}

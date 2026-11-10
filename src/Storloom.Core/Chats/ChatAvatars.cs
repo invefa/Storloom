@@ -22,7 +22,7 @@ internal static class ChatAvatars {
                     else {using var output=new FileStream(target,FileMode.CreateNew,FileAccess.Write);output.Write(image);}
                     result[id]="assets/"+filename;
                 }
-            } catch(Exception ex)when(ex is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException){cancellation.ThrowIfCancellationRequested();}
+            } catch(Exception ex)when(ex is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException){OperationPause.Check(cancellation);}
             progress?.Report(new("chat-avatars",Interlocked.Increment(ref done),0,TotalFiles:ids.Length));
         });
         failed=ids.Length-result.Count;return new(result,StringComparer.Ordinal);

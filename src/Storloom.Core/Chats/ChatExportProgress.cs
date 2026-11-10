@@ -30,7 +30,7 @@ internal static class ExportProgressFiles {
             throw new InvalidDataException("Export checkpoint file size mismatch.");
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         byte[] buffer = new byte[128 * 1024]; long remaining = proof.Bytes;
-        while (remaining > 0) { cancellation.ThrowIfCancellationRequested(); int count = input.Read(buffer, 0, (int)Math.Min(remaining, buffer.Length));
+        while (remaining > 0) { OperationPause.Check(cancellation); int count = input.Read(buffer, 0, (int)Math.Min(remaining, buffer.Length));
             if (count == 0) throw new EndOfStreamException(); hash.AppendData(buffer, 0, count); remaining -= count; }
         if (Convert.ToHexString(hash.GetHashAndReset()) != proof.Sha256)
             throw new InvalidDataException("Export checkpoint file authentication failed; resume refused.");

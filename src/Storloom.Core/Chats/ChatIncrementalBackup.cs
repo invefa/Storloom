@@ -31,7 +31,7 @@ public static class ChatIncrementalBackup {
         var oldReceipts = previous.Receipts.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
         var inherited = new Dictionary<string, TransferReceipt>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in plan.Files) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             // Keep databases/WAL physically together in each generation for SQLite and client compatibility.
             string name = Path.GetFileName(file.RelativePath);
             if (name.EndsWith(".db", StringComparison.OrdinalIgnoreCase) || name.EndsWith("-wal", StringComparison.OrdinalIgnoreCase) || name.EndsWith("-shm", StringComparison.OrdinalIgnoreCase)) continue;
@@ -60,7 +60,7 @@ public static class ChatIncrementalBackup {
         long done = 0;
         try {
             foreach (var file in plan.Files) {
-                cancellation.ThrowIfCancellationRequested(); Closed();
+                OperationPause.Check(cancellation); Closed();
                 string inputPath = TransferService.Child(plan.Source, file.RelativePath); PathPolicy.AssertNoLinks(inputPath);
                 if (NativeFile.ReadStamp(inputPath) != file.Stamp) throw new IOException("Account changed during backup.");
                 if (inherited.TryGetValue(file.RelativePath, out var receipt)) { receipts.Add(receipt); continue; }
@@ -71,7 +71,7 @@ public static class ChatIncrementalBackup {
                 using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
                     byte[] buffer = new byte[1024 * 1024]; int count;
                     while ((count = input.Read(buffer)) > 0) {
-                        cancellation.ThrowIfCancellationRequested(); output.Write(buffer, 0, count); hash.AppendData(buffer, 0, count); done += count;
+                        OperationPause.Check(cancellation); output.Write(buffer, 0, count); hash.AppendData(buffer, 0, count); done += count;
                         progress?.Report(new("transfer", receipts.Count, done, checked(copyBytes * 2), plan.Files.Count, file.RelativePath));
                     }
                     output.Flush(true);
@@ -87,12 +87,12 @@ public static class ChatIncrementalBackup {
             // Check even reused source files again before publishing this consistent generation.
             Closed();
             foreach (var file in plan.Files) {
-                cancellation.ThrowIfCancellationRequested(); string path = TransferService.Child(plan.Source, file.RelativePath); PathPolicy.AssertNoLinks(path);
+                OperationPause.Check(cancellation); string path = TransferService.Child(plan.Source, file.RelativePath); PathPolicy.AssertNoLinks(path);
                 if (NativeFile.ReadStamp(path) != file.Stamp) throw new IOException("Account changed before publishing.");
             }
             var published = new TransferJournal { Plan = plan, State = "Completed", Receipts = receipts };
             JsonFiles.Write(staging + ".manifest.json", published);
-            cancellation.ThrowIfCancellationRequested(); PathPolicy.AssertNoLinks(Path.GetDirectoryName(plan.Destination)!);
+            OperationPause.Check(cancellation); PathPolicy.AssertNoLinks(Path.GetDirectoryName(plan.Destination)!);
             Directory.Move(staging, plan.Destination);
             File.Move(staging + ".manifest.json", manifest);
             Save("Completed");

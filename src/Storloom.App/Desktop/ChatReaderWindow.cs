@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using Storloom.Core;
@@ -10,15 +11,33 @@ namespace Storloom.App;
 public sealed class ChatReaderWindow : ThemeWindow {
     public WebView2 Browser { get; } = new();
     private bool closed;
+    internal Func<string?>? VaultPasswordProvider { get; set; }
+    private ChatVault? vault;
+    private FileStream? readerLease;
     internal string? LastClipboardError { get; private set; }
     internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
     public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false) : base(L.T("ChatArchive"), 1200, 820) {
-        Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); };
+        Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); };
         Loaded += async (_, _) => {
             try {
                 directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
+                string lockPath=Path.Combine(directory,".export.lock");
+                if(!File.Exists(lockPath)){using var create=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.Write,FileShare.Read);}
+                PathPolicy.AssertNoLinks(lockPath);readerLease=new FileStream(lockPath,FileMode.Open,FileAccess.Read,FileShare.Read);
+                if(ChatVault.Exists(directory)){
+                    string? secret;
+                    if(VaultPasswordProvider!=null){secret=VaultPasswordProvider();VaultPasswordProvider=null;}
+                    else{var password=new VaultPasswordWindow(false,false){Owner=this};secret=password.ShowDialog()==true?password.Password:null;password.ClearSecret();}
+                    if(secret==null){Close();return;}
+                    try{vault=await Task.Run(()=>ChatVault.Open(directory,secret.AsSpan()));}finally{secret=null;}
+                    if(closed){vault.Dispose();return;}
+                    var protection=await Task.Run(()=>vault.Status);
+                    Title=L.T("ChatArchive")+" — "+L.T(protection.Complete?"VaultReaderProtected":"VaultReaderPartial");Caption.Title=Title;
+                }
                 var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.Combine(dataRoot, "reader-browser"));
-                if (closed) return; await Browser.EnsureCoreWebView2Async(environment); if (closed) return;
+                if (closed) return;
+                if(vault!=null){var options=environment.CreateCoreWebView2ControllerOptions();options.IsInPrivateModeEnabled=true;options.ProfileName="ProtectedReader";await Browser.EnsureCoreWebView2Async(environment,options);}
+                else await Browser.EnsureCoreWebView2Async(environment); if (closed) return;
                 var core = Browser.CoreWebView2;
                 core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = true;
                 core.Settings.AreDefaultContextMenusEnabled = false;
@@ -33,18 +52,19 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)await WriteClipboardAsync(()=>Clipboard.SetText(value));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action=="clipboard-image"){copyingImage=true;var bitmap=DecodeClipboardImage(root.GetProperty("data").GetString());await WriteClipboardAsync(()=>ImageClipboardWriter(bitmap));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action is not ("save-image" or "save-file"))return;
-                        string? path=root.GetProperty("path").GetString();string source=action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
+                        string? path=root.GetProperty("path").GetString();string source=vault!=null?ValidateVaultResource(path,action=="save-image"):action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
                         string name=Path.GetFileName(root.TryGetProperty("name",out var valueName)?valueName.GetString():null)??"image";
                         foreach(char invalid in Path.GetInvalidFileNameChars())name=name.Replace(invalid,'_');
                         string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
                         var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T(action=="save-image"?"ReaderSaveImage":"ReaderSaveFile"),FileName=name,Filter="File|*"+extension,AddExtension=true,DefaultExt=extension};
                         if(picker.ShowDialog(this)!=true)return;
-                        SaveResourceFile(source,picker.FileName);
+                        if(vault==null)SaveResourceFile(source,picker.FileName);
+                        else{using var input=vault.OpenRead(source);SaveDecryptedResource(input,picker.FileName);}
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
-                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException){if(copyingImage)LastClipboardError=ex.GetType().Name+":"+ex.HResult.ToString("X");if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
+                    }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException or CryptographicException){if(copyingImage)LastClipboardError=ex.GetType().Name+":"+ex.HResult.ToString("X");if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
                 };
                 core.Settings.AreDefaultScriptDialogsEnabled = false; core.Settings.AreDevToolsEnabled = false; core.Settings.IsStatusBarEnabled = false;
-                core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
+                if(vault==null)core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
                 bool Allowed(string uri) => Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.Scheme == "https" && parsed.Port == 443 && parsed.UserInfo.Length == 0 && parsed.Host is "archive.storloom.invalid" or "reader.storloom.invalid";
                 core.NavigationStarting += (_, args) => { if (!Allowed(args.Uri)) args.Cancel = true; };
                 core.FrameNavigationStarting += (_, args) => args.Cancel = true;
@@ -55,12 +75,17 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 var assets = ReaderAssets();
                 core.WebResourceRequested += (_, args) => {
                     if (!Allowed(args.Request.Uri)) args.Response = environment.CreateWebResourceResponse(null, 403, "Local archive only", "");
+                    else if(vault!=null&&new Uri(args.Request.Uri).Host=="archive.storloom.invalid") {
+                        try{string relative=Uri.UnescapeDataString(new Uri(args.Request.Uri).AbsolutePath.TrimStart('/'));var input=vault.OpenRead(relative);
+                            args.Response=VaultResponse(environment,args.Request,input,ContentType(relative));
+                        }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException){args.Response=environment.CreateWebResourceResponse(null,404,"Protected resource unavailable","Cache-Control: no-store");}
+                    }
                     else if (new Uri(args.Request.Uri).Host == "reader.storloom.invalid") {
                         string relative=new Uri(args.Request.Uri).AbsolutePath;
                         if(relative.StartsWith("/image-copy/",StringComparison.Ordinal)) {
-                            try {string path=ResolveImagePath(directory,"assets/"+relative[12..]);if(new FileInfo(path).Length>32*1024*1024)throw new InvalidDataException("Image exceeds clipboard source limit.");string mime=Path.GetExtension(path).ToLowerInvariant() switch {".jpg" or ".jpeg"=>"image/jpeg",".gif"=>"image/gif",".webp"=>"image/webp",".bmp"=>"image/bmp",_=>"image/png"};
-                                args.Response=environment.CreateWebResourceResponse(File.OpenRead(path),200,"OK","Content-Type: "+mime+"\r\nCache-Control: no-store");
-                            }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException){args.Response=environment.CreateWebResourceResponse(null,404,"Image unavailable","");}
+                            try {string path=vault!=null?ValidateVaultResource("assets/"+relative[12..],true):ResolveImagePath(directory,"assets/"+relative[12..]);var input=vault!=null?vault.OpenRead(path):File.OpenRead(path);if(input.Length>32*1024*1024){input.Dispose();throw new InvalidDataException("Image exceeds clipboard source limit.");}
+                                args.Response=environment.CreateWebResourceResponse(input,200,"OK","Content-Type: "+ContentType(path)+"\r\nCache-Control: no-store");
+                            }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException or CryptographicException){args.Response=environment.CreateWebResourceResponse(null,404,"Image unavailable","");}
                         }
                         else if (assets.TryGetValue(relative, out var asset))
                             args.Response = environment.CreateWebResourceResponse(new MemoryStream(asset.Bytes, false), 200, "OK", "Content-Type: " + asset.Type + "; charset=utf-8\r\nCache-Control: no-store");
@@ -70,10 +95,34 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 if (reduceMotion) await core.AddScriptToExecuteOnDocumentCreatedAsync("document.addEventListener('DOMContentLoaded',()=>document.documentElement.classList.add('reduce-motion'));");
                 core.Navigate("https://reader.storloom.invalid/messages.html" + (Theme.IsDark ? "#dark" : "#light"));
             } catch (Exception ex) when (!closed) {
-                Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T("ReaderRuntimeMissing") + "\n" + ex.Message));
+                readerLease?.Dispose();vault?.Dispose();Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T(ChatVault.Exists(directory)?"VaultOpenFailed":"ReaderRuntimeMissing") + (ChatVault.Exists(directory)?"":"\n"+ex.Message)));
             }
         };
     }
+    private static string ValidateVaultResource(string? path,bool image) {
+        string formats=image?"png|jpg|jpeg|gif|webp|bmp":"pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv";
+        if(path==null||!System.Text.RegularExpressions.Regex.IsMatch(path,"^assets/[a-f0-9]{64}\\.("+formats+")$"))throw new InvalidDataException("Invalid protected resource.");return path;
+    }
+    private static string ContentType(string path)=>Path.GetExtension(path).ToLowerInvariant() switch{
+        ".js"=>"application/javascript", ".css"=>"text/css", ".html"=>"text/html", ".json"=>"application/json",
+        ".jpg" or ".jpeg"=>"image/jpeg", ".png"=>"image/png", ".gif"=>"image/gif", ".webp"=>"image/webp", ".bmp"=>"image/bmp",
+        ".mp4"=>"video/mp4", ".webm"=>"video/webm", ".wav"=>"audio/wav", ".mp3"=>"audio/mpeg", ".ogg"=>"audio/ogg", _=>"application/octet-stream"};
+    private static CoreWebView2WebResourceResponse VaultResponse(CoreWebView2Environment environment,CoreWebView2WebResourceRequest request,Stream stream,string type){
+        long length=stream.Length;string headers="Content-Type: "+type+"\r\nCache-Control: no-store\r\nAccept-Ranges: bytes";
+        if(request.Headers.Contains("Range")){
+            var match=System.Text.RegularExpressions.Regex.Match(request.Headers.GetHeader("Range"),"^bytes=([0-9]+)-([0-9]*)$");
+            if(!match.Success||!long.TryParse(match.Groups[1].Value,out long start)||start>=length){stream.Dispose();return environment.CreateWebResourceResponse(null,416,"Invalid range","Content-Range: bytes */"+length);}
+            long end=match.Groups[2].Value.Length>0&&long.TryParse(match.Groups[2].Value,out long requested)?Math.Min(requested,length-1):length-1;
+            if(end<start){stream.Dispose();return environment.CreateWebResourceResponse(null,416,"Invalid range","");}
+            stream.Position=start;return environment.CreateWebResourceResponse(new BoundedReadStream(stream,end-start+1),206,"Partial Content",headers+"\r\nContent-Length: "+(end-start+1)+"\r\nContent-Range: bytes "+start+"-"+end+"/"+length);
+        }
+        return environment.CreateWebResourceResponse(stream,200,"OK",headers+"\r\nContent-Length: "+length);
+    }
+    private sealed class BoundedReadStream(Stream input,long remaining):Stream{
+        public override int Read(byte[] buffer,int offset,int count){int read=input.Read(buffer,offset,(int)Math.Min(count,remaining));remaining-=read;return read;}
+        public override bool CanRead=>true;public override bool CanSeek=>false;public override bool CanWrite=>false;public override long Length=>remaining;public override long Position{get=>throw new NotSupportedException();set=>throw new NotSupportedException();}public override void Flush(){}public override long Seek(long offset,SeekOrigin origin)=>throw new NotSupportedException();public override void SetLength(long value)=>throw new NotSupportedException();public override void Write(byte[] buffer,int offset,int count)=>throw new NotSupportedException();protected override void Dispose(bool disposing){if(disposing)input.Dispose();base.Dispose(disposing);}
+    }
+    private static void SaveDecryptedResource(Stream input,string target){target=PathPolicy.Normalize(target);PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);if(File.Exists(target)){PathPolicy.AssertNoLinks(target);if(NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared destination cannot be overwritten.");}using var output=new FileStream(target,FileMode.Create,FileAccess.Write,FileShare.None);input.CopyTo(output);output.Flush(true);}
     internal static void SaveResourceFile(string source,string target) {
         source=PathPolicy.Normalize(source);target=PathPolicy.Normalize(target);PathPolicy.AssertNoLinks(source);
         if(target.Equals(source,StringComparison.OrdinalIgnoreCase))return;

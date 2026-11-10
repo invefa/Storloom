@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '1.0.0',
+    [string] $Version = '1.1.0',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'

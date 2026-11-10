@@ -659,11 +659,18 @@ public sealed class FormTests {
             string voice="assets/"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(wave)).ToLowerInvariant()+".wav";File.WriteAllBytes(Path.Combine(export.Directory,voice),wave);
             const string logical="0123456789abcdef0123456789abcdef";
             string mediaItems=System.Text.Json.JsonSerializer.Serialize(new[]{
-                new ChatMessage("QQ","direct:fixture","fixture",1700000000,2,""){Parts=[new("image",MediaKeys:[logical])],Media=[new(image,"image",logical+".jpg"){Key=logical},new(variant,"image",logical+".png"){Key=logical}]},
+                new ChatMessage("QQ","direct:fixture","fixture",1700000000,2,""){Identity=new("fixture","direct:fixture",Nickname:"Fixture nickname",FriendRemark:"Fixture remark",GroupCard:"Fixture card",Avatar:image),Parts=[new("image",MediaKeys:[logical])],Media=[new(image,"image",logical+".jpg"){Key=logical},new(variant,"image",logical+".png"){Key=logical}]},
                 new ChatMessage("QQ","direct:fixture","fixture",1700000001,2,""){Parts=[new("audio",Title:"internal-voice.amr",MediaKeys:["voice"])],Media=[new(voice,"audio","internal-voice.amr"){Key="voice"}]}
             });
             Query("window.receivePage(window.archiveIndex.conversations[0].id,1,"+mediaItems+");true");
             Assert.Equal("1",Query("document.querySelectorAll('img.previewable').length"));Assert.Equal("1",Query("document.querySelectorAll('.image-source-switch').length"));
+            Assert.Equal("true",Query("(()=>{const a=document.querySelector('.message-tools .source').getBoundingClientRect(),b=document.querySelector('.image-source-tools').getBoundingClientRect();return b.left-a.right<35})()"));
+            Query("document.querySelector('.avatar[data-profile]').click();true");Assert.Equal("true",Query("document.querySelector('.identity-details').open"));
+            Assert.Contains("Fixture nickname",Query("document.querySelector('.identity-panel').textContent"));Assert.Contains("Fixture remark",Query("document.querySelector('.identity-panel').textContent"));
+            Query("document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));true");Assert.Equal("false",Query("document.querySelector('.identity-details').open"));
+            Query("document.querySelector('.avatar[data-profile]').click();document.querySelector('.identity-portrait').click();true");Assert.Equal("true",Query("document.querySelector('#image-preview').open"));
+            Query("document.querySelector('#image-close').click();document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true");Assert.Equal("false",Query("document.querySelector('.identity-details').open"));
+
             Query("document.querySelector('.image-source-switch').click();true");Assert.Contains(variant,Query("document.querySelector('img.previewable').dataset.asset"));
             Query("document.querySelector('.image-source-all').click();true");Assert.Equal("2",Query("document.querySelectorAll('img.previewable').length"));
             Query("document.querySelector('.image-source-all').click();true");Assert.Equal("1",Query("document.querySelectorAll('img.previewable').length"));
@@ -700,6 +707,7 @@ public sealed class FormTests {
             Assert.Equal("true",Query("(()=>{const b=document.querySelector('#sidebar-toggle').getBoundingClientRect(),t=document.querySelector('#chat-title').getBoundingClientRect(),m=document.querySelector('#chat-meta').getBoundingClientRect();return Math.abs(b.top+b.height/2-t.top-t.height/2)<5&&Math.abs(t.bottom-m.bottom)<6&&document.querySelector('.chat-header').getBoundingClientRect().height<60})()"));
             Assert.Equal("true",Query("Math.abs(document.querySelector('.pagination').getBoundingClientRect().left-document.querySelector('main').getBoundingClientRect().left-12)<2"));
             Query("document.querySelector('#filter-toggle').click();document.querySelector('#message-search').value='selectable content';true");
+            window.Activate();window.Browser.Focus();Pump();Query("document.querySelector('#message-search').focus();true");
             using(var rect=System.Text.Json.JsonDocument.Parse(Query("(()=>{const r=document.querySelector('#message-search').getBoundingClientRect();return {x:r.left+10,y:r.top+r.height/2}})()"))){double x=rect.RootElement.GetProperty("x").GetDouble(),y=rect.RootElement.GetProperty("y").GetDouble();
                 string Mouse(string type,double px,int buttons)=>System.Text.Json.JsonSerializer.Serialize(new{type,x=px,y,button="left",buttons,clickCount=1});
                 Wait(core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",Mouse("mousePressed",x,1)));
@@ -1155,6 +1163,32 @@ public sealed class FormTests {
                     var color=((SolidColorBrush)Theme.Brush(key)).Color;Assert.Equal(color.R,color.G);Assert.Equal(color.G,color.B);
                 }
         }finally{window.Close();Directory.Delete(fixture,true);Theme.Apply(new AppPreferences{ReduceMotion=true});}
+    });
+    [Fact]
+    public void ProtectedReaderDecryptsContentInPrivateProfileWithoutPlaintextExtraction() => OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),reading=Path.Combine(fixture,"reading");Directory.CreateDirectory(source);
+        Theme.Apply(new AppPreferences{ReduceMotion=true});L.SetLanguage("en");
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','Synthetic protected message');");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
+        new ChatExporter().ExportVerifiedBackup(backup.Manifest,reading,ChatPlatform.WeChat);
+        byte[] original=File.ReadAllBytes(Path.Combine(reading,"messages.jsonl"));
+        using(var vault=ChatVault.Create(reading,"synthetic-protected-reader")){Assert.True(vault.Encrypt().Complete);}
+        Assert.False(File.Exists(Path.Combine(reading,"messages.jsonl")));Assert.False(File.Exists(Path.Combine(reading,"archive-index.js")));
+        var window=new ChatReaderWindow(reading,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};
+        typeof(ChatReaderWindow).GetProperty("VaultPasswordProvider",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,(Func<string?>)(()=>"synthetic-protected-reader"));
+        try{
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);
+            while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
+            Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));
+            var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
+            while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="1"){Pump();Thread.Sleep(10);}
+            Assert.Contains("Synthetic protected message",Query("document.querySelector('#messages').textContent"));Assert.True(core.Profile.IsInPrivateModeEnabled);
+            using var vault=ChatVault.Open(reading,"synthetic-protected-reader");Assert.ThrowsAny<IOException>(()=>vault.Encrypt());
+            var request=core.Environment.CreateWebResourceRequest("https://archive.storloom.invalid/messages.jsonl","GET",null,"Range: bytes=2-6");
+            var response=(Microsoft.Web.WebView2.Core.CoreWebView2WebResourceResponse)typeof(ChatReaderWindow).GetMethod("VaultResponse",BindingFlags.Static|BindingFlags.NonPublic)!.Invoke(null,[core.Environment,request,vault.OpenRead("messages.jsonl"),"application/octet-stream"])!;
+            Assert.Equal(206,response.StatusCode);using(var bytes=new MemoryStream()){response.Content.CopyTo(bytes);response.Content.Dispose();Assert.Equal(original[2..7],bytes.ToArray());}
+            Assert.False(File.Exists(Path.Combine(reading,"archive-index.js")));Assert.False(File.Exists(Path.Combine(reading,"messages.jsonl")));
+        }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
     private static double Contrast(Color foreground,Color background) {
         static double Luminance(Color c) {static double Linear(byte channel){double x=channel/255d;return x<=.04045?x/12.92:Math.Pow((x+.055)/1.055,2.4);}return .2126*Linear(c.R)+.7152*Linear(c.G)+.0722*Linear(c.B);}

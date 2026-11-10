@@ -52,12 +52,12 @@ public sealed class TransferService {
         var pending = new Stack<string>();
         pending.Push(source);
         while (pending.TryPop(out string? directory)) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             PathPolicy.AssertNoLinks(directory);
             if (!Directory.EnumerateFileSystemEntries(directory).Any())
                 folders.Add(Path.GetRelativePath(source, directory));
             foreach (string path in Directory.EnumerateFileSystemEntries(directory)) {
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 FileAttributes attrs = File.GetAttributes(path);
                 if ((attrs & FileAttributes.ReparsePoint) != 0)
                     throw new IOException($"Transfer cannot omit a linked entry: {path}");
@@ -134,7 +134,7 @@ public sealed class TransferService {
         try {
             progress?.Report(new("transfer", 0, 0, checked(needed * 2), plan.Files.Count, SourceBytes: needed));
             foreach (var entry in plan.Files) {
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 CheckProcesses(plan.Processes);
                 string source = Child(plan.Source, entry.RelativePath);
                 string target = Child(staging, entry.RelativePath);
@@ -148,7 +148,7 @@ public sealed class TransferService {
                         byte[] buffer = new byte[1024 * 1024];
                         int count;
                         while ((count = input.Read(buffer)) > 0) {
-                            cancellation.ThrowIfCancellationRequested(); output.Write(buffer, 0, count);
+                            OperationPause.Check(cancellation); output.Write(buffer, 0, count);
                             sourceDigest.AppendData(buffer, 0, count); Advanced(count, "copy: " + entry.RelativePath);
                         }
                         output.Flush(true);
@@ -165,10 +165,10 @@ public sealed class TransferService {
             }
             foreach (string directory in plan.EmptyDirectories)
                 Directory.CreateDirectory(directory == "." ? staging : Child(staging, directory));
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             // Verify every destination against its streaming source hash before publishing the batch.
             foreach (var entry in receipts) {
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 using var target = File.OpenRead(Child(staging, entry.RelativePath));
                 if (Convert.ToHexString(Hash(target, cancellation,
                     count => Advanced(count, "verify batch: " + entry.RelativePath))) != entry.Sha256)
@@ -176,11 +176,11 @@ public sealed class TransferService {
             }
             AssertParents(plan.Destination);
             for (int attempt = 0; ; attempt++) {
-                cancellation.ThrowIfCancellationRequested(); AssertParents(plan.Destination);
+                OperationPause.Check(cancellation); AssertParents(plan.Destination);
                 try { Directory.Move(staging, plan.Destination); break; }
                 catch (IOException ex) when (attempt < 6 && (ex.HResult & 0xffff) is 5 or 32 or 33) {
                     // Windows indexers can briefly hold a newly written media file without delete sharing.
-                    if (cancellation.WaitHandle.WaitOne(50)) cancellation.ThrowIfCancellationRequested();
+                    if (cancellation.WaitHandle.WaitOne(50)) OperationPause.Check(cancellation);
                 }
             }
             published = true;
@@ -239,7 +239,7 @@ public sealed class TransferService {
         byte[] buffer = new byte[1024 * 1024];
         int count;
         while ((count = input.Read(buffer)) > 0) {
-            cancellation.ThrowIfCancellationRequested(); hash.AppendData(buffer, 0, count);
+            OperationPause.Check(cancellation); hash.AppendData(buffer, 0, count);
             bytesRead?.Invoke(count);
         }
         return hash.GetHashAndReset();

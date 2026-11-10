@@ -64,6 +64,7 @@ public static class ChatReadingUpdate {
         var databaseHashes = DatabaseHashes(manifest, platform);
         if (databaseHashes.Count == 0) throw new InvalidDataException("No supported message database in the new backup.");
         var changedDatabases = databaseHashes.Where(p => previousDatabases == null || !previousDatabases.TryGetValue(p.Key, out var hash) || hash != p.Value).Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if(ChatVault.Exists(directory))throw new InvalidOperationException("Encrypted readers cannot be updated in place. Keep the verified raw backup and update a separate reading copy.");
         var oldIndex = ReadIndex(directory);
         ChatIdentityHistory.FreezeLegacy(oldIndex);
         var nativeKeys=oldIndex["conversationKeys"] as JsonObject??new JsonObject();oldIndex["conversationKeys"]=nativeKeys;
@@ -86,7 +87,7 @@ public static class ChatReadingUpdate {
                 if (!reuse) {
                     long imported = 0;
                     foreach (string line in File.ReadLines(transcript)) {
-                        cancellation.ThrowIfCancellationRequested(); var message = Message(line);RememberConversation(message.Conversation);
+                        OperationPause.Check(cancellation); var message = Message(line);RememberConversation(message.Conversation);
                         index.Execute("INSERT OR IGNORE INTO messages VALUES(?,?,?)", Key(message), Fingerprint(message), message.Id ?? throw new InvalidDataException("Missing archived message identity."));
                         if (++imported % 1000 == 0) progress?.Report(new("chat-update-index", (int)Math.Min(imported, int.MaxValue), 0, TotalFiles: (int)Math.Min(report.Messages, int.MaxValue)));
                     }
@@ -94,7 +95,7 @@ public static class ChatReadingUpdate {
                 string delta = Path.Combine(work, "delta");
                 var deltaResult = new ChatExporter(parallelism, useLocalConfiguration).ExportVerifiedBackup(manifestPath, delta, platform, secret, progress, cancellation, verifyBackup,
                     selectMessage: message => {
-                        cancellation.ThrowIfCancellationRequested(); string key = Key(message), hash = Fingerprint(message);
+                        OperationPause.Check(cancellation); string key = Key(message), hash = Fingerprint(message);
                         var found = index.Query("SELECT h,id FROM messages WHERE k=?", key).SingleOrDefault();
                         if (found != null && found[0] == hash) { unchanged++; return null; }
                         string id = found?[1] ?? "u" + Guid.NewGuid().ToString("N");
@@ -102,7 +103,7 @@ public static class ChatReadingUpdate {
                         index.Execute("INSERT OR REPLACE INTO messages VALUES(?,?,?)", key, hash, id);
                         return message with { Id = id };
                     }, includeDatabase: relative => changedDatabases.Contains(relative));
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 if (deltaResult.CanResume || (deltaResult.Databases != changedDatabases.Count) || deltaResult.Issues.Any(i => i.RuleId == "chat-export"))
                     throw new IOException("New database processing failed; the previous reading copy was retained.");
                 foreach (string line in File.ReadLines(Path.Combine(delta, "messages.jsonl"))) {
@@ -128,7 +129,7 @@ public static class ChatReadingUpdate {
                         JsonFiles.Write(Path.Combine(emptyStage, StateFile), new UpdateState(1, account, platform, NativeFile.ReadStamp(transcript), Convert.ToHexString(TransferService.Hash(stream, cancellation)), databaseHashes));
                     var noChange = new ChatReadingUpdateResult(0, 0, unchanged, 0, directory);
                     JsonFiles.Write(Path.Combine(emptyStage, "reading-update-report.json"), noChange);
-                    cancellation.ThrowIfCancellationRequested(); Publish(directory, workName); return noChange;
+                    OperationPause.Check(cancellation); Publish(directory, workName); return noChange;
                 }
                 string merged = Path.Combine(work, "merged"); Directory.CreateDirectory(merged);
                 var affected = index.Query("SELECT data FROM changes").Select(row => Message(row[0]).Conversation).ToHashSet(StringComparer.Ordinal);
@@ -136,7 +137,7 @@ public static class ChatReadingUpdate {
                 using (var output = new StreamWriter(all, false, new UTF8Encoding(false), 1024 * 1024))
                 using (var writer = new ChatArchiveWriter(manifest.Plan.Destination, merged, merged, [], [], cancellation, Path.GetFileName(account), pageParallelism: parallelism)) {
                     foreach (string line in File.ReadLines(transcript)) {
-                        cancellation.ThrowIfCancellationRequested(); var message = Message(line);
+                        OperationPause.Check(cancellation); var message = Message(line);
                         var replacement = index.Query("SELECT data FROM changes WHERE k=?", Key(message)).SingleOrDefault();
                         if (replacement != null) {
                             var updated = Message(replacement[0]) with { Identity = message.Identity, IdentityVersion = message.IdentityVersion, SenderName = message.SenderName };
@@ -148,7 +149,7 @@ public static class ChatReadingUpdate {
                         if (total % 1000 == 0) progress?.Report(new("chat-update-merge", (int)Math.Min(total, int.MaxValue), 0, TotalFiles: (int)Math.Min(report.Messages + added, int.MaxValue)));
                     }
                     foreach (var row in index.Query("SELECT data FROM changes ORDER BY k")) {
-                        cancellation.ThrowIfCancellationRequested(); var message = Message(row[0]);
+                        OperationPause.Check(cancellation); var message = Message(row[0]);
                         output.WriteLine(row[0]); total++; writer.AddPrepared(message);
                         oldIndex["messageParts"]?.AsObject().Remove(message.Id!);
                     }
@@ -175,7 +176,7 @@ public static class ChatReadingUpdate {
             File.Move(pendingIndex, Path.Combine(stage, IndexFile));
             using (var stream = File.OpenRead(Path.Combine(stage, IndexFile)))
                 JsonFiles.Write(Path.Combine(stage, StateFile), new UpdateState(1, account, platform, NativeFile.ReadStamp(Path.Combine(stage, "messages.jsonl")), Convert.ToHexString(TransferService.Hash(stream, cancellation)), databaseHashes));
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             Publish(directory, workName);
             return JsonFiles.Read<ChatReadingUpdateResult>(Path.Combine(directory, "reading-update-report.json"));
         } finally {
@@ -196,7 +197,7 @@ public static class ChatReadingUpdate {
     }
     private static void CopyAssets(string delta, string directory, CancellationToken cancellation) {
                 if (Directory.Exists(Path.Combine(delta, "assets"))) foreach (string asset in Directory.GetFiles(Path.Combine(delta, "assets"))) {
-                    cancellation.ThrowIfCancellationRequested(); PathPolicy.AssertNoLinks(asset);
+                    OperationPause.Check(cancellation); PathPolicy.AssertNoLinks(asset);
                     using (var stream = File.OpenRead(asset))
                         if (!Convert.ToHexString(TransferService.Hash(stream, cancellation)).Equals(Path.GetFileNameWithoutExtension(asset), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Invalid derived resource.");
                     string target = Path.Combine(directory, "assets", Path.GetFileName(asset)); Directory.CreateDirectory(Path.GetDirectoryName(target)!); PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);

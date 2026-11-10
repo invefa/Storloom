@@ -26,7 +26,7 @@ internal static class SilkAudio {
                 writer.Write("RIFF"u8); writer.Write(pcm.Length + 36); writer.Write("WAVEfmt "u8); writer.Write(16); writer.Write((short)1); writer.Write((short)1);
                 writer.Write(24000); writer.Write(48000); writer.Write((short)2); writer.Write((short)16); writer.Write("data"u8); writer.Write(pcm.Length); writer.Write(pcm);
                 return wave.ToArray();
-            } catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); process.WaitForExit(); cancellation.ThrowIfCancellationRequested(); return null; }
+            } catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); process.WaitForExit(); OperationPause.Check(cancellation); return null; }
         } catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { return null; }
         finally { foreach (string path in Directory.EnumerateFiles(directory)) File.Delete(path); Directory.Delete(directory); }
     }

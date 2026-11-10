@@ -37,7 +37,7 @@ public static class ChatReaderRepair {
             }
         }
         foreach (string line in File.ReadLines(Path.Combine(directory, "messages.jsonl"))) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid archived message.");
             foreach (var media in message.Media) if (media.Key != null && CanReuse(media)) resources.TryAdd(media.Key, media);
             Collect((message.Id is {} id ? oldIndex["messageParts"]?[id]?.Deserialize<MessagePart[]>() : null)??message.Parts);
@@ -49,7 +49,7 @@ public static class ChatReaderRepair {
                 Path.GetFileName(source).StartsWith("wxid_", StringComparison.OrdinalIgnoreCase) ? Path.GetFileName(source) : Directory.GetParent(source)!.Name, includeLocalConfiguration)) {
                 int done = 0;
                 foreach (string key in keys) {
-                    cancellation.ThrowIfCancellationRequested();
+                    OperationPause.Check(cancellation);
                     ChatMedia? resource = resources.ContainsKey(key) ? null : resolver.ResolveMedia(key);
                     if (resource != null) resources[key] = resource;
                     progress?.Report(new("chat-resource-repair", ++done, 0, 0, Detail: null, TotalFiles: keys.Count));
@@ -57,7 +57,7 @@ public static class ChatReaderRepair {
             }
             string assets = Path.Combine(directory, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
             foreach (string path in Directory.Exists(Path.Combine(stage, "assets")) ? Directory.EnumerateFiles(Path.Combine(stage, "assets")) : []) {
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 string target = Path.Combine(assets, Path.GetFileName(path)); PathPolicy.AssertNoLinks(path);
                 if (!File.Exists(target)) File.Move(path, target);
                 else {
@@ -73,6 +73,7 @@ public static class ChatReaderRepair {
     // Refresh presentation and optional resource associations without rewriting messages or pages.
     public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false, IReadOnlyDictionary<string, ChatMedia>? resourceMedia = null, IReadOnlyDictionary<string,string>? avatars = null, IReadOnlyDictionary<string,MessagePart[]>? messageParts = null, bool includeIdentityHistory = false) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
+        if(ChatVault.Exists(directory))throw new InvalidOperationException("Encrypted readers cannot be repaired as plaintext.");
         string reportPath = Path.Combine(directory, "export-report.json");
         var report = JsonFiles.Read<ChatExportResult>(reportPath);
         if (report.CanResume) throw new InvalidOperationException("An interrupted export must finish before its reader is refreshed.");

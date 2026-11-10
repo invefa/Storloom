@@ -9,7 +9,7 @@ internal sealed class WeChatVoices : IDisposable {
     internal static string Identity(string conversation, string serverId) => conversation + "/" + serverId;
     public WeChatVoices(string source, string work, byte[]? secret, CancellationToken cancellation) {
         foreach (string database in Directory.EnumerateFiles(source, "media_*.db", SearchOption.AllDirectories)) {
-            cancellation.ThrowIfCancellationRequested(); PathPolicy.AssertNoLinks(database);
+            OperationPause.Check(cancellation); PathPolicy.AssertNoLinks(database);
             string temporary = Path.Combine(work, "voice-" + Guid.NewGuid().ToString("N") + ".db");
             try {
                 bool shifted = ChatCipher.DecryptDatabase(database, temporary, secret ?? [], ChatPlatform.WeChat, cancellation);

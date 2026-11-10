@@ -50,7 +50,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
     public ChatExportResult ExportVerifiedBackup(string manifestPath, string destination,
         ChatPlatform platform, byte[]? secret = null, IProgress<ScanProgress>? progress = null,
         CancellationToken cancellation = default, bool verifyBackup = true, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null) {
-        cancellation.ThrowIfCancellationRequested();
+        OperationPause.Check(cancellation);
         var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
         var verificationClock = System.Diagnostics.Stopwatch.StartNew();
         if (manifest.Version != 1 || manifest.State is not ("Verified" or "Completed" or
@@ -62,7 +62,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         long verifiedBytes = 0, totalBytes = manifest.Receipts.Sum(e => e.Bytes);
         int verifiedFiles = 0;
         foreach (var entry in manifest.Receipts) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             if (!received.Add(entry.RelativePath) || !expected.TryGetValue(entry.RelativePath, out var planned) ||
                 planned.Stamp.Bytes != entry.Bytes)
                 throw new InvalidDataException("Backup receipts do not match the planned files.");
@@ -76,7 +76,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                     throw new InvalidDataException("An unverified message database or WAL was added to the archive.");
         // Fail on an incorrect key before reading/hash-checking potentially many GB of attachments.
         foreach (string database in FindDatabases(manifest.Plan.Destination, platform)) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             using var input = File.OpenRead(database);
             byte[] prefix = new byte[Math.Min(input.Length, 5120)]; input.ReadExactly(prefix);
             bool plain = prefix.AsSpan().StartsWith("SQLite format 3\0"u8) ||
@@ -85,7 +85,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 throw new CryptographicException(L.T("DatabaseKeyMismatch"));
         }
         if (verifyBackup) foreach (var entry in manifest.Receipts) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             using var input = File.OpenRead(ChatIncrementalBackup.Resolve(manifest.Plan.Destination, entry));
             if (input.Length != entry.Bytes || Convert.ToHexString(TransferService.Hash(input, cancellation, count => {
                 verifiedBytes += count;
@@ -154,7 +154,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             // Metadata databases are small and read once before workers start.
             foreach (string contact in FindMetadataDatabases(source).Where(Allowed).Where(p=>platform==ChatPlatform.WeChat||!new[]{"head_image.db","Misc.db"}.Contains(Path.GetFileName(p),StringComparer.OrdinalIgnoreCase))
                 .Where(p => platform != ChatPlatform.QQ || !IsQQGuildDatabase(source, p))) {
-                cancellation.ThrowIfCancellationRequested(); string plain = Path.Combine(work, Guid.NewGuid().ToString("N") + ".db");
+                OperationPause.Check(cancellation); string plain = Path.Combine(work, Guid.NewGuid().ToString("N") + ".db");
                 try {
                     bool shifted = PrepareDatabase(contact, plain, secret, platform, cancellation);
                     using var reader = new SqliteReader(plain, shifted);
@@ -210,7 +210,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             for (int index = 0; index < databases.Length; index++) {
                 string output = Path.Combine(work, $"{index}.jsonl"); if (!File.Exists(output)) continue;
                 foreach (string line in File.ReadLines(output)) {
-                    cancellation.ThrowIfCancellationRequested();
+                    OperationPause.Check(cancellation);
                     if (assembled++ < archive.ProcessedMessages) continue;
                     var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid parsed message.");
                     if (selectMessage != null) message = selectMessage(message);
@@ -264,7 +264,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         if (!head.AsSpan().SequenceEqual("SQLite format 3\0"u8)) return ChatCipher.DecryptDatabase(database, plain, secret ?? [], platform, cancellation, progress);
         using (var copied = new FileStream(plain, FileMode.CreateNew, FileAccess.Write)) {
             original.Position = 0; byte[] buffer = new byte[1024 * 1024]; int count;
-            while ((count = original.Read(buffer)) > 0) { cancellation.ThrowIfCancellationRequested(); copied.Write(buffer, 0, count);
+            while ((count = original.Read(buffer)) > 0) { OperationPause.Check(cancellation); copied.Write(buffer, 0, count);
                 progress?.Report(new("chat-decrypt", 0, original.Position, original.Length, Detail: Path.GetFileName(database))); }
         }
         foreach (string suffix in new[] { "-wal", "-shm" }) if (File.Exists(database + suffix)) {
@@ -336,7 +336,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         var contacts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try {
             foreach (string path in FindMetadataDatabases(source).Where(p => platform != ChatPlatform.QQ || !IsQQGuildDatabase(source, p)).Where(p=>!new[]{"head_image.db","Misc.db"}.Contains(Path.GetFileName(p),StringComparer.OrdinalIgnoreCase))) {
-                cancellation.ThrowIfCancellationRequested(); string plain = Path.Combine(work, Guid.NewGuid().ToString("N") + ".db");
+                OperationPause.Check(cancellation); string plain = Path.Combine(work, Guid.NewGuid().ToString("N") + ".db");
                 try { bool shifted = PrepareDatabase(path, plain, secret, platform, cancellation); using var reader = new SqliteReader(plain, shifted); ReadContacts(reader, contacts, cancellation); }
                 finally { DeletePlain(plain); }
             }

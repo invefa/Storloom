@@ -77,7 +77,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             foreach (var proof in previous.Generated.Values.SelectMany(p => p)) ExportProgressFiles.Validate(destination, proof, false, cancellation);
             string assets = Path.Combine(destination, "assets");
             if (Directory.Exists(assets)) foreach (string path in Directory.EnumerateFiles(assets)) {
-                cancellation.ThrowIfCancellationRequested(); PathPolicy.AssertNoLinks(path);
+                OperationPause.Check(cancellation); PathPolicy.AssertNoLinks(path);
                 if (Regex.IsMatch(Path.GetFileName(path), "^\\.pending-[a-f0-9]{32}$")) { File.Delete(path); continue; }
                 string digest = Path.GetFileNameWithoutExtension(path);
                 using var input = File.OpenRead(path);
@@ -108,11 +108,11 @@ internal sealed class ChatArchiveWriter : IDisposable {
             foreach(var pair in previous.NativeConversations){if(JsonFiles.Hash(pair.Key)[..24].ToLowerInvariant()!=pair.Value||!conversations.ContainsKey(pair.Value))throw new InvalidDataException("Invalid conversation identity checkpoint.");conversationIds[pair.Key]=pair.Value;}
         }else{
             // Older checkpoints can recover native IDs from their already-authenticated JSONL prefix.
-            foreach(string line in File.ReadLines(json.Path)){cancellation.ThrowIfCancellationRequested();using var entry=JsonDocument.Parse(line);string native=entry.RootElement.GetProperty("Conversation").GetString()!;conversationIds.TryAdd(native,JsonFiles.Hash(native)[..24].ToLowerInvariant());}
+            foreach(string line in File.ReadLines(json.Path)){OperationPause.Check(cancellation);using var entry=JsonDocument.Parse(line);string native=entry.RootElement.GetProperty("Conversation").GetString()!;conversationIds.TryAdd(native,JsonFiles.Hash(native)[..24].ToLowerInvariant());}
         }
         IEnumerable<string> files = verified?.Keys ?? EnumerateMediaFiles(source);
         foreach (string relative in files) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             if (!new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".dat", ".mp4", ".webm", ".mp3", ".wav", ".ogg", ".silk", ".amr", ".m4a", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".7z", ".rar", ".txt", ".md", ".csv" }
                 .Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase) && !Regex.IsMatch(Path.GetFileName(relative), "^[a-fA-F0-9]{32}$")) continue;
             foreach (string key in new[] { Path.GetFileName(relative), Path.GetFileNameWithoutExtension(relative) }.Distinct(StringComparer.OrdinalIgnoreCase)) {
@@ -133,7 +133,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         }
     }
     public void Add(ChatMessage original) {
-        cancellation.ThrowIfCancellationRequested();
+        OperationPause.Check(cancellation);
         adding = true;
         original = MessagePresentation.ResolveSenderPrefix(original);
         string peer = original.Conversation.StartsWith("direct:") ? original.Conversation[7..] :
@@ -202,7 +202,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             identityVersions.TryAdd(identity.Version, identity);
             message = message with { IdentityVersion = identity.Version, Identity = null };
         }
-        cancellation.ThrowIfCancellationRequested();
+        OperationPause.Check(cancellation);
         string name = message.ConversationName ?? message.Conversation;
         string line = JsonSerializer.Serialize(message);
         jsonBuffer.AppendLine(line);
@@ -301,7 +301,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write))
             using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256)) {
                 var buffer = new byte[1024 * 1024]; int length;
-                while ((length = input.Read(buffer)) > 0) { cancellation.ThrowIfCancellationRequested(); hash.AppendData(buffer, 0, length); output.Write(buffer, 0, length); }
+                while ((length = input.Read(buffer)) > 0) { OperationPause.Check(cancellation); hash.AppendData(buffer, 0, length); output.Write(buffer, 0, length); }
                 digest = Convert.ToHexString(hash.GetHashAndReset());
             }
             if (verified != null && (!verified.TryGetValue(relative, out var receipt) || digest != receipt.Sha256))
@@ -323,7 +323,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         object checkpointGate = new();
         var entries = conversations.Values.ToArray();
         Parallel.ForEach(entries, new ParallelOptions { MaxDegreeOfParallelism = pageParallelism, CancellationToken = cancellation }, entry => {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             bool alreadyGenerated; lock (checkpointGate) alreadyGenerated = generated.ContainsKey(entry.Id);
             if (alreadyGenerated) { lock (checkpointGate) progress?.Report(new("chat-pages", ++done, 0, TotalFiles: entries.Length)); return; }
             // External merge keeps memory bounded for conversations with millions of messages.
@@ -337,7 +337,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             // Most single-database QQ conversations already arrive in chronological order.
             // Older checkpoints have no ordering proof and safely use the sorting path.
             if (entry.Ordered != true) {
-                foreach (string line in File.ReadLines(entry.File)) { cancellation.ThrowIfCancellationRequested();
+                foreach (string line in File.ReadLines(entry.File)) { OperationPause.Check(cancellation);
                     batch.Add(JsonSerializer.Deserialize<ChatMessage>(line)!); if (batch.Count >= 4000) WriteRun(); }
                 if (runs.Count == 0) { sorted = batch.OrderBy(m => m.Timestamp).ToArray(); batch.Clear(); }
                 else if (batch.Count > 0) WriteRun();
@@ -348,7 +348,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 if (entry.Ordered == true) {
                     long? previous = null;
                     foreach (string line in File.ReadLines(entry.File)) {
-                        cancellation.ThrowIfCancellationRequested();
+                        OperationPause.Check(cancellation);
                         var message = JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid conversation spool.");
                         if (previous != null && message.Timestamp < previous) throw new InvalidDataException("Conversation ordering checkpoint is inconsistent.");
                         previous = message.Timestamp; yield return message;
@@ -377,7 +377,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 if (resumable) proofs.Add(ExportProgressFiles.Proof(destination, path));
             }
             try {
-                foreach (var message in OrderedMessages()) { cancellation.ThrowIfCancellationRequested();
+                foreach (var message in OrderedMessages()) { OperationPause.Check(cancellation);
                     Reference(message.ServerId, message); if (message.Sequence != null) Reference("seq:" + message.Sequence, message);
                     batch.Add(message); if (batch.Count >= 300) WritePage(); }
                 if (batch.Count > 0) WritePage();

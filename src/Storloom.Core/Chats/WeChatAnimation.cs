@@ -38,7 +38,7 @@ internal static class WeChatAnimation {
             } catch (OperationCanceledException) {
                 if (!process.HasExited) process.Kill(true);
                 process.WaitForExit();
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 return null;
             }
         } catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { return null; }

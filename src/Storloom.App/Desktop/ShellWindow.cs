@@ -12,6 +12,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private CleanupEngine engine = null!;
     private CleanupPlan? cleanupPlan;
     private CancellationTokenSource? operation;
+    private OperationPause? operationPause;
     private bool operationIncomplete;
     private byte[]? capturedKey;
     private readonly Dictionary<string, Grid> pages = [];
@@ -54,7 +55,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         void Item(MenuItem parent, string key, Action action) { var item = new MenuItem { Header = L.T(key) }; item.Click += (_, _) => Guard(action); parent.Items.Add(item); }
         Item(file, "ImportRules", ImportRules); Item(file, "ReloadRules", () => { ReloadEngine(); RenderRules(); });
         file.Items.Add(new Separator()); Item(file, "SavePlan", SaveCleanupPlan); Item(file, "LoadPlan", LoadCleanupPlan);
-        Item(file, "OpenChatBackup", OpenChatBackup); Item(file, "OpenReaderArchive", OpenReaderArchive);
+        Item(file, "OpenChatBackup", OpenChatBackup); Item(file, "OpenReaderArchive", OpenReaderArchive); Item(file,"VaultManage",EncryptReaderArchive);
         Item(file, "ExportLog", ExportOperationLog);
         file.Items.Add(new Separator()); Item(file, "OpenData", () => OpenFolder(dataRoot)); Item(file, "HideToTray", HideToTray); Item(file, "Exit", RequestExit);
         var tools = new MenuItem { Header = L.T("ToolsMenu") }; Item(tools, "Preferences", () => ShowPreferences());
@@ -103,6 +104,13 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView = new OperationPanel { Visibility = Visibility.Collapsed }; View.Add(root, operationView, 3);
         operationView.DebugToggle.IsChecked = preferences.DebugLogging;
         operationView.DebugLoggingChanged += enabled => Guard(() => { preferences = preferences with { DebugLogging = enabled }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences); });
+        operationView.PauseRequested += () => {
+            if(operationPause==null)return;
+            if(operationPause.IsPaused){operationPause.Resume();operationView.PauseButton.Content=L.T("PauseOperation");}
+            else{operationPause.Pause();operationView.PauseButton.Content=L.T("ResumeOperation");}
+            operationView.SetPaused(operationPause.IsPaused);
+            operationView.AddLog(L.T(operationPause.IsPaused?"OperationPauseHelp":"OperationResumed"));
+        };
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
             double target = expanded ? Math.Clamp(preferences.LogHeight, 130, Math.Max(130, ActualHeight * .55)) : 56;
@@ -199,9 +207,11 @@ public sealed partial class ShellWindow : ThemeWindow {
     }
     private bool Confirm(string message) => Notice.Show(this, L.T("Confirm"), message, true);
     private IProgress<ScanProgress> Progress() => new ProgressRelay(Dispatcher, value => { if (operation != null) operationView.Report(value); });
-    private async Task Run(Func<CancellationToken, Task> work) {
+    private Task RunPausable(Func<CancellationToken, Task> work) => RunCore(work,true);
+    private Task Run(Func<CancellationToken, Task> work) => RunCore(work,false);
+    private async Task RunCore(Func<CancellationToken, Task> work,bool pausable) {
         if (operation != null) return;
-        using var source = new CancellationTokenSource(); operation = source; operationIncomplete = false;
+        using var source = new CancellationTokenSource(); using var pauseState=new OperationPause(); using var pauseScope=pauseState.Enter(); operationPause=pauseState; operation = source; operationIncomplete = false;
         navigation.IsEnabled = menu.IsEnabled = false;
         bool previousEnabled = operationButton?.IsEnabled ?? true;
         if (operationButton != null) operationButton.IsEnabled = true;
@@ -211,13 +221,13 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight, 130, ActualHeight * .55) : 56);
-        operationView.Start(); cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
+        operationView.Start(); operationView.PauseButton.Content=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Visibility = Visibility.Collapsed; statusFooter.Visibility = operationButton == null ? Visibility.Visible : Visibility.Collapsed;
         status.Text = L.T("OperationStarting"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete; }
         catch (OperationCanceledException) { status.Text = L.T("Cancelled"); operationView.AddDiagnostic(new("operation.cancelled")); }
         catch (Exception ex) { Error(ex); }
-        finally { operation = null; navigation.IsEnabled = menu.IsEnabled = true;
+        finally { operationPause=null;operationView.PauseButton.Visibility=Visibility.Collapsed; operation = null; navigation.IsEnabled = menu.IsEnabled = true;
             foreach (var control in disabled) control.IsEnabled = true;
             if (operationButton != null) { operationButton.Content = previousContent; operationButton.IsEnabled = previousEnabled; }
             cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
@@ -261,7 +271,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         cleanupPlan = JsonFiles.Read<CleanupPlan>(dialog.FileName); excluded.Clear(); RenderRules(); Navigate("cleanup");
     }
     private void OpenReaderArchive() {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom HTML|messages.html" };
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom reading copy|messages.html;vault.storloom.json" };
         if (dialog.ShowDialog(this) == true) new ChatReaderWindow(Path.GetDirectoryName(dialog.FileName)!, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog();
     }
     private void SetCapturedKey(byte[]? key) { if (capturedKey != null) CryptographicOperations.ZeroMemory(capturedKey); capturedKey = key; }

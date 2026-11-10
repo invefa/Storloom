@@ -76,7 +76,7 @@ public sealed partial class ShellWindow {
             DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6] + "-raw");
         if (!Confirm(L.T("ChatBackupConfirm", destination))) return;
         preferences = preferences with { BackupRoot = root }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
-        await Run(async token => {
+        await RunPausable(async token => {
             var progress = Progress();
             var result = await Task.Run(() => {
                 var service = new TransferService(); var plan = service.Plan(location.Directory, destination, processes: clients, cancellation: token);
@@ -120,7 +120,7 @@ public sealed partial class ShellWindow {
         string destination = Path.Combine(PathPolicy.Normalize(root), location.Platform.ToString(), location.Account,
             DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6] + "-raw");
         if (!Confirm(L.T("IncrementalBackupConfirm", previous, destination))) return;
-        await Run(async token => {
+        await RunPausable(async token => {
             var progress = Progress();
             var result = await Task.Run(() => ChatIncrementalBackup.Create(location.Directory, destination, previous,
                 Path.Combine(dataRoot, "journals"), location.Platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"], progress, token));
@@ -157,7 +157,7 @@ public sealed partial class ShellWindow {
             if (NeedsKey() && key == null) throw new InvalidOperationException(L.T("ExportKeyMissing"));
             keyInput?.Clear();
             JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);
-            await Run(async token => {
+            await RunPausable(async token => {
                 var progress = Progress(); ChatReadingUpdateResult? updateResult = null;
                 var result = await Task.Run(() => {
                     if (!update) return new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars).ExportVerifiedBackup(

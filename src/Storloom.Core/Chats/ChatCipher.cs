@@ -100,7 +100,7 @@ public static class ChatCipher {
             using var copy = new FileStream(destination, FileMode.CreateNew, FileAccess.Write);
             var buffer = new byte[1024 * 1024]; int count;
             while ((count = input.Read(buffer)) > 0) {
-                cancellation.ThrowIfCancellationRequested(); copy.Write(buffer, 0, count);
+                OperationPause.Check(cancellation); copy.Write(buffer, 0, count);
                 progress?.Report(new("chat-decrypt", 0, input.Position, input.Length, Detail: Path.GetFileName(source)));
             }
             copy.Flush(true);
@@ -133,7 +133,7 @@ public static class ChatCipher {
             }
             uint number = 1;
             while (true) {
-                cancellation.ThrowIfCancellationRequested();
+                OperationPause.Check(cancellation);
                 if (logicalPages > 0 && number > logicalPages) {
                     if (page.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
                         throw new CryptographicException($"Nonzero data beyond the authenticated database size: {number}");
@@ -182,7 +182,7 @@ public static class ChatCipher {
         long commitEnd = 0;
         uint commitPages = 0;
         while (wal.Position + frame.Length <= wal.Length) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             wal.ReadExactly(frame);
             if (!frame.AsSpan(8, 8).SequenceEqual(header.AsSpan(16, 8))) break;
             checksum = Checksum(frame.AsSpan(0, 8), checksum, big);
@@ -199,7 +199,7 @@ public static class ChatCipher {
         if (commitEnd == 0) return;
         wal.Position = 32;
         while (wal.Position < commitEnd) {
-            cancellation.ThrowIfCancellationRequested();
+            OperationPause.Check(cancellation);
             wal.ReadExactly(frame);
             uint pageNumber = BinaryPrimitives.ReadUInt32BigEndian(frame);
             if (pageNumber > commitPages) continue;
