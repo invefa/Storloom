@@ -15,7 +15,7 @@ public static class ChatReadingUpdate {
     private static string Key(ChatMessage m) => JsonFiles.Hash(new { m.Platform, m.Conversation,
         Identity = !string.IsNullOrEmpty(m.ServerId) && m.ServerId != "0" ? "server:" + m.ServerId :
             !string.IsNullOrEmpty(m.Sequence) && m.Sequence != "0" ? $"sequence:{m.Sequence}:{m.Sender}:{m.Timestamp}" : "payload:" + Fingerprint(m) });
-    private static string Fingerprint(ChatMessage m) { m = MessagePresentation.ResolveSenderPrefix(m); return JsonFiles.Hash(new { m.Platform, m.Conversation, m.Sender, m.Timestamp, m.Type, m.Text, m.SourceText, m.RawBase64, m.ExtraRawBase64, Keys = m.LocalMediaKeys.Order(StringComparer.Ordinal) }); }
+    private static string Fingerprint(ChatMessage m) { m = MessagePresentation.ResolveSenderPrefix(m); return JsonFiles.Hash(new { m.Platform, m.Conversation, m.Sender, m.Timestamp, m.Type, m.Text, m.SourceText, m.RawBase64, m.ExtraRawBase64, m.ReactionsRawBase64, Keys = m.LocalMediaKeys.Order(StringComparer.Ordinal) }); }
     private static JsonObject ReadIndex(string root) {
         string text = File.ReadAllText(Path.Combine(root, "archive-index.js"));
         if (!text.StartsWith("window.archiveIndex=", StringComparison.Ordinal)) throw new InvalidDataException("Unsupported reading index.");
@@ -65,6 +65,7 @@ public static class ChatReadingUpdate {
         if (databaseHashes.Count == 0) throw new InvalidDataException("No supported message database in the new backup.");
         var changedDatabases = databaseHashes.Where(p => previousDatabases == null || !previousDatabases.TryGetValue(p.Key, out var hash) || hash != p.Value).Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var oldIndex = ReadIndex(directory);
+        ChatIdentityHistory.FreezeLegacy(oldIndex);
         var nativeKeys=oldIndex["conversationKeys"] as JsonObject??new JsonObject();oldIndex["conversationKeys"]=nativeKeys;
         var knownConversations=nativeKeys.Select(p=>p.Value!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
         void RememberConversation(string value){if(knownConversations.Add(value))nativeKeys[JsonFiles.Hash(value)[..24].ToLowerInvariant()]=value;}
@@ -136,7 +137,12 @@ public static class ChatReadingUpdate {
                 using (var writer = new ChatArchiveWriter(manifest.Plan.Destination, merged, merged, [], [], cancellation, Path.GetFileName(account), pageParallelism: parallelism)) {
                     foreach (string line in File.ReadLines(transcript)) {
                         cancellation.ThrowIfCancellationRequested(); var message = Message(line);
-                        if (index.Query("SELECT 1 FROM changes WHERE k=?", Key(message)).Any()) continue;
+                        var replacement = index.Query("SELECT data FROM changes WHERE k=?", Key(message)).SingleOrDefault();
+                        if (replacement != null) {
+                            var updated = Message(replacement[0]) with { Identity = message.Identity, IdentityVersion = message.IdentityVersion, SenderName = message.SenderName };
+                            index.Execute("UPDATE changes SET data=? WHERE k=?", JsonSerializer.Serialize(updated), Key(message));
+                            continue;
+                        }
                         output.WriteLine(line); total++;
                         if (affected.Contains(message.Conversation)) writer.AddPrepared(message);
                         if (total % 1000 == 0) progress?.Report(new("chat-update-merge", (int)Math.Min(total, int.MaxValue), 0, TotalFiles: (int)Math.Min(report.Messages + added, int.MaxValue)));
@@ -178,10 +184,13 @@ public static class ChatReadingUpdate {
         }
     }
     private static void MergeMaps(JsonObject target, JsonObject latest) {
-        foreach (string map in new[] { "builtInEmoji", "avatars", "conversationAvatars", "contactNames", "conversationNames", "conversationKeys" }) {
+        foreach (string map in new[] { "builtInEmoji", "avatars", "conversationAvatars", "contactNames", "conversationNames", "conversationKeys", "identityVersions" }) {
             if (latest[map] is not JsonObject values) continue;
             if (target[map] is not JsonObject) target[map] = new JsonObject();
-            foreach (var pair in values) target[map]![pair.Key] = pair.Value?.DeepClone();
+            foreach (var pair in values) {
+                if (map == "identityVersions" && target[map]![pair.Key] != null) continue;
+                target[map]![pair.Key] = pair.Value?.DeepClone();
+            }
         }
         if (latest["labels"] != null) target["labels"] = latest["labels"]!.DeepClone();
     }

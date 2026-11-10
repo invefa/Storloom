@@ -598,7 +598,7 @@ public sealed class FormTests {
             Assert.Equal("true",Query("(()=>{let p=document.querySelectorAll('.message:not(.system) .message-text');return Math.abs(p[0].getBoundingClientRect().top-p[1].getBoundingClientRect().top)<1})()"));
             Assert.DoesNotContain("1970",Query("document.querySelector('#messages').textContent"));
             Assert.Contains("Time unavailable",Query("document.querySelector('.system').textContent"));
-            Query("document.querySelector('.message:not(.system) details').open=true;true");
+            Query("document.querySelector('.message:not(.system) .source').open=true;true");
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.source-bubble').length")!="1"){Pump();Thread.Sleep(10);}
             Assert.Contains("45101",Query("document.querySelector('.source-bubble').textContent"));
             Assert.Contains("@Alex",Query("document.querySelector('.source-bubble').textContent"));
@@ -773,7 +773,10 @@ public sealed class FormTests {
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}
             Assert.True(window.Browser.CoreWebView2!=null,string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));
             void Until(string expression,string expected){while(DateTime.UtcNow<until&&Query(expression)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(expression));}
-            Until("document.querySelectorAll('.message.system').length","1");Assert.Equal("0",Query("document.querySelectorAll('.system .avatar').length"));
+            Until("document.querySelectorAll('.message.system').length","1");
+            Query("document.querySelector('.system .source').open=true;true");Pump();
+            Assert.Equal("true",Query("(()=>{const a=document.querySelector('.system'),b=a.querySelector('.source-bubble');const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return Math.abs((x.left+x.right-y.left-y.right)/2)<2})()"));
+            Query("document.querySelector('.system .source').open=false;true");Assert.Equal("0",Query("document.querySelectorAll('.system .avatar').length"));
             Query("window.readerOriginalScrollIntoView=Element.prototype.scrollIntoView;Element.prototype.scrollIntoView=function(options){window.readerJumpStart=document.querySelector('#messages').scrollTop;window.readerJumpAnchorTop=window.readerOrigin.getBoundingClientRect().top;window.readerJumpBehavior=options.behavior;return window.readerOriginalScrollIntoView.call(this,options);};window.readerOrigin=document.querySelector('blockquote').closest('.message');document.querySelector('#messages').scrollTop=window.readerOrigin.offsetTop-100;window.readerOriginTop=window.readerOrigin.getBoundingClientRect().top;true");
             double start=double.Parse(Query("document.querySelector('#messages').scrollTop"),System.Globalization.CultureInfo.InvariantCulture);Assert.True(start>1000);
             Query("document.querySelector('blockquote').click();true");Until("document.querySelectorAll('.referenced').length","1");
@@ -784,7 +787,7 @@ public sealed class FormTests {
             Query("document.querySelector('blockquote').click();true");Until("document.querySelectorAll('.referenced').length","1");
             Assert.Contains("Original target",Query("document.querySelector('.referenced .bubble').textContent"));Assert.Contains("1 / 2",Query("document.getElementById('page').textContent"));
             Assert.Equal("\"instant\"",Query("window.readerJumpBehavior"));Query("Element.prototype.scrollIntoView=window.readerOriginalScrollIntoView;true");
-            Assert.Equal("0",Query("document.querySelectorAll('pre').length"));Query("document.querySelector('.referenced details').open=true;true");
+            Assert.Equal("0",Query("document.querySelectorAll('pre').length"));Query("document.querySelector('.referenced .source').open=true;true");
             Until("document.querySelectorAll('.source-bubble').length","1");Assert.Equal("0",Query("document.querySelectorAll('.bubble details').length"));
             using var stream=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,stream)));
             DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
@@ -892,13 +895,13 @@ public sealed class FormTests {
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="5"){Pump();Thread.Sleep(10);}Assert.Equal("5",Query("document.querySelectorAll('.message').length"));
             Assert.DoesNotContain("wxid_",Query("document.querySelector('.message-text').textContent"));
             Query("window.short=document.querySelectorAll('.message')[1];window.shortBubble=short.querySelector('.bubble');window.originalWidth=shortBubble.getBoundingClientRect().width;window.originalX=shortBubble.getBoundingClientRect().x;true");
-            Assert.True(Query("originalWidth<60")=="true","Short bubble width: "+Query("originalWidth"));Query("short.querySelector('details').open=true;true");Pump();
+            Assert.True(Query("originalWidth<60")=="true","Short bubble width: "+Query("originalWidth"));Query("short.querySelector('.source').open=true;true");Pump();
             Assert.True(Query("Math.abs(shortBubble.getBoundingClientRect().width-originalWidth)<0.1&&Math.abs(shortBubble.getBoundingClientRect().x-originalX)<0.1")=="true","Expanded source moved the message: "+Query("[originalWidth,shortBubble.getBoundingClientRect().width,originalX,shortBubble.getBoundingClientRect().x]"));
             Assert.True(Query("document.querySelector('nav button').getBoundingClientRect().height<56")=="true","Conversation row height: "+Query("document.querySelector('nav button').getBoundingClientRect().height"));
             Assert.Equal("5",Query("document.querySelectorAll('.forwarded').length"));Assert.Equal("0",Query("document.querySelectorAll('.kind-forward img').length"));
             Query("document.querySelector('.forward-more').click();true");Assert.Equal("8",Query("document.querySelectorAll('.forwarded').length"));Assert.Equal("1",Query("document.querySelectorAll('.kind-forward img').length"));
             Query("document.querySelector('.forward-more').click();true");Assert.Equal("5",Query("Array.from(document.querySelectorAll('.forwarded')).filter(e=>e.getClientRects().length).length"));
-            Query("short.querySelector('details').open=false;true");
+            Query("short.querySelector('.source').open=false;true");
             foreach(string palette in new[]{"wechat","qq"})foreach(bool dark in new[]{false,true}) {
                 Query("document.getElementById('palette').value='"+palette+"';document.getElementById('palette').dispatchEvent(new Event('change'));document.body.classList.toggle('dark',"+(dark?"true":"false")+");true");
                 Assert.Equal("\"0px\"",Query("getComputedStyle(shortBubble).borderTopWidth"));

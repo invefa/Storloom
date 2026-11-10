@@ -13,6 +13,7 @@ public sealed record MessagePart(string Kind, string Text = "", string Title = "
     public string? ReferenceId { get; init; }
     public bool Inline { get; init; }
     public string? EmojiId { get; init; }
+    public int? RecallRole { get; init; }
     public ForwardedMessage[] Forwarded { get; init; } = [];
 }
 public sealed record ForwardedMessage(string Sender, string Time, MessagePart[] Parts);

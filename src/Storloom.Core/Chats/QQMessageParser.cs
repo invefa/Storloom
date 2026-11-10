@@ -2,9 +2,21 @@ using System.Text;
 
 namespace Storloom.Core.Chats;
 
+public sealed record ChatReaction(string EmojiId, long Count, bool IsSelf, long Flag);
+
 /// <summary>NTQQ database wire fields. Unknown segments remain inspectable in the original payload.</summary>
 public static class QQMessageParser {
     private sealed record Field(int Number, ulong Integer, byte[]? Bytes);
+    public static ChatReaction[] ParseReactions(byte[] bytes) {
+        try {
+            return Fields(bytes).Where(f => f.Number == 40062 && f.Bytes != null).Select(entry => {
+                var fields = Fields(entry.Bytes!);
+                ulong Number(int id) => fields.FirstOrDefault(f => f.Number == id)?.Integer ?? 0;
+                byte[]? id = fields.FirstOrDefault(f => f.Number == 48301)?.Bytes;
+                return new ChatReaction(id == null ? "" : new UTF8Encoding(false,true).GetString(id), checked((long)Number(48303)), Number(48304) != 0, checked((long)Number(48302)));
+            }).Where(r => r.Count > 0 && r.EmojiId.Length is > 0 and <= 32).ToArray();
+        } catch (Exception ex) when (ex is InvalidDataException or OverflowException or DecoderFallbackException) { return []; }
+    }
     public static MessagePart[] Parse(byte[] bytes, long outerType) => Parse(bytes, outerType, 0);
     private static MessagePart[] Parse(byte[] bytes, long outerType, int depth) {
         if (depth > 6) return [new("unsupported")];
@@ -28,7 +40,9 @@ public static class QQMessageParser {
         if (Text(48214) is string tip && tip.StartsWith("<gtip", StringComparison.Ordinal))
             return MessagePresentation.Parse(new("QQ", "", "", 0, 5, tip))[0];
         if (kind == "system" && fields.Any(f => f.Number == 47702))
-            return new("reaction", ReferenceSender: MessagePresentation.SafeSummary(Text(47705)), ReferenceText: MessagePresentation.SafeSummary(Text(47714)));
+            return new("recall", Detail: MessagePresentation.SafeSummary(Text(47713)),
+                ReferenceSender: MessagePresentation.SafeSummary(new[] { Text(47716), Text(47715), Text(47714) }.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? ""),
+                ReferenceText: MessagePresentation.SafeSummary(Text(47705))) { RecallRole = (int)Number(47702) };
         if (fields.FirstOrDefault(f => f.Number == 47401)?.Bytes is byte[] poke) {
             var action = Fields(poke).FirstOrDefault(f => f.Number == 47413)?.Bytes;
             return new("poke", action == null ? "" : MessagePresentation.SafeSummary(new UTF8Encoding(false,true).GetString(action)));

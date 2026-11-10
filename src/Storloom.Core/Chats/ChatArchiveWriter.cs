@@ -16,6 +16,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private readonly string source, destination, work;
     private readonly string account;
     private readonly Dictionary<string, string> contacts;
+    private readonly IReadOnlyDictionary<string,ChatIdentity> identities;
+    private readonly Dictionary<string,ChatIdentity> identityVersions = [];
+    private readonly DateTimeOffset identityObservedAt = DateTimeOffset.UtcNow;
     private readonly Dictionary<string, TransferReceipt>? verified;
     private readonly CancellationToken cancellation;
     private readonly ExportAppendFile json;
@@ -32,7 +35,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     private string ProgressPath => Path.Combine(work, "reader-progress.json");
     private sealed record WriterProgress(long Messages, int Media, int Missing, int Unsupported,
         Conversation[] Conversations, ExportFileProgress Main, ExportFileProgress[] Spools,
-        Dictionary<string, ExportFileProgress[]> Generated, Dictionary<string,string>? Emoji = null, Dictionary<string,string>? NativeConversations = null);
+        Dictionary<string, ExportFileProgress[]> Generated, Dictionary<string,string>? Emoji = null, Dictionary<string,string>? NativeConversations = null, DateTimeOffset? IdentityObservedAt = null, Dictionary<string,ChatIdentity>? IdentityVersions = null);
     public long ProcessedMessages => messageId;
     internal int SpoolWrites { get; private set; }
     private readonly Dictionary<string, List<string>> media = new(StringComparer.OrdinalIgnoreCase);
@@ -49,7 +52,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null, bool downloadQQGroupAvatars = false) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null, bool downloadQQGroupAvatars = false, IReadOnlyDictionary<string,ChatIdentity>? identities = null) {
+        this.identities = identities ?? new Dictionary<string,ChatIdentity>();
         this.avatars=avatars==null?new(StringComparer.Ordinal):new(avatars,StringComparer.Ordinal);
         this.downloadQQGroupAvatars=downloadQQGroupAvatars;
         this.voices = voices;
@@ -63,7 +67,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
         emoji = new BuiltInEmoji(source,destination,useLocalImageConfiguration);
         WriterProgress? previous = resumable && File.Exists(ProgressPath) ? JsonFiles.Read<WriterProgress>(ProgressPath) : null;
         if (previous != null) {
+            identityObservedAt = previous.IdentityObservedAt ?? identityObservedAt;
             emoji.Restore(previous.Emoji);
+            if (previous.IdentityVersions != null) foreach (var pair in previous.IdentityVersions) identityVersions[pair.Key] = pair.Value;
             if (previous.Main.Path != "messages.jsonl") throw new InvalidDataException("Invalid reader checkpoint output.");
             if (previous.Messages < 0 || previous.Conversations.Sum(c => c.Count) != previous.Messages)
                 throw new InvalidDataException("Invalid reader checkpoint counters.");
@@ -133,7 +139,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
         string peer = original.Conversation.StartsWith("direct:") ? original.Conversation[7..] :
             original.Conversation.StartsWith("group:") ? original.Conversation[6..] : original.Conversation;
         string name = contacts.GetValueOrDefault(original.Conversation, contacts.GetValueOrDefault(peer, original.ConversationName ?? peer));
-        var message = original with { Id = original.Id ?? "m" + (messageId + 1), ConversationName = name, SenderName = contacts.GetValueOrDefault(original.Conversation + "/" + original.Sender, contacts.GetValueOrDefault(original.Sender, original.SenderName ?? original.Sender)),
+        var message = original with { Id = original.Id ?? "m" + (messageId + 1), ConversationName = name, SenderName = original.SenderName ?? contacts.GetValueOrDefault(original.Conversation + "/" + original.Sender, contacts.GetValueOrDefault(original.Sender, original.Sender)),
+            Identity = CaptureIdentity(original),
             IsSelf = original.IsSelf || original.Sender == account || account.StartsWith(original.Sender + "_", StringComparison.Ordinal) };
         var attachments = new List<ChatMedia>();
         var parts = MessagePresentation.Parse(message);
@@ -178,7 +185,23 @@ internal sealed class ChatArchiveWriter : IDisposable {
         AddPrepared(message);
     }
     // Import already-rendered messages without resolving/copying their resources again.
+    private ChatIdentity? CaptureIdentity(ChatMessage message) {
+        var person = identities.GetValueOrDefault(message.Sender);
+        var member = identities.GetValueOrDefault(message.Conversation + "/" + message.Sender);
+        var recorded = message.Identity;
+        string? avatar = avatars.GetValueOrDefault(message.Conversation + "/" + message.Sender) ?? avatars.GetValueOrDefault(message.Sender);
+        var result = new ChatIdentity(message.Sender, message.Conversation,
+            Nickname: recorded?.Nickname ?? person?.Nickname, FriendRemark: person?.FriendRemark,
+            GroupCard: recorded?.GroupCard ?? member?.GroupCard, RecordedName: recorded?.RecordedName ?? message.SenderName,
+            Avatar: avatar, MessageNickname: recorded?.MessageNickname ?? false, MessageGroupCard: recorded?.MessageGroupCard ?? false,
+            ObservedAt: identityObservedAt);
+        return new[] { result.Nickname, result.FriendRemark, result.GroupCard, result.RecordedName, result.Avatar }.Any(v => !string.IsNullOrWhiteSpace(v)) ? result : null;
+    }
     internal void AddPrepared(ChatMessage message) {
+        if (message.Identity is {} identity) {
+            identityVersions.TryAdd(identity.Version, identity);
+            message = message with { IdentityVersion = identity.Version, Identity = null };
+        }
         cancellation.ThrowIfCancellationRequested();
         string name = message.ConversationName ?? message.Conversation;
         string line = JsonSerializer.Serialize(message);
@@ -209,7 +232,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
     internal void SaveProgress() {
         FlushJson(); foreach (string id in buffers.Keys.ToArray()) FlushSpool(id);
         if (resumable) JsonFiles.Write(ProgressPath, new WriterProgress(messageId, MediaFiles, UnresolvedMedia, UnsupportedMessages,
-            conversations.Values.Select(c => c with { File = Path.GetFileName(c.File) }).ToArray(), json.Proof(destination), spools.Values.Select(f => f.Proof(destination)).ToArray(), generated,new(emoji.Exported),new(conversationIds)));
+            conversations.Values.Select(c => c with { File = Path.GetFileName(c.File) }).ToArray(), json.Proof(destination), spools.Values.Select(f => f.Proof(destination)).ToArray(), generated,new(emoji.Exported),new(conversationIds),identityObservedAt,new(identityVersions)));
         checkpointTime = DateTime.UtcNow;
     }
     internal void SaveSafeProgress() { if (!adding) SaveProgress(); }
@@ -374,7 +397,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));
         File.WriteAllText(Path.Combine(destination, "archive-index.js"), "window.archiveIndex=" + JsonSerializer.Serialize(new {
-            language = L.Language, labels, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported, avatars,
+            language = L.Language, labels, identityVersions, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported, avatars,
             conversationAvatars=conversationIds.Where(c=>avatars?.ContainsKey(c.Key)==true||avatars?.ContainsKey(c.Key.StartsWith("direct:",StringComparison.Ordinal)?c.Key[7..]:c.Key)==true).ToDictionary(c=>c.Value,c=>avatars!.GetValueOrDefault(c.Key,avatars!.GetValueOrDefault(c.Key.StartsWith("direct:",StringComparison.Ordinal)?c.Key[7..]:c.Key)!)),
             conversationKeys = conversationIds.ToDictionary(c=>c.Value,c=>c.Key),
             conversations = conversations.Values.OrderBy(c => c.Name).Select(c => new { id = c.Id, name = c.Name, count = c.Count, pages = c.Pages }) }) + ";");

@@ -487,5 +487,19 @@
   "DownloadQQGroupAvatars": "Download QQ group avatars (Tencent service)",
   "DownloadQQGroupAvatarsHelp": "Optional. Requests group avatar images from Tencent using group numbers. No chat text or database key is sent. Images are stored in this offline reading copy; unavailable avatars keep their fallback.",
   "GroupAvatarUnavailableCount": "{0} group avatars were unavailable; message export is retained.",
-  "PhaseGroupAvatars": "Downloading group avatars"
+  "PhaseGroupAvatars": "Downloading group avatars",
+  "ReaderKind_recall": "Recall notice",
+  "ReaderRecall": "{0} recalled a message",
+  "ReaderRecallAdmin": "Administrator {0} recalled a member’s message",
+  "ReaderRecallOwner": "Group owner {0} recalled a member’s message",
+  "ReaderIdentity": "Sender identity for this message",
+  "ReaderAccount": "Account",
+  "ReaderNickname": "Nickname",
+  "ReaderFriendRemark": "Friend remark",
+  "ReaderGroupCard": "Group nickname",
+  "ReaderRecordedName": "Recorded display name",
+  "ReaderNotRecorded": "Not recorded",
+  "ReaderIdentityHistory": "Name and avatar history",
+  "ReaderObservedAt": "Observed at",
+  "ReaderIdentityProvenance": "Recorded message names are preserved. Remarks, avatars and supplemental profiles represent observations, not verified historical change dates."
 }

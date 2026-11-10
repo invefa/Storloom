@@ -8,6 +8,19 @@ using Xunit;
 namespace Storloom.Tests;
 
 public sealed class MessagePresentationTests {
+    [Fact]
+    public void QQEmojiReactionsAreAttachedCountsAndNeverConfusedWithRecallRoles() {
+        byte[] raw = [..B(40062,[..S(48301,"75"),..I(48302,1),..I(48303,3),..I(48304,1)]),
+            ..B(40062,[..S(48301,"128077"),..I(48303,2)]),..B(40062,[..S(48301,"1"),..I(48303,0)])];
+        var reactions=QQMessageParser.ParseReactions(raw);Assert.Equal(2,reactions.Length);
+        Assert.Equal("75",reactions[0].EmojiId);Assert.Equal(3,reactions[0].Count);Assert.True(reactions[0].IsSelf);
+        Assert.Equal("128077",reactions[1].EmojiId);Assert.False(reactions[1].IsSelf);
+        Assert.Empty(QQMessageParser.ParseReactions([255,255]));
+        foreach(int role in new[]{0,1,2,99}) {
+            var part=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,8),..I(47702,(ulong)role),..S(47705,"Member"),..S(47714,"Operator"),..S(47713,"Fixture reason")]),5));
+            Assert.Equal("recall",part.Kind);Assert.Equal(role,part.RecallRole);Assert.Equal("Fixture reason",part.Detail);
+        }
+    }
     [Theory]
     [InlineData("wxid_fixture_member", "wxid_fixture_member:\nGoing to make tea")]
     [InlineData("123456789@openim", "123456789@openim:\r\nGoing to make tea")]
@@ -91,7 +104,7 @@ public sealed class MessagePresentationTests {
         var poke=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,7),..B(47401,S(47413,"Alex poked Sam"))]),9));
         Assert.Equal("poke",poke.Kind);Assert.Equal("Alex poked Sam",poke.Text);
         var reaction=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,8),..I(47702,1),..S(47705,"Alex"),..S(47714,"Sam")]),5));
-        Assert.Equal("reaction",reaction.Kind);Assert.Equal("Alex",reaction.ReferenceSender);
+        Assert.Equal("recall",reaction.Kind);Assert.Equal("Sam",reaction.ReferenceSender);Assert.Equal("Alex",reaction.ReferenceText);Assert.Equal(1,reaction.RecallRole);
     }
     [Fact]
     public void BuiltInEmojiExtractsOnlyRequestedLocalResourcesAndUsesConfigAliases() {

@@ -11,6 +11,10 @@ public sealed record ChatMessage(string Platform, string Conversation, string Se
     long Timestamp, long Type, string Text, string? RawBase64 = null) {
     public string? ConversationName { get; init; }
     public string? SenderName { get; init; }
+    public ChatIdentity? Identity { get; init; }
+    public string? IdentityVersion { get; init; }
+    public string? ReactionsRawBase64 { get; init; }
+    public ChatReaction[] Reactions { get; init; } = [];
     public bool IsSelf { get; init; }
     public ChatMedia[] Media { get; init; } = [];
     public MessagePart[] Parts { get; init; } = [];
@@ -138,6 +142,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                     "QQ Guild uses a separate database key and is not included in this reading export. Its files remain in the raw backup."));
         var contacts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var avatars = new Dictionary<string,string>(StringComparer.Ordinal);
+        var identities = new Dictionary<string,ChatIdentity>(StringComparer.Ordinal);
         int completed = checkpoint.Databases.Count; long messages = checkpoint.Databases.Values.Sum(d => d.Messages);
         var weights = new long[databases.Length]; var databaseBytes = databases.Select(p => new FileInfo(p).Length).ToArray();
         var decryptWeights = new long[databases.Length];
@@ -153,7 +158,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 try {
                     bool shifted = PrepareDatabase(contact, plain, secret, platform, cancellation);
                     using var reader = new SqliteReader(plain, shifted);
-                    ReadContacts(reader, contacts, cancellation);
+                    ReadContacts(reader, contacts, cancellation, identities);
                     foreach(var avatar in ChatAvatars.Read(reader,destination,cancellation))avatars[avatar.Key]=avatar.Value;
                 } catch (Exception ex) when (ExportFailure(ex)) { issues.Add(new("chat-contacts", Path.GetRelativePath(source, contact), ex.Message)); }
                 finally { DeletePlain(plain); }
@@ -199,7 +204,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
             if (verified != null && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
             using var voices = platform == ChatPlatform.WeChat ? new WeChatVoices(source, work, secret, cancellation) : null;
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism, voices, avatars, downloadQQGroupAvatars);
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism, voices, avatars, downloadQQGroupAvatars, identities);
             progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {
@@ -280,7 +285,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             }
         }
     }
-    private static void ReadContacts(SqliteReader reader, Dictionary<string, string> contacts, CancellationToken cancellation) {
+    private static void ReadContacts(SqliteReader reader, Dictionary<string, string> contacts, CancellationToken cancellation, Dictionary<string,ChatIdentity>? identities = null) {
         foreach (var row in reader.Query("SELECT name FROM sqlite_master WHERE type='table'", cancellation).ToArray()) {
             string table = row[0]?.ToString() ?? "";
             if (table is "profile_info_v6" or "group_member3" or "group_list" or "group_detail_info_ver1") {
@@ -296,6 +301,13 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                     if (key is "" or "0" || name == "") continue;
                     string prefix = group ? "group:" : member ? "group:" + value[4] + "/" : "";
                     contacts[prefix + key] = name;
+                    if (!group && identities != null) {
+                        var identity = new ChatIdentity(key, member ? "group:" + value[4] : "",
+                            Nickname: member ? null : value[2]?.ToString(), FriendRemark: member ? null : value[3]?.ToString(),
+                            GroupCard: member ? value[2]?.ToString() : null);
+                        identities[prefix + key] = identity;
+                        if (uid != "") identities[prefix + uid] = identity with { Sender = uid };
+                    }
                     if (!group && uid != "") contacts[prefix + uid] = name;
                 }
                 continue;
@@ -310,7 +322,10 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             foreach (var contact in reader.Query(sql, cancellation)) {
                 string key = contact[0]?.ToString() ?? "";
                 string name = contact.Skip(1).Select(v => v?.ToString()?.Trim()).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? key;
-                if (key != "") contacts[key] = name;
+                if (key != "") {
+                    contacts[key] = name;
+                    if (identities != null) identities[key] = new(key, "", Nickname: contact[2]?.ToString(), FriendRemark: contact[1]?.ToString());
+                }
             }
         }
     }
@@ -413,7 +428,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 string Optional(string name) => columns.Contains(name) ? SqliteReader.Identifier(name) : "NULL";
                 string sql = "SELECT " + string.Join(',', required.Select(SqliteReader.Identifier)) +
                     "," + (columns.Contains("40011") ? "\"40011\"" : "0") +
-                    "," + string.Join(',', new[] { "40001", "40003", "40013", "40090", "40093", "40850", "40900" }.Select(Optional)) +
+                    "," + string.Join(',', new[] { "40001", "40003", "40013", "40090", "40093", "40850", "40900", "40062" }.Select(Optional)) +
                     " FROM " + SqliteReader.Identifier(table) + " ORDER BY \"40050\"";
                 foreach (var row in reader.Query(sql, cancellation)) {
                     byte[]? raw = row[3] as byte[];
@@ -424,13 +439,19 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                         parts = parts.Select(p => p.Kind == "forward" && p.Forwarded.Length == 0 ? p with { Forwarded = forwarded,
                             MediaKeys = [.. p.MediaKeys ?? [], .. forwarded.SelectMany(f => f.Parts).SelectMany(c => c.MediaKeys ?? [])] } : p).ToArray();
                     }
-                    if (Convert.ToInt64(row[7] ?? 0) == 3) parts = [new("system", Text: parts.Length == 0 ? body : string.Join("\n", parts.Select(p => p.Text).Where(t => t.Length > 0)))];
+                    if (Convert.ToInt64(row[7] ?? 0) == 3 && !parts.Any(p => p.Kind == "recall")) parts = [new("system", Text: parts.Length == 0 ? body : string.Join("\n", parts.Select(p => p.Text).Where(t => t.Length > 0)))];
                     else if (group && row[10]?.ToString() is string reference && reference != "0")
                         parts = parts.Select(p => p.Kind == "reply" ? p with { ReferenceId = "seq:" + reference } : p).ToArray();
                     yield return new("QQ", (group ? "group:" : "direct:") + row[0], row[1]?.ToString() ?? "",
                         Convert.ToInt64(row[2] ?? 0), Convert.ToInt64(row[4] ?? 0), body, raw == null ? null : Convert.ToBase64String(raw)) {
                             ServerId = row[5]?.ToString(), Sequence = row[6]?.ToString(),
                             SenderName = new[] { row[8]?.ToString(), row[9]?.ToString() }.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+                            Identity = new(row[1]?.ToString() ?? "", (group ? "group:" : "direct:") + row[0],
+                                Nickname: row[9]?.ToString(), GroupCard: group ? row[8]?.ToString() : null,
+                                RecordedName: group ? null : row[8]?.ToString(),
+                                MessageNickname: !string.IsNullOrWhiteSpace(row[9]?.ToString()), MessageGroupCard: group && !string.IsNullOrWhiteSpace(row[8]?.ToString())),
+                            ReactionsRawBase64 = row[12] is byte[] reactions ? Convert.ToBase64String(reactions) : null,
+                            Reactions = row[12] is byte[] likes ? QQMessageParser.ParseReactions(likes) : [],
                             IsSelf = Convert.ToInt64(row[7] ?? 0) is 1 or 2, Parts = parts };
                 }
             }

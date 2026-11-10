@@ -6,6 +6,31 @@
  const referenceMaps = new Map(), referenceLoads = new Map();
  const label = key => labels[key] || key;
  const contactNames = index.contactNames || {};
+ const baseline=index.identityBaseline||{contactNames,avatars:index.avatars||{}};
+ const identityHistory=new Map();
+ for(const profile of Object.values(index.identityVersions||{})){const list=identityHistory.get(profile.Sender)||[];list.push(profile);identityHistory.set(profile.Sender,list);}
+ function identityOf(m){return m.Identity||index.identityVersions?.[m.IdentityVersion]||{Sender:m.Sender,Conversation:m.Conversation,RecordedName:(m.SenderName&&m.SenderName!==m.Sender?m.SenderName:null)||baseline.contactNames?.[m.Conversation+'/'+m.Sender]||baseline.contactNames?.[m.Sender]||m.SenderName,Avatar:baseline.avatars?.[m.Conversation+'/'+m.Sender]||baseline.avatars?.[m.Sender],ObservedAt:baseline.observedAt};}
+ function nameOf(m){const p=identityOf(m);return p.GroupCard||p.FriendRemark||p.Nickname||p.RecordedName||m.Sender;}
+ function identityDetails(m){
+  const current=identityOf(m),details=element('details','','identity-details'),summary=element('summary',nameOf(m)||label('ReaderUnknownSender'));
+  details.append(summary);const panel=element('div','','identity-panel');details.append(panel);
+  panel.append(element('strong',label('ReaderIdentity')));
+  const rows=[['ReaderAccount',m.Sender],['ReaderNickname',current.Nickname],['ReaderFriendRemark',current.FriendRemark],['ReaderGroupCard',current.GroupCard]];
+  if(current.RecordedName)rows.push(['ReaderRecordedName',current.RecordedName]);
+  const table=element('dl');for(const [name,value] of rows)table.append(element('dt',label(name)),element('dd',value||label('ReaderNotRecorded')));panel.append(table);
+  panel.append(element('small',label('ReaderIdentityProvenance')));
+  const versions=(identityHistory.get(m.Sender)||[]).filter(p=>!p.Conversation||p.Conversation===m.Conversation);
+  if(versions.length){panel.append(element('strong',label('ReaderIdentityHistory')));const list=element('div','','identity-history');panel.append(list);
+   for(const version of versions){const item=element('div','','identity-version');
+    if(version.Avatar&&safeAsset(version.Avatar)){const img=element('img');img.src=archiveBase+version.Avatar;img.alt='';item.append(img);}
+    const values=[['ReaderNickname',version.Nickname],['ReaderFriendRemark',version.FriendRemark],['ReaderGroupCard',version.GroupCard],['ReaderRecordedName',version.RecordedName]].filter(([,v])=>v).map(([k,v])=>label(k)+': '+v);
+    item.append(element('span',values.join(' · ')||label('ReaderNotRecorded')));
+    if(version.ObservedAt)item.append(element('small',label('ReaderObservedAt')+': '+new Date(version.ObservedAt).toLocaleString()));
+    list.append(item);
+   }
+  }
+  return details;
+ }
  const emojis=index.builtInEmoji || {};
  const resourceMap=new Map(Object.entries(index.resourceMedia||{}).map(([key,value])=>[key.toLowerCase(),value]));
  const mediaMatches=(keys,media)=>(keys||[]).some(key=>[media.Key,media.Name].some(value=>typeof value==='string'&&key.toLowerCase()===value.toLowerCase()));
@@ -42,7 +67,7 @@
  $('auto-bottom').checked=!!readerPrefs.autoBottom;$('auto-last').checked=!!readerPrefs.autoLast;
  for(const [id,key] of [['first','ReaderFirst'],['last','ReaderLast'],['jump-label','ReaderJumpPage'],['page-go','ReaderGo'],['filter-label','ReaderFilters'],['kind-label','ReaderMessageType'],['sender-label','ReaderSender'],['from-label','ReaderDateFrom'],['to-label','ReaderDateTo'],['self-label','ReaderOnlySelf'],['reset-filter','ReaderResetFilters'],['find-page','ReaderFindNextPage'],['stop-search','ReaderStopSearch']])text(id,label(key));
  $('kind-filter').append(new Option(label('ReaderAllTypes'),''));
- for(const kind of ['text','image','sticker','video','audio','file','reply','forward','system','poke','reaction','link','miniapp','contact','location','call','transfer','redpacket','music','channel','gift','markdown','buttons','wallet','unsupported','unparsed'])$('kind-filter').append(new Option(label('ReaderKind_'+kind),kind));
+ for(const kind of ['text','image','sticker','video','audio','file','reply','forward','system','poke','recall','reaction','link','miniapp','contact','location','call','transfer','redpacket','music','channel','gift','markdown','buttons','wallet','unsupported','unparsed'])$('kind-filter').append(new Option(label('ReaderKind_'+kind),kind));
  for(const [id,key] of [['scope-label','ReaderSearchScope'],['image-locate','ReaderLocateImage'],['image-copy','ReaderCopyImage']])text(id,label(key));
  $('search-scope').options[0].textContent=label('ReaderScopeConversation');$('search-scope').options[1].textContent=label('ReaderScopeArchive');
  function toggleFilters(open=!$('filter-panel').open){$('filter-panel').open=open;$('filter-toggle').setAttribute('aria-expanded',String(open));}
@@ -179,7 +204,7 @@
  function effectiveParts(m){if(!derivedParts.has(m))derivedParts.set(m,deriveParts(m));return derivedParts.get(m);}
  function deriveParts(m){
   const parts=index.messageParts?.[m.Id]||(m.Parts?.length?m.Parts:legacyParts(m));
-  if(m.Platform!=='QQ'||!m.RawBase64||!parts.some(p=>p.Kind==='system'&&!p.Text||['unsupported','unparsed','reply'].includes(p.Kind)))return parts;
+  if(m.Platform!=='QQ'||!m.RawBase64||!parts.some(p=>p.Kind==='system'&&!p.Text||['unsupported','unparsed','reply','reaction','recall'].includes(p.Kind)))return parts;
   try{
    for(const segment of protoFields(m.RawBase64)){
     const value=n=>segment.find(f=>f.id===n)?.value;
@@ -189,7 +214,7 @@
      const root=new DOMParser().parseFromString(xml,'application/xml');if(root.querySelector('parsererror'))continue;
      return [{Kind:'system',Text:Array.from(root.querySelectorAll('qq,nor')).map(e=>e.tagName==='qq'?contactNames[e.getAttribute('uin')]||e.getAttribute('nm')||e.getAttribute('jp')||e.getAttribute('uin')||e.textContent:e.getAttribute('txt')||e.textContent).join('')}];
     }
-    if((value(45002)==='8'||m.Type===5)&&segment.some(f=>f.id===47702))return [{Kind:'reaction',ReferenceSender:str(47705),ReferenceText:str(47714)}];
+    if((value(45002)==='8'||m.Type===5)&&segment.some(f=>f.id===47702))return [{Kind:'recall',ReferenceSender:str(47716)||str(47715)||str(47714),ReferenceText:str(47705),Detail:str(47713),RecallRole:Number(value(47702))}];
     const poke=segment.find(f=>f.id===47401&&f.bytes);if(poke){const action=wireFields(poke.bytes).find(f=>f.id===47413);return [{Kind:'poke',Text:typeof action?.value==='string'?action.value:''}];}
    }
   }catch{}
@@ -202,10 +227,10 @@
  function protoFields(encoded){if(encoded.length>1024*1024)return [];const data=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0)),fields=wireFields(data),segments=fields.filter(f=>f.id===40800&&f.bytes);return (segments.length?segments.map(f=>wireFields(f.bytes)):[fields]).map(part=>{const extra=part.find(f=>f.id===48210&&f.bytes);if(extra)try{return [...part,...wireFields(extra.bytes)];}catch{}return part;});}
  function matches(m,force=false){
   if(contextMode&&!force)return true;
-  const parts=effectiveParts(m),sender=contactNames[m.Conversation+'/'+m.Sender]||contactNames[m.Sender]||m.SenderName||m.Sender||'';
+  const parts=effectiveParts(m),sender=nameOf(m)||'';
   const query=$('message-search').value.toLocaleLowerCase(),author=$('sender-filter').value.toLocaleLowerCase(),kind=$('kind-filter').value;
   const searchable=[m.DisplayText||m.Text||'',sender,...parts.flatMap(p=>[p.Text,p.Title,p.Detail,p.ReferenceText])].join(' ').toLocaleLowerCase();
-  if(query&&!searchable.includes(query)||author&&!(sender+' '+m.Sender).toLocaleLowerCase().includes(author)||kind&&!parts.some(p=>p.Kind===kind)||$('self-filter').checked&&!m.IsSelf)return false;
+  if(query&&!searchable.includes(query)||author&&!([sender,m.Sender,...Object.values(identityOf(m)).filter(v=>typeof v==='string')].join(' ')).toLocaleLowerCase().includes(author)||kind&&!parts.some(p=>p.Kind===kind)||$('self-filter').checked&&!m.IsSelf)return false;
   const from=$('date-from').value,to=$('date-to').value;if((from||to)&&!(m.Timestamp>0))return false;
   const date=new Date(m.Timestamp*1000);const localDate=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
   return (!from||localDate>=from)&&(!to||localDate<=to);
@@ -305,20 +330,22 @@
    const mediaEntries=[...(m.Media||[])];
    const repairedMessage=index.resourceMedia?.['message:'+m.Id];if(repairedMessage)mediaEntries.push(repairedMessage);
    for(const key of repairedKeys){const resource=resourceMap.get(key.toLowerCase());if(resource&&!mediaEntries.some(item=>item.Path===resource.Path&&item.Key===resource.Key))mediaEntries.push(resource);}
-   const displayName=contactNames[m.Conversation+'/'+m.Sender] || contactNames[m.Sender] || m.SenderName || m.Sender;
+   const displayName=nameOf(m);
    if(!archiveResults&&$('search-scope').value!=='archive'&&!matches(m))continue;shownCount++;
-   const parts=effectiveParts(m),system=parts.every(p=>['system','poke','reaction'].includes(p.Kind));
+   const parts=effectiveParts(m),system=parts.every(p=>['system','poke','reaction','recall'].includes(p.Kind));
    const face=p=>p.Inline||p.EmojiId!=null||p.Kind==='sticker'&&(/^#[0-9]+$/.test(p.Title||'')||/^\/[^\s]+$/.test(p.Title||'')||!!emojiPath(m.Platform,p.Title));
    const article = element('article', '', 'message' + (system ? ' system' : m.IsSelf ? ' self' : '')); if (m.Id) article.id = 'msg-' + m.Id;
    article.messageData=m;article.resultRow=archiveResults?row:null;
    const avatar = element('div', displayName && displayName!=='0'?Array.from(displayName)[0]:'?', 'avatar');
-   const avatarPath=index.avatars?.[m.Sender]||index.avatars?.[m.Conversation+'/'+m.Sender];if(avatarPath&&safeAsset(avatarPath)){const img=element('img');img.src=archiveBase+avatarPath;img.alt=displayName;img.onerror=()=>img.remove();avatar.append(img);}
+   const avatarPath=identityOf(m).Avatar;if(avatarPath&&safeAsset(avatarPath)){const img=element('img');img.src=archiveBase+avatarPath;img.alt=displayName;img.onerror=()=>img.remove();avatar.append(img);}
    const content = element('div', '', 'content'), date = new Date(m.Timestamp * 1000);
    const sender=displayName && displayName!=='0'?displayName:label('ReaderUnknownSender');
    const time = element('div', (system ? '' : sender + '  ') + (m.Timestamp>0 && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : label('ReaderUnknownTime')), 'timestamp');
+   if(!system)time.replaceChildren(identityDetails(m),document.createTextNode('  '+(m.Timestamp>0&&!Number.isNaN(date.valueOf())?date.toLocaleString():label('ReaderUnknownTime'))));
    const bubble = element('div', '', 'bubble'), referenceZone = element('div', '', 'reference-zone');
    if(parts.length&&parts.every(p=>['image','video','sticker'].includes(p.Kind)&&!face(p))&&mediaEntries.some(media=>safeAsset(media.Path)))bubble.classList.add('visual-only');
    if(parts.length&&parts.every(p=>p.Kind==='audio')&&mediaEntries.some(media=>media.Kind==='audio'&&safeAsset(media.Path)))bubble.classList.add('audio-only');
+   if(m.Reactions?.length){const badges=element('div','','reaction-badges');for(const reaction of m.Reactions){if(!(reaction.Count>0))continue;const badge=element('span','','reaction-badge'+(reaction.IsSelf?' own':''));badge.append(inlineEmoji(m.Platform,reaction.EmojiId,/^[0-9]+$/.test(reaction.EmojiId)&&Number(reaction.EmojiId)>=0x1000&&Number(reaction.EmojiId)<=0x10ffff?String.fromCodePoint(Number(reaction.EmojiId)):'#'+reaction.EmojiId),document.createTextNode(' '+reaction.Count));badges.append(badge);}referenceZone.append(badges);}
    const tools=element('div','','message-tools'),sourceTools=element('div','','image-source-tools');
    tools.append(sourceDisclosure(m),sourceTools);
    const imageGroups=new Map(),renderedGroups=new Set();
@@ -355,13 +382,14 @@
      if (depth === 0) { const slot = element('div', '', 'quote-slot'); slot.quote = quote; slot.append(quote); block.append(slot); }
      else block.append(quote);
     }
-    if (!['text','reply','system','markdown','poke','reaction'].includes(kind)&&!visual&&!playableAudio) {
+    if (!['text','reply','system','markdown','poke','reaction','recall'].includes(kind)&&!visual&&!playableAudio) {
      block.append(element('div', label('ReaderKind_' + kind), 'kind-title'));
      if (part.Title) block.append(element('strong', part.Title));
     }
     if (kind === 'markdown') block.append(element('div', label('ReaderKind_markdown'), 'kind-title'));
     if (part.Text && (!rich || ['text','system','markdown','poke'].includes(kind))) {const text=element('span','','message-text');textWithEmoji(text,depth===0?visibleText(m,part.Text):part.Text,m.Platform);block.append(text);}
     if(kind==='poke'&&!part.Text)block.append(element('span',label('ReaderKind_poke')));
+    if(kind==='recall'){const key=part.RecallRole===1?'ReaderRecallAdmin':part.RecallRole===2?'ReaderRecallOwner':'ReaderRecall';block.append(element('span',label(key).replace('{0}',part.ReferenceSender||label('ReaderUnknownSender'))));}
     if(kind==='reaction'){block.classList.add('reaction-event');block.append(element('span',[part.ReferenceSender,label('ReaderReacted'),part.ReferenceText].filter(Boolean).join(' ')));}
     if (kind==='system' && !part.Text && !part.Title) block.append(element('span',label('ReaderEmptySystem'),'card-detail'));
     if (kind==='text' && !part.Text) block.append(element('span',label('ReaderEmptyMessage'),'card-detail'));

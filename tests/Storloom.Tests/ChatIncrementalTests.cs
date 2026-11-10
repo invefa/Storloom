@@ -50,6 +50,28 @@ public sealed class ChatIncrementalTests : IDisposable {
         Assert.Empty(Directory.GetDirectories(reading, ".reading-update-*"));
     }
     [Fact]
+    public void IdentityUpdatesPreserveOldNamesRemarksAndAvatarsWhileNewMessagesUseNewSnapshot() {
+        Create(ChatPlatform.QQ);
+        Sql(DatabasePath(ChatPlatform.QQ), "ALTER TABLE c2c_msg_table ADD COLUMN \"40093\";UPDATE c2c_msg_table SET \"40093\"='Old nickname';");
+        string profile = Path.Combine(Account,"profile_info.db");
+        Sql(profile,"CREATE TABLE profile_info_v6(\"1002\",\"1000\",\"20002\",\"20009\");INSERT INTO profile_info_v6 VALUES(2,'uid','Current profile','Old remark');");
+        var first=Backup("raw");string reading=Path.Combine(root,"reading");
+        new ChatExporter().ExportVerifiedBackup(first.Manifest,reading,ChatPlatform.QQ);
+        var before=Messages(reading).Single(m=>m.ServerId=="101");Assert.NotNull(before.IdentityVersion);Assert.Null(before.Identity);
+        Sql(profile,"UPDATE profile_info_v6 SET \"20002\"='New profile',\"20009\"='New remark';");
+        Sql(DatabasePath(ChatPlatform.QQ),"UPDATE c2c_msg_table SET \"40800\"='edited' WHERE \"40001\"=101;INSERT INTO c2c_msg_table VALUES(1,2,1700000002,'new',102,'New nickname');");
+        var next=ChatIncrementalBackup.Create(Account,Path.Combine(root,"next"),first.Manifest,Path.Combine(root,"journals"));
+        ChatReadingUpdate.Update(next.Backup.Manifest,reading,ChatPlatform.QQ);
+        var messages=Messages(reading);var old=messages.Single(m=>m.ServerId=="101");var fresh=messages.Single(m=>m.ServerId=="102");
+        Assert.Equal(before.IdentityVersion,old.IdentityVersion);Assert.NotEqual(old.IdentityVersion,fresh.IdentityVersion);
+        string text=File.ReadAllText(Path.Combine(reading,"archive-index.js"));var index=JsonNode.Parse(text["window.archiveIndex=".Length..].TrimEnd(';'))!;
+        var versions=index["identityVersions"]!;
+        Assert.Equal("Old nickname",versions[old.IdentityVersion!]!["Nickname"]!.GetValue<string>());
+        Assert.Equal("Old remark",versions[old.IdentityVersion!]!["FriendRemark"]!.GetValue<string>());
+        Assert.Equal("New nickname",versions[fresh.IdentityVersion!]!["Nickname"]!.GetValue<string>());
+        Assert.Equal("New remark",versions[fresh.IdentityVersion!]!["FriendRemark"]!.GetValue<string>());
+    }
+    [Fact]
     public void LegacyReaderWithoutCheckpointCanAdoptItsVerifiedSiblingBackup() {
         Create(ChatPlatform.WeChat); var first = Backup("raw"); string reading = first.Destination + "-reading-legacy";
         new ChatExporter().ExportVerifiedBackup(first.Manifest, reading, ChatPlatform.WeChat);

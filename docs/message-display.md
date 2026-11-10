@@ -77,3 +77,12 @@ Version 0.6.14 permits saving an image or attachment to a new filename. The dest
 
 
 Resolved voice messages use compact playback bubbles; filenames remain in source details. Multiple representations of the same image are grouped by original media identity when available. Use the small source controls beside source details to cycle sources or show all; separate unrelated images remain separate. QQ group portraits use distinct group identifiers instead of looking up a person with the same number. Export has an optional **Download QQ group avatars (Tencent service)** checkbox, off by default: it requests only group numbers from the fixed Tencent avatar host, with bounded downloads and no redirects, and saves images locally. Source: [NapCat maintainer explanation](https://github.com/NapNeko/NapCatQQ/discussions/1379). WeChat group portraits use the supported local head-image cache. Missing portraits keep a text fallback.
+
+
+### Identity observations
+
+Click a message sender to inspect nickname, personal friend remark and group nickname separately, plus previously captured names and avatars. Message database names take precedence over current profile metadata. Each new message binds a compact, immutable identity version; incremental updates retain the binding of existing messages, including edited messages. Avatar assets use content hashes and are retained rather than overwritten. Search by sender matches the three captured names.
+
+Observation timestamps describe when a profile was exported, not when a person changed it. A single client cache cannot reconstruct earlier avatar versions or missing remarks. Older reading copies retain their recorded display name and frozen avatar baseline; unknown name scopes are marked as not recorded. Repair can build an alias history from retained messages without changing their JSONL. History is scoped to a group, so unrelated group nicknames are not mixed.
+
+QQ recall notices are distinct from emoji reactions. Reactions read from the message's `40062` summary appear as emoji/count badges on that message; unknown flags and raw bytes remain available for inspection. Recall operator roles and custom wording remain separate from reactions.

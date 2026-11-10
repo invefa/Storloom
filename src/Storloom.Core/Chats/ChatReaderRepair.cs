@@ -71,7 +71,7 @@ public static class ChatReaderRepair {
         } finally { PathPolicy.AssertNoLinks(stage); Directory.Delete(stage, true); }
     }
     // Refresh presentation and optional resource associations without rewriting messages or pages.
-    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false, IReadOnlyDictionary<string, ChatMedia>? resourceMedia = null, IReadOnlyDictionary<string,string>? avatars = null, IReadOnlyDictionary<string,MessagePart[]>? messageParts = null) {
+    public static string Refresh(string directory, IReadOnlyDictionary<string, string>? contacts = null, string? emojiSource = null, bool includeInstalledEmoji = false, IReadOnlyDictionary<string, ChatMedia>? resourceMedia = null, IReadOnlyDictionary<string,string>? avatars = null, IReadOnlyDictionary<string,MessagePart[]>? messageParts = null, bool includeIdentityHistory = false) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
         string reportPath = Path.Combine(directory, "export-report.json");
         var report = JsonFiles.Read<ChatExportResult>(reportPath);
@@ -83,6 +83,24 @@ public static class ChatReaderRepair {
         string text = File.ReadAllText(indexPath); const string prefix = "window.archiveIndex=";
         if (!text.StartsWith(prefix, StringComparison.Ordinal) || !text.TrimEnd().EndsWith(';')) throw new InvalidDataException("Unsupported reader index.");
         var index = JsonNode.Parse(text[prefix.Length..].Trim().TrimEnd(';'))?.AsObject() ?? throw new InvalidDataException("Invalid reader index.");
+        ChatIdentityHistory.FreezeLegacy(index);
+        if (includeIdentityHistory) {
+            var history = index["identityVersions"] as JsonObject ?? new JsonObject();
+            var known = history.Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+            var baseline = index["identityBaseline"]!;
+            foreach (string line in File.ReadLines(Path.Combine(directory,"messages.jsonl"))) {
+                using var record = JsonDocument.Parse(line); var message = record.RootElement;
+                string? Value(string key) => message.TryGetProperty(key,out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+                if (Value("IdentityVersion") != null) continue;
+                string sender = Value("Sender") ?? "", conversation = Value("Conversation") ?? "";
+                if (sender is "" or "0") continue;
+                string? name = Value("SenderName");
+                string? avatar = baseline["avatars"]?[conversation + "/" + sender]?.GetValue<string>() ?? baseline["avatars"]?[sender]?.GetValue<string>();
+                var profile = new ChatIdentity(sender,conversation,RecordedName:name,Avatar:avatar);
+                if (known.Add(profile.Version)) history[profile.Version] = JsonSerializer.SerializeToNode(profile);
+            }
+            index["identityVersions"] = history;
+        }
         if(messageParts!=null){var parts=index["messageParts"] as JsonObject??new JsonObject();foreach(var pair in messageParts)parts[pair.Key]=JsonSerializer.SerializeToNode(pair.Value);index["messageParts"]=parts;}
         if(avatars!=null){
             var mapped=index["avatars"] as JsonObject??new JsonObject();
@@ -112,6 +130,8 @@ public static class ChatReaderRepair {
         }
         if (contacts != null) {
             index["contactNames"] = JsonSerializer.SerializeToNode(contacts);
+            if (index["identityBaseline"]?["contactNames"] is JsonObject baselineNames)
+                foreach (var pair in contacts) if (baselineNames[pair.Key] == null) baselineNames[pair.Key] = pair.Value;
             var ids = index["conversations"]!.AsArray().Select(c => c!["id"]!.GetValue<string>()).ToHashSet();
             var names = new Dictionary<string, string>();
             foreach (var pair in contacts) {

@@ -13,6 +13,26 @@ public sealed class ChatReaderTests : IDisposable {
     private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7WQAAAAASUVORK5CYII=");
     public ChatReaderTests() => Directory.CreateDirectory(root);
     [Fact]
+    public void ScopedIdentitySnapshotsKeepThreeNamesAndImmutableAvatarVersions() {
+        string source=Path.Combine(root,"identity-source"),target=Path.Combine(root,"identity-reader"),work=Path.Combine(root,"identity-work");
+        Directory.CreateDirectory(source);Directory.CreateDirectory(target);Directory.CreateDirectory(work);
+        var first=new ChatIdentity("sender","group:fixture",Nickname:"QQ name",FriendRemark:"My remark",GroupCard:"Group name",Avatar:"assets/"+new string('a',64)+".png",ObservedAt:DateTimeOffset.UtcNow);
+        var second=first with { Nickname="New QQ name",Avatar="assets/"+new string('b',64)+".png" };
+        using(var writer=new ChatArchiveWriter(source,target,work,[],null,CancellationToken.None,"self")) {
+            writer.AddPrepared(new("QQ","group:fixture","sender",1700000000,1,"old") {Identity=first});
+            writer.AddPrepared(new("QQ","group:fixture","sender",1700000001,1,"new") {Identity=second});writer.Finish(null);
+        }
+        var messages=File.ReadLines(Path.Combine(target,"messages.jsonl")).Select(l=>JsonSerializer.Deserialize<ChatMessage>(l)!).ToArray();
+        Assert.Equal(first.Version,messages[0].IdentityVersion);Assert.Equal(second.Version,messages[1].IdentityVersion);Assert.Null(messages[0].Identity);
+        string text=File.ReadAllText(Path.Combine(target,"archive-index.js"));using var index=JsonDocument.Parse(text["window.archiveIndex=".Length..].TrimEnd(';'));
+        var profiles=index.RootElement.GetProperty("identityVersions");Assert.Equal(2,profiles.EnumerateObject().Count());
+        Assert.Equal("My remark",profiles.GetProperty(first.Version).GetProperty("FriendRemark").GetString());
+        Assert.NotEqual(profiles.GetProperty(first.Version).GetProperty("Avatar").GetString(),profiles.GetProperty(second.Version).GetProperty("Avatar").GetString());
+        var baseline=new System.Text.Json.Nodes.JsonObject{["avatars"]=new System.Text.Json.Nodes.JsonObject{["sender"]="old.png"}};
+        ChatIdentityHistory.FreezeLegacy(baseline);baseline["avatars"]!["sender"]="new.png";ChatIdentityHistory.FreezeLegacy(baseline);
+        Assert.Equal("old.png",baseline["identityBaseline"]!["avatars"]!["sender"]!.GetValue<string>());
+    }
+    [Fact]
     public void AvatarMetadataIsExportedAndReaderRepairRejectsInvalidPaths() {
         string source=Path.Combine(root,"account");Directory.CreateDirectory(source);
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','hello');");

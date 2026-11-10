@@ -487,5 +487,19 @@
   "DownloadQQGroupAvatars": "下载 QQ 群头像（访问腾讯头像服务）",
   "DownloadQQGroupAvatarsHelp": "可选：用群号向腾讯请求群头像，不发送聊天内容或数据库密钥。头像保存到离线阅读版，不可用的头像保留默认显示。",
   "GroupAvatarUnavailableCount": "{0} 个群头像暂不可用，消息导出已保留。",
-  "PhaseGroupAvatars": "获取群头像"
+  "PhaseGroupAvatars": "获取群头像",
+  "ReaderKind_recall": "撤回提示",
+  "ReaderRecall": "{0}撤回了一条消息",
+  "ReaderRecallAdmin": "管理员{0}撤回了一条成员消息",
+  "ReaderRecallOwner": "群主{0}撤回了一条成员消息",
+  "ReaderIdentity": "此消息的发送人资料",
+  "ReaderAccount": "账号",
+  "ReaderNickname": "昵称",
+  "ReaderFriendRemark": "好友备注",
+  "ReaderGroupCard": "群内昵称",
+  "ReaderRecordedName": "已保存的显示名",
+  "ReaderNotRecorded": "未记录",
+  "ReaderIdentityHistory": "曾用名与头像记录",
+  "ReaderObservedAt": "观察时间",
+  "ReaderIdentityProvenance": "消息中的昵称和群名片优先保留。备注、头像及补读资料仅代表观察时的版本；无法确认过去的变更时间。"
 }
