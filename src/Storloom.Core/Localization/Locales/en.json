@@ -555,7 +555,7 @@
   "PhaseEncryptionSavePlan": "Preparing encryption: saving the authenticated resume plan",
   "ReaderPageSize": "Per page",
   "ReaderPageSizeHelp": "Enter 10-5,000 messages per page. Larger pages use more memory and take longer to display.",
-  "ReaderPageTop": "Page top",
+  "ReaderPageTop": "Top of page",
   "ReaderFindPreviousPage": "Previous matching page",
   "ReaderConversationDetails": "Conversation details",
   "ReaderArchivedMembers": "Archived senders",

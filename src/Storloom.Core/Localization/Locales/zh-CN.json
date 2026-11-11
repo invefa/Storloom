@@ -555,7 +555,7 @@
   "PhaseEncryptionSavePlan": "准备加密:正在保存加密续作计划",
   "ReaderPageSize": "每页条数",
   "ReaderPageSizeHelp": "每页可输入 10-5,000 条消息. 更多消息会占用更多内存并增加渲染时间.",
-  "ReaderPageTop": "当前页顶部",
+  "ReaderPageTop": "跳到当前页顶部",
   "ReaderFindPreviousPage": "查找上一匹配页",
   "ReaderConversationDetails": "会话详情",
   "ReaderArchivedMembers": "已归档的发送人",
