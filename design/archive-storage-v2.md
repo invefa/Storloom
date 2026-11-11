@@ -1,6 +1,6 @@
 # Archive storage v2 proposal
 
-Status: optional archive-library import, reading, indexed text search, incremental backup, verification and reading-copy export are connected in 1.8.0. No automatic migration or replacement of existing archives. Running tasks are unchanged.
+Status: optional archive-library import, reading, indexed text search, incremental backup, verification and reading-copy export are connected in 2.0.0. No automatic migration or replacement of existing archives. Running tasks are unchanged.
 
 ## Implementation status
 
