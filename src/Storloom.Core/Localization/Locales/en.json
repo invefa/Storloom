@@ -676,7 +676,7 @@
   "StoreNotEncrypted": "This archive library is not encrypted.",
   "StorePasswordConfirm": "Change the archive password? Existing backups retain their previous password until backed up again.",
   "StoreBackupConfirm": "Incremental backup from {0} to {1}? A paused backup resumes its captured snapshot.",
-  "StoreExportConfirm": "Export a plaintext reading copy from {0} to {1}? Anyone with disk access can read the exported files. To resume, select the same destination before updating the source archive.",
+  "StoreExportConfirm": "Export a reading copy from {0} to {1}? It contains plaintext unless the selected password protection finishes. To resume export, select the same destination before updating the source archive.",
   "StoreBackupDone": "Backup completed: {0} new files | {1} reused | {2} processed",
   "StoreExportDone": "Reading copy exported: {0}",
   "StorePasswordDone": "Archive password changed.",
