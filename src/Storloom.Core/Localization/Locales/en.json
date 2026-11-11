@@ -397,7 +397,7 @@
   "KeyFormatInvalid": "Invalid database key format. QQ requires 16 or 32 printable ASCII characters; WeChat requires 64 hexadecimal characters.",
   "DatabaseKeyMismatch": "The database key does not match this backup, or the database format is unsupported. Use the chat database encryption key, not your login password.",
   "VerifyBackupBeforeExport": "Recheck every backup file before export / update",
-  "VerifyBackupHelp": "Compare every raw backup file with its recorded SHA-256 before export / update. Turn off to save time, then use Verify backup independently after completion. Structure, file size and database authentication checks remain enabled. The choice is saved per archive; unfinished tasks retain their original choice.",
+  "VerifyBackupHelp": "Compare every raw backup file with its recorded SHA-256 before export / update. Turn off to save time, then use Verify backup independently after completion. Structure, file size and database authentication checks remain enabled. The choice is saved per archive; unfinished tasks retain their choice, which can be changed here before continuing.",
   "WeChatKeyMethodsHelp": "For newer WeChat clients, use login capture. Read from logged-in client is a best-effort, read-only search and may not find a retained key. Login capture asks you to close the daily client and log in to a separate debugger-managed instance.",
   "WeChatPassiveUnavailable": "No key matching this backup was found by read-only search. Some WeChat versions do not retain a supported key representation after login. Use Start WeChat login capture, or enter a database key obtained separately. No debugger was started automatically.",
   "ReadQQLogin": "Start QQ login capture...",
