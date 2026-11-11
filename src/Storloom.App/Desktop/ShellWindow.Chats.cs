@@ -83,7 +83,7 @@ public sealed partial class ShellWindow {
         browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
         chatContent.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = View.Stack(View.Text(L.T("BackupStepTitle"), 23), View.Text(L.T("BackupStepLead"), color: "Muted"),
-                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination),View.Field("ChatWorkers",ChatWorkerSelector())) });
+                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination),View.Field("ChatWorkers",ChatWorkerSelector("backup",()=>backupInput.Text))) });
         chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat, true));
         chatFooter.Children.Add(AsyncButton("IncrementalBackup", IncrementalBackupChat));
         if (verifiedBackups.TryGetValue(account.Directory, out string? previous) && File.Exists(previous))
@@ -126,7 +126,7 @@ public sealed partial class ShellWindow {
         var verify = new CheckBox { Content = L.T("VerifyBackupBeforeExport"), IsChecked = verifyChatBackup, Margin = new Thickness(0, 12, 0, 4) };
         verify.Checked += (_, _) => verifyChatBackup = true;
         verify.Unchecked += (_, _) => verifyChatBackup = false;
-        stack.Children.Add(View.Field("ChatWorkers",ChatWorkerSelector()));
+        stack.Children.Add(View.Field("ChatWorkers",ChatWorkerSelector("export",()=>readingDirectory??preferences.BackupRoot)));
         stack.Children.Add(verify);
         var help=new Expander{Header=L.T("ExportHelpTitle"),Margin=new Thickness(0,10,0,0),HorizontalContentAlignment=HorizontalAlignment.Stretch,
             Content=View.Stack(View.Text(L.T("VerifyBackupHelp"),color:"Muted"),View.Text(L.T("UpdateReadingHelp"),color:"Muted"),View.Text(L.T("ResumeReadingHelp"),color:"Muted"))};
@@ -139,7 +139,8 @@ public sealed partial class ShellWindow {
             chatStep = 3; readingDirectory = exportReport = null; SetCapturedKey(null); RenderChatStage();
         })); chatFooter.Children.Add(Button("GoBack", () => { chatStep = 1; RenderChatStage(); }));
     }
-    private ComboBox ChatWorkerSelector(){var choice=new ComboBox{ItemsSource=Enumerable.Range(1,8).ToArray(),SelectedItem=Math.Clamp(preferences.ChatParallelism,1,8),Width=72,HorizontalAlignment=HorizontalAlignment.Left,ToolTip=L.T("ChatWorkersHelp")};choice.SelectionChanged+=(_,_)=>{if(choice.SelectedItem is int count)preferences=preferences with{ChatParallelism=count};};return choice;}
+    private int ChatWorkers(string task,string? path)=>preferences.ChatWorkersAutomatic?WorkerRecommendation.For(task,path):Math.Clamp(preferences.ChatParallelism,1,8);
+    private ComboBox ChatWorkerSelector(string task,Func<string?> path){var choice=WorkerRecommendation.Selector(preferences.ChatParallelism,preferences.ChatWorkersAutomatic,task,path);choice.SelectionChanged+=(_,_)=>{if(choice.Tag is not true&&choice.SelectedValue is int count)preferences=preferences with{ChatParallelism=count>0?count:preferences.ChatParallelism,ChatWorkersAutomatic=count==0};};return choice;}
     private void UpdateExportEnabled(bool encrypted) {
         chatNext.IsEnabled = !encrypted || capturedKey != null || (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password));
         if (chatResume != null) chatResume.IsEnabled = chatNext.IsEnabled;

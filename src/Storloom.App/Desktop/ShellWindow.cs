@@ -37,6 +37,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
         MinWidth = 640; MinHeight = 480; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         dataRoot = Path.GetFullPath(dataDirectory ?? Path.Combine(AppContext.BaseDirectory, "data"));
+        PickerHistory.Attach(this,dataRoot);
         string prefs = Path.Combine(dataRoot, "preferences.json");
         if (File.Exists(prefs)) preferences = JsonFiles.Read<AppPreferences>(prefs);
         string backups = Path.Combine(dataRoot, "chat-backups.json");
@@ -50,7 +51,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     }
     private void BuildUi() {
         Body.Children.Clear(); pages.Clear();
-        var root = View.Grid(View.Auto, View.Fill, View.Auto, new GridLength(26), View.Auto);
+        var root = View.Grid(View.Auto, View.Fill, View.Auto, new GridLength(32), View.Auto);
         menu = new Menu { Padding = new Thickness(0), Margin = new Thickness(16, 0, 0, 0) };
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(menu, true);
         var file = new MenuItem { Header = L.T("FileMenu") };
@@ -95,9 +96,14 @@ public sealed partial class ShellWindow : ThemeWindow {
         logSplitter.DragStarted += (_, _) => { logRow.BeginAnimation(RowDefinition.HeightProperty, null); };
         logSplitter.DragCompleted += (_, _) => { preferences = preferences with { LogHeight = logRow.ActualHeight }; };
         View.Add(root, logSplitter, 2); logRow = root.RowDefinitions[3];
-        root.RowDefinitions[1].MinHeight = 260;
+        root.RowDefinitions[1].MinHeight = 320;
+        double contentFloor=260;
         void ClampLog() {
-            logRow.MaxHeight = Math.Max(26, Body.ActualHeight - 260 - root.RowDefinitions[0].ActualHeight - root.RowDefinitions[2].ActualHeight - root.RowDefinitions[4].ActualHeight);
+            // Larger controls can raise the content grid's measured minimum. Reserve that
+            // minimum before allocating the log, so expanding it cannot leave the viewport.
+            if(operationView!=null&&operationView.IsVisible&&operationView.TranslatePoint(new Point(0,operationView.ActualHeight),Body).Y>Body.ActualHeight+.5)
+                contentFloor=Math.Max(contentFloor,center.ActualHeight);
+            logRow.MaxHeight = Math.Max(32, Math.Min(Body.ActualHeight,ActualHeight-Caption.ActualHeight) - contentFloor - root.RowDefinitions[0].ActualHeight - root.RowDefinitions[2].ActualHeight - root.RowDefinitions[4].ActualHeight);
             if (logRow.Height.IsAbsolute && logRow.Height.Value > logRow.MaxHeight) {
                 logRow.BeginAnimation(RowDefinition.HeightProperty, null); logRow.Height = new GridLength(logRow.MaxHeight);
             }
@@ -116,12 +122,12 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView.CancelRequested += ()=>operation?.Cancel();
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
-            double target = expanded ? Math.Clamp(preferences.LogHeight, 80, Math.Max(80, ActualHeight * .55)) : 26;
+            double target = expanded ? Math.Clamp(preferences.LogHeight, 80, Math.Max(80, ActualHeight * .55)) : 32;
             if (!expanded && logRow.ActualHeight > 80) preferences = preferences with { LogHeight = logRow.ActualHeight };
             AnimateLog(target);logSplitter.IsEnabled=expanded;logSplitter.Height=expanded?3:1;
             preferences=preferences with{LogExpanded=expanded};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);
         };
-        logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 26; };
+        logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 32; };
         // The persistent log/status panel is the sole status surface, including at startup.
         statusFooter=new DockPanel{Visibility=Visibility.Collapsed};cancel=Button("Cancel",()=>operation?.Cancel());cancel.Visibility=Visibility.Collapsed;
         status=operationView.StatusText;status.Text=L.T("CatalogSummary",engine.Catalog.Rules.Count);
@@ -201,7 +207,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private void Guard(Action action) { try { action(); } catch (Exception ex) { Error(ex); } }
     private void ExportOperationLog() {
         var picker = new Microsoft.Win32.SaveFileDialog { Title = L.T("ExportLog"), Filter = "Text log|*.log|Text file|*.txt", FileName = "Storloom-log-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", AddExtension = true };
-        if (picker.ShowDialog(this) == true) operationView.ExportLog(picker.FileName);
+        if (PickerHistory.Show(picker,this,"log-export") == true) operationView.ExportLog(picker.FileName);
     }
     private void Error(Exception ex) {
         status.Text = L.T("OperationFailureLog",ex.Message); operationView.AddLog(status.Text);
@@ -226,10 +232,10 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         if(operationView.AutoShowToggle.IsChecked==true&&!operationView.Expanded)operationView.ToggleExpanded();
-        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight,80,Math.Max(80,ActualHeight*.55)) : 26);
+        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight,80,Math.Max(80,ActualHeight*.55)) : 32);
         operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14",12);operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;
         statusFooter.Visibility=Visibility.Collapsed;
-        status.Text = L.T("OperationStarting");if(debugEnabled)operationView.AddDebugDetail("task.options",$"workers: {preferences.ChatParallelism} | page: {currentPage} | auto_open_log: {preferences.LogAutoShow}"); bool complete = false;
+        status.Text = L.T("OperationStarting");if(debugEnabled)operationView.AddDebugDetail("task.options",$"worker_mode: {(preferences.ChatWorkersAutomatic?"auto":"manual")} | manual_workers: {preferences.ChatParallelism} | page: {currentPage} | auto_open_log: {preferences.LogAutoShow}"); bool complete = false;
         try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete; }
         catch (OperationCanceledException) { status.Text = L.T("Cancelled"); if(debugEnabled)operationView.AddDiagnostic(new("operation.cancelled")); }
         catch (Exception ex) { Error(ex); }
@@ -261,7 +267,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     }
     private void ShowHelp(int? topic = null, string? document = null) => new HelpWindow(topic ?? (currentPage == "chats" ? 2 : currentPage == "overview" ? 5 : 0), document) { Owner = this }.ShowDialog();
     private void ImportRules() {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "JSON|*.json" }; if (dialog.ShowDialog(this) != true) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "JSON|*.json" }; if (PickerHistory.Show(dialog,this,"rule-import") != true) return;
         var catalog = JsonFiles.Read<RuleCatalog>(dialog.FileName); _ = new CleanupEngine(catalog, engine.Settings);
         string path = Path.Combine(dataRoot, "rules.json");
         var merged = File.Exists(path) ? JsonFiles.Read<RuleCatalog>(path).Rules.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase) : [];
@@ -271,16 +277,16 @@ public sealed partial class ShellWindow : ThemeWindow {
     private void SaveCleanupPlan() {
         if (cleanupPlan == null) throw new InvalidOperationException(L.T("ScanFirst"));
         var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "JSON|*.cleanup-plan.json" };
-        if (dialog.ShowDialog(this) == true) JsonFiles.Write(dialog.FileName, cleanupPlan with {
+        if (PickerHistory.Show(dialog,this,"plan-save") == true) JsonFiles.Write(dialog.FileName, cleanupPlan with {
             Files = SelectedFiles(), Commands = cleanupPlan.Commands.Where(c => SelectedRules().Contains(c.RuleId)).ToList() });
     }
     private void LoadCleanupPlan() {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "JSON|*.cleanup-plan.json" }; if (dialog.ShowDialog(this) != true) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "JSON|*.cleanup-plan.json" }; if (PickerHistory.Show(dialog,this,"plan-load") != true) return;
         cleanupPlan = JsonFiles.Read<CleanupPlan>(dialog.FileName); excluded.Clear(); RenderRules(); Navigate("cleanup");
     }
     private void OpenReaderArchive() {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom reading copy|messages.html;vault.storloom.json" };
-        if (dialog.ShowDialog(this) == true) new ChatReaderWindow(Path.GetDirectoryName(dialog.FileName)!, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog();
+        if (PickerHistory.Show(dialog,this,"reader-open") == true) new ChatReaderWindow(Path.GetDirectoryName(dialog.FileName)!, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog();
     }
     private void SetCapturedKey(byte[]? key) { if (capturedKey != null) CryptographicOperations.ZeroMemory(capturedKey); capturedKey = key; }
     private static void OpenFolder(string path) { Directory.CreateDirectory(path); OpenFile(path); }

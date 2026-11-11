@@ -17,7 +17,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
     internal string? LastClipboardError { get; private set; }
     internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
     public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false) : base(L.T("ChatArchive"), 1200, 820) {
-        WindowGeometry.Attach(this,dataRoot,"reader",480,360);
+        WindowGeometry.Attach(this,dataRoot,"reader",480,360);PickerHistory.Attach(this,dataRoot);
         Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); };
         Loaded += async (_, _) => {
             try {
@@ -40,6 +40,9 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 if(vault!=null){var options=environment.CreateCoreWebView2ControllerOptions();options.IsInPrivateModeEnabled=true;options.ProfileName="ProtectedReader";await Browser.EnsureCoreWebView2Async(environment,options);}
                 else await Browser.EnsureCoreWebView2Async(environment); if (closed) return;
                 var core = Browser.CoreWebView2;
+                string preferenceScope=JsonFiles.Hash(directory.ToUpperInvariant());
+                string preferenceFile=Path.Combine(dataRoot,"reader-preferences",preferenceScope+".json");
+                await core.AddScriptToExecuteOnDocumentCreatedAsync("window.readerPreferenceScope="+JsonSerializer.Serialize(preferenceScope)+";window.readerHostPreferences="+ReaderPreferences.Load(preferenceFile).ToJsonString()+";window.readerDefaults="+JsonSerializer.Serialize(new{dark=Theme.IsDark})+";");
                 core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = true;
                 core.Settings.AreDefaultContextMenusEnabled = false;
                 core.WebMessageReceived += async (_,args) => {
@@ -50,6 +53,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
                         string? action=root.GetProperty("action").GetString();
                         if(action!="clipboard-image"&&args.WebMessageAsJson.Length>1024*1024)return;
+                        if(action=="reader-preferences"){if(args.WebMessageAsJson.Length<=8192)ReaderPreferences.Save(preferenceFile,root.GetProperty("preferences"));return;}
                         if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)await WriteClipboardAsync(()=>Clipboard.SetText(value));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action=="clipboard-image"){copyingImage=true;var bitmap=DecodeClipboardImage(root.GetProperty("data").GetString());await WriteClipboardAsync(()=>ImageClipboardWriter(bitmap));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action is not ("save-image" or "save-file"))return;
@@ -58,7 +62,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         foreach(char invalid in Path.GetInvalidFileNameChars())name=name.Replace(invalid,'_');
                         string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
                         var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T(action=="save-image"?"ReaderSaveImage":"ReaderSaveFile"),FileName=name,Filter="File|*"+extension,AddExtension=true,DefaultExt=extension};
-                        if(picker.ShowDialog(this)!=true)return;
+                        if(PickerHistory.Show(picker,this,action=="save-image"?"reader-save-image":"reader-save-file")!=true)return;
                         if(vault==null)SaveResourceFile(source,picker.FileName);
                         else{using var input=vault.OpenRead(source);SaveDecryptedResource(input,picker.FileName);}
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));

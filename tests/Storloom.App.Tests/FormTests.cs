@@ -403,7 +403,7 @@ public sealed class FormTests {
             item.IsSubmenuOpen=false;window.Navigate("overview");Pump();
             nodes=Descendants(window).ToArray();var input=nodes.OfType<TextBox>().Single(t=>t.Text==Path.GetPathRoot(Environment.SystemDirectory));
             var browse=nodes.OfType<Button>().First(b=>Equals(b.Content,L.T("Browse"))&&b.IsVisible);
-            Assert.Equal(28,input.ActualHeight);Assert.Equal(input.ActualHeight,browse.ActualHeight);
+            Assert.Equal(32,input.ActualHeight);Assert.Equal(input.ActualHeight,browse.ActualHeight);
             Assert.InRange(Math.Abs(input.TranslatePoint(new Point(0,input.ActualHeight/2),window).Y-browse.TranslatePoint(new Point(0,browse.ActualHeight/2),window).Y),0,.5);
             var tab=nodes.OfType<TabControl>().First(t=>t.IsVisible);var selected=(TabItem)tab.SelectedItem;
             var header=(Border)selected.Template.FindName("head",selected);
@@ -537,7 +537,7 @@ public sealed class FormTests {
             }
             var logRow=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;
             logRow.Height=new GridLength(5000);Pump();window.UpdateLayout();
-            Assert.InRange(panel.TranslatePoint(new Point(0,panel.ActualHeight),window).Y,0,window.ActualHeight+0.1);
+            Assert.True(panel.TranslatePoint(new Point(0,panel.ActualHeight),window).Y<=window.ActualHeight+.1,$"panelBottom={panel.TranslatePoint(new Point(0,panel.ActualHeight),window).Y}; window={window.ActualHeight}; body={window.Body.ActualHeight}; log={logRow.ActualHeight}; max={logRow.MaxHeight}; top={panel.TranslatePoint(new Point(),window).Y}");
             window.Height=650;Pump();window.UpdateLayout();Assert.InRange(logRow.ActualHeight,40,window.Body.ActualHeight-260);
             Capture(window,"bounded-log-"+theme);
         } finally {completion.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
@@ -742,6 +742,17 @@ public sealed class FormTests {
             Query("document.querySelector('#minimap-collapse').click();true");Assert.Equal("true",Query("document.querySelector('#minimap').classList.contains('collapsed')&&document.querySelector('#minimap-canvas').width>0"));
             Assert.Equal("true",Query("document.querySelector('#messages').getBoundingClientRect().right<=document.querySelector('#minimap').getBoundingClientRect().left+1"));
             Query("document.querySelector('#page-size').value='125';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","125");
+            Query("document.querySelector('#page-size').value='500';document.querySelector('#page-size-toggle').click();true");
+            Assert.Equal("6",Query("document.querySelectorAll('#page-sizes button').length"));
+            Assert.Equal("true",Query("!document.querySelector('#page-sizes').hidden&&document.querySelector('#page-sizes').getBoundingClientRect().bottom<document.querySelector('#page-size').getBoundingClientRect().top"));
+            Assert.Equal("true",Query("document.querySelector('#page-size').getBoundingClientRect().width>=88"));
+            Query("document.querySelector('#page-sizes button:nth-child(2)').click();true");Until("document.querySelectorAll('.message').length","201");
+            Assert.Equal("true",Query("document.querySelector('#page-sizes').hidden"));
+            Query("document.querySelector('#palette').value='qq';document.querySelector('#palette').dispatchEvent(new Event('change'));if(document.body.classList.contains('dark'))document.querySelector('#theme').click();true");
+            Until("document.querySelector('#palette').value","\"qq\"");
+            Pump();Query("location.reload();true");Until("document.querySelectorAll('.message').length","201");
+            Assert.Equal("\"qq\"",Query("document.querySelector('#palette').value"));Assert.Equal("false",Query("document.body.classList.contains('dark')"));
+
             Query("document.querySelector('#minimap-close').click();true");Assert.Equal("true",Query("document.querySelector('#minimap').hidden&&document.querySelector('#minimap-canvas').width===0"));
             Query("document.querySelector('#chat-title').click();true");Assert.Equal("true",Query("document.querySelector('#conversation-details').open"));Assert.Contains("Archived senders",Query("document.querySelector('#conversation-details-body').textContent"));
             Query("document.querySelector('#conversation-details-close').click();document.querySelector('#page-size').value='300';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","201");
@@ -861,7 +872,7 @@ public sealed class FormTests {
                     File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-"+entry.Item1+"-"+(dark?"dark":"light")+"-"+locale+".png"),stream.ToArray());
                 }
             }
-            Assert.Equal("\"qq\"",Query("localStorage.getItem('storloom.reader.palette')"));Query("location.reload();true");
+            Assert.Equal("\"qq\"",Query("JSON.parse(localStorage.getItem('storloom.reader.'+window.readerPreferenceScope)).palette"));Query("location.reload();true");
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="4"){Pump();Thread.Sleep(10);}
             Assert.Equal("\"qq\"",Query("document.getElementById('palette').value"));
             Assert.Contains("Older archive fixture",File.ReadAllText(Path.Combine(export.Directory,"messages.html")));
@@ -1198,12 +1209,12 @@ public sealed class FormTests {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true,LogAutoShow=false});
         var window=new ShellWindow(fixture){ShowInTaskbar=false};var finish=new TaskCompletionSource();Task? task=null;
         try{window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();
-            Assert.True(panel.IsVisible);Assert.False(panel.Expanded);Assert.True(panel.Follow);Assert.InRange(panel.ActualHeight,25,28);
+            Assert.True(panel.IsVisible);Assert.False(panel.Expanded);Assert.True(panel.Follow);Assert.InRange(panel.ActualHeight,31,34);
             task=(Task)typeof(ShellWindow).GetMethod("RunPausable",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[new Func<CancellationToken,Task>(_=>finish.Task)])!;Pump();Assert.False(panel.Expanded);
             panel.WrapToggle.IsChecked=true;Assert.Equal(TextWrapping.Wrap,panel.Log.TextWrapping);Assert.Equal(ScrollBarVisibility.Disabled,panel.Log.HorizontalScrollBarVisibility);
             panel.ToggleExpanded();Pump();Assert.True(panel.Expanded);Assert.True(panel.ActualHeight>80);
             foreach(var button in new[]{panel.PauseButton,panel.CancelButton}){var icon=Assert.IsType<System.Windows.Shapes.Path>(button.Content);var bounds=icon.RenderedGeometry.Bounds;var center=icon.TranslatePoint(new Point(bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2),button);Assert.InRange(Math.Abs(center.X-button.ActualWidth/2),0,1.5);Assert.InRange(Math.Abs(center.Y-button.ActualHeight/2),0,1.5);}
-            Capture(window,"compact-persistent-log");panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,25,28);finish.SetResult();Wait(AsResult(task));
+            Capture(window,"compact-persistent-log");panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,31,34);finish.SetResult();Wait(AsResult(task));
         }finally{finish.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
     });
     [Fact]

@@ -6,6 +6,7 @@ public sealed record AppPreferences {
     public AppTheme Theme { get; init; }
     public bool DownloadQQGroupAvatars { get; init; }
     public int ChatParallelism { get; init; } = 2;
+    public bool ChatWorkersAutomatic {get;init;}=true;
     public string BackupRoot { get; init; } = "";
     public string ArchiveRoot { get; init; } = "";
     public string[]? EnabledRuleSets { get; init; }

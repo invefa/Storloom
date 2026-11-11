@@ -45,7 +45,7 @@ public sealed class OperationPanel : Grid {
         PauseButton=View.IconButton("M 4,2 L 4,14 M 10,2 L 10,14","PauseOperation",()=>PauseRequested?.Invoke());PauseButton.Name="pause_operation";PauseButton.Visibility=Visibility.Collapsed;
         CancelButton=View.IconButton("M 3,3 L 13,13 M 13,3 L 3,13","Cancel",()=>CancelRequested?.Invoke());CancelButton.Name="cancel_operation";CancelButton.Visibility=Visibility.Collapsed;
         Margin = new Thickness(10,0,8,0);ControlFeedback.SetEnabled(Log,false);Log.Visibility=Visibility.Collapsed;
-        RowDefinitions.Add(new RowDefinition{Height=new GridLength(26)});RowDefinitions.Add(new RowDefinition{Height=new GridLength(0)});RowDefinitions.Add(new RowDefinition{Height=View.Fill});
+        RowDefinitions.Add(new RowDefinition{Height=new GridLength(32)});RowDefinitions.Add(new RowDefinition{Height=new GridLength(0)});RowDefinitions.Add(new RowDefinition{Height=View.Fill});
         var row=View.Grid(View.Fill);row.ColumnDefinitions.Add(new ColumnDefinition{Width=View.Fill});row.ColumnDefinitions.Add(new ColumnDefinition{Width=View.Auto});row.ColumnDefinitions.Add(new ColumnDefinition{Width=View.Auto});
         collapse=View.IconButton("M 1,9 L 6,4 11,9","ShowOperationLog",ToggleExpanded);collapse.Name="toggle_log";
         var export=View.IconButton("M 6,0 L 6,9 M 2,5 L 6,9 10,5 M 0,10 L 0,13 12,13 12,10","ExportLog",()=>ExportRequested?.Invoke());export.Name="export_log";
@@ -55,7 +55,7 @@ public sealed class OperationPanel : Grid {
         ToggleIcon(WrapToggle,"M 0,2 L 12,2 M 0,6 L 9,6 Q 14,6 11,10 L 5,10 M 7,8 L 5,10 7,12 M 0,10 L 2,10","WrapLog","wrap_log");
         ToggleIcon(AutoShowToggle,"M 1,3 L 11,3 11,12 1,12 Z M 3,0 L 9,0 M 6,0 L 6,7 M 4,5 L 6,7 8,5","AutoShowLog","auto_show_log");
         var actions=View.Row(PauseButton,CancelButton,DebugToggle,WrapToggle,FollowToggle,AutoShowToggle,export,collapse);actions.Margin=new Thickness(4,0,0,0);
-        state.TextTrimming=TextTrimming.CharacterEllipsis;state.TextWrapping=TextWrapping.NoWrap;state.FontSize=12;state.Margin=new Thickness(0);timing.FontSize=11;timing.Margin=new Thickness(8,0,4,0);
+        state.TextTrimming=TextTrimming.CharacterEllipsis;state.TextWrapping=TextWrapping.NoWrap;state.FontSize=13;state.Margin=new Thickness(0);timing.FontSize=12;timing.Margin=new Thickness(8,0,4,0);
         View.Add(row,state,0);View.Add(row,timing,0,1);View.Add(row,actions,0,2);View.Add(this,row,0);View.Add(this,progress,0);View.Add(this,Log,2);
         void WrapChanged(){Log.TextWrapping=WrapToggle.IsChecked==true?TextWrapping.Wrap:TextWrapping.NoWrap;Log.HorizontalScrollBarVisibility=WrapToggle.IsChecked==true?ScrollBarVisibility.Disabled:ScrollBarVisibility.Auto;OptionsChanged?.Invoke();}
         WrapToggle.Checked+=(_,_)=>WrapChanged();WrapToggle.Unchecked+=(_,_)=>WrapChanged();AutoShowToggle.Checked+=(_,_)=>OptionsChanged?.Invoke();AutoShowToggle.Unchecked+=(_,_)=>OptionsChanged?.Invoke();

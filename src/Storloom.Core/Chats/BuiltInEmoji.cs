@@ -77,8 +77,11 @@ public sealed class BuiltInEmoji {
     }
     internal void AddWeChat(Dictionary<string,byte[]> files) {
         if(files.TryGetValue("base-aliases.txt",out var aliases)) {
-            string[] names=Encoding.UTF8.GetString(aliases).Split('|');for(int i=0;i<names.Length;i++) {
-                string file="expression_"+(i+1)+".png";if(files.TryGetValue(file,out var bytes)) AddAliases("WeChat",names[i],new(()=>bytes,".png"));
+            string[] names=Encoding.UTF8.GetString(aliases).Split('|');for(int i=0;i<Math.Min(99,names.Length);i++) {
+                // The legacy alias table follows the old 99-face order. Resource numbers
+                // also include inserted faces and gestures; they are not alias positions.
+                int ordinal=i+1,resource=ordinal+(ordinal>=87?4:ordinal>=31?2:ordinal>=22?1:0);
+                string file="expression_"+resource+".png";if(files.TryGetValue(file,out var bytes)) AddAliases("WeChat",names[i],new(()=>bytes,".png"));
             }
         }
         if(!files.TryGetValue("newemoji-config.xml",out var xml))return;

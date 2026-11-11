@@ -22,11 +22,11 @@ internal sealed class PreferencesWindow : ThemeWindow {
         AppTheme[] themeValues = [AppTheme.Light, AppTheme.Dark, AppTheme.OneDark];
         var themes = Options([L.T("ThemeLight"), L.T("ThemeGrayscaleDark"), L.T("ThemeDark")], Array.IndexOf(themeValues, preferences.Theme)); Field("ThemeLabel", themes);
         TextBox FolderField(string key, string initial) {
-            var input = View.Input(initial); var panel = new DockPanel(); var browse = View.Button("Browse", () => { string path = View.Folder(this, input.Text); if (path != "") input.Text = path; });
+            var input = View.Input(initial); var panel = new DockPanel(); var browse = View.Button("Browse", () => { string path = View.Folder(this, input.Text,"preference-"+key); if (path != "") input.Text = path; });
             DockPanel.SetDock(browse, Dock.Right); panel.Children.Add(browse); panel.Children.Add(input); Field(key, panel); return input;
         }
         var backup = FolderField("BackupTo", preferences.BackupRoot); var archive = FolderField("ArchiveRoot", preferences.ArchiveRoot);
-        var workers = Options(Enumerable.Range(1,8).Select(n=>n.ToString()).ToArray(),Math.Clamp(preferences.ChatParallelism,1,8)-1); Field("ChatWorkers", workers);
+        var workers = WorkerRecommendation.Selector(preferences.ChatParallelism,preferences.ChatWorkersAutomatic,"backup",()=>backup.Text); Field("ChatWorkers", workers);
         Field("", View.Text(L.T("ChatWorkersHelp"), color: "Muted"));
         var motion = new CheckBox { Content = L.T("ReduceMotion"), IsChecked = preferences.ReduceMotion }; Field("MotionLabel", motion);
         var closeToTray = new CheckBox { Content = L.T("CloseToTray"), IsChecked = preferences.CloseToTray }; Field("CloseBehavior", closeToTray);
@@ -35,7 +35,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
         var custom = View.Input(preferences.CustomThemeFile ?? "");
         var customRow = new DockPanel(); var choose = View.Button("Browse", () => {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Theme JSON|*.json" };
-            if (picker.ShowDialog(this) == true) custom.Text = picker.FileName;
+            if (PickerHistory.Show(picker,this,"theme-import") == true) custom.Text = picker.FileName;
         }); DockPanel.SetDock(choose, Dock.Right); customRow.Children.Add(choose); customRow.Children.Add(custom); Field("CustomTheme", customRow);
         Field("", View.Text(L.T("CustomThemeHelp"), color: "Muted"));
         tabs.Items.Add(new TabItem { Header = L.T("General"), Content = new ScrollViewer { Content = fields, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
@@ -50,7 +50,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
         View.Checks(setList); setList.Name = "rule_sets"; setList.ItemsSource = choices; View.Add(rules, setList, 2);
         void RefreshSets() { setList.ItemsSource = null; setList.ItemsSource = choices; }
         var setActions = View.Row(View.Button("ImportRuleSet", () => {
-            var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Rule catalog JSON|*.json" }; if (picker.ShowDialog(this) != true) return;
+            var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Rule catalog JSON|*.json" }; if (PickerHistory.Show(picker,this,"rule-catalog-import") != true) return;
             try {
                 var catalog = JsonFiles.Read<RuleCatalog>(picker.FileName); _ = new CleanupEngine(RuleSets.Combine([catalog]), settings);
                 string id = "custom-" + Guid.NewGuid().ToString("N");
@@ -79,7 +79,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                 if (catalog.Rules.Count == 0) throw new InvalidDataException(L.T("NoRuleSets")); _ = new CleanupEngine(catalog, settings);
                 if (!string.IsNullOrWhiteSpace(custom.Text)) _ = Theme.ReadCustom(custom.Text);
                 Result = preferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = themeValues[themes.SelectedIndex],
-                    BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatParallelism = int.Parse((string)workers.SelectedItem),
+                    BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatParallelism = workers.SelectedValue is int n&&n>0?n:preferences.ChatParallelism, ChatWorkersAutomatic=workers.SelectedValue is 0,
                     LogAutoShow=logAutoShow.IsChecked==true, ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, DebugLogging = debugLogging.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
                 foreach (var choice in choices.Where(c => pending.ContainsKey(c.Info.Id))) JsonFiles.Write(Path.Combine(customSets, choice.Info.File), pending[choice.Info.Id]);
                 JsonFiles.Write(Path.Combine(customSets, "sets.json"), new RuleSetIndex(1, choices.Where(c => c.Info.IsCustom).Select(c => c.Info).ToList()));

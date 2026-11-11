@@ -11,7 +11,7 @@ public sealed partial class ShellWindow {
 
     private async void OpenChatBackup() {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("OpenChatBackup") };
-        if (dialog.ShowDialog(this) != true) return;
+        if (PickerHistory.Show(dialog,this,"backup-open") != true) return;
         await Run(async token => {
         var selected = await Task.Run(() => {
         var manifest = JsonFiles.Read<TransferJournal>(dialog.FileName);
@@ -79,7 +79,7 @@ public sealed partial class ShellWindow {
         await RunPausable(async token => {
             var progress = Progress();
             var result = await Task.Run(() => {
-                var service = new TransferService(preferences.ChatParallelism); var plan = service.Plan(location.Directory, destination, processes: clients, cancellation: token,progress:progress);
+                var service = new TransferService(ChatWorkers("backup",preferences.BackupRoot)); var plan = service.Plan(location.Directory, destination, processes: clients, cancellation: token,progress:progress);
                 return service.Execute(plan, Path.Combine(dataRoot, "journals"), progress, token);
             });
             if (result.Cancelled) { status.Text = L.T("Cancelled"); return; }
@@ -101,7 +101,7 @@ public sealed partial class ShellWindow {
         var location = ArchiveAccount(); bool qq = location.Platform == ChatPlatform.QQ;
         if (!Confirm(L.T(qq ? "QQActiveKeyConfirm" : "ActiveKeyConfirm"))) return;
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = qq ? "QQ.exe|QQ.exe" : "Weixin.exe|Weixin.exe" };
-        if (dialog.ShowDialog(this) != true) return;
+        if (PickerHistory.Show(dialog,this,"client-executable-"+(qq?"qq":"wechat")) != true) return;
         await Run(async token => {
             byte[] key = await CaptureWorker.Capture(location, dialog.FileName, token, ChatDiagnostics());
             SetCapturedKey(key); RenderChatStage(); status.Text = L.T("KeyReady");
@@ -118,7 +118,7 @@ public sealed partial class ShellWindow {
         string? previous = verifiedBackups.GetValueOrDefault(location.Directory);
         if (previous == null || !File.Exists(previous)) {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("ChooseIncrementalBase") };
-            if (picker.ShowDialog(this) != true) return; previous = picker.FileName;
+            if (PickerHistory.Show(picker,this,"incremental-base") != true) return; previous = picker.FileName;
         }
         string destination = Path.Combine(PathPolicy.Normalize(root), location.Platform.ToString(), location.Account,
             DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6] + "-raw");
@@ -126,7 +126,7 @@ public sealed partial class ShellWindow {
         await RunPausable(async token => {
             var progress = Progress();
             var result = await Task.Run(() => ChatIncrementalBackup.Create(location.Directory, destination, previous,
-                Path.Combine(dataRoot, "journals"), location.Platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"], progress, token,workers:preferences.ChatParallelism));
+                Path.Combine(dataRoot, "journals"), location.Platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"], progress, token,workers:ChatWorkers("backup",root)));
             activeManifest = result.Backup.Manifest; verifiedBackups[location.Directory] = activeManifest;
             preparedArchive = await Task.Run(() => ReadChatArchive(activeManifest, location), token);
             preferences = preferences with { BackupRoot = root }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
@@ -148,7 +148,7 @@ public sealed partial class ShellWindow {
         string target = resumeDirectory ?? raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
         VaultPasswordWindow? protection=null;
         if(encryptAfterExport){
-            protection=new VaultPasswordWindow(true,true){Owner=this};
+            protection=new VaultPasswordWindow(true,true,target){Owner=this};
             if(protection.ShowDialog()!=true||protection.Password==null)return;
         }
         byte[]? key = capturedKey?.ToArray();
@@ -164,9 +164,9 @@ public sealed partial class ShellWindow {
             await RunPausable(async token => {
                 var progress = Progress(); ChatReadingUpdateResult? updateResult = null;
                 var result = await Task.Run(() => {
-                    if (!update) return new ChatExporter(preferences.ChatParallelism, useLocalImageConfiguration: true, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars).ExportVerifiedBackup(
+                    if (!update) return new ChatExporter(ChatWorkers("export",target), useLocalImageConfiguration: true, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars, defaultReaderDark: Theme.IsDark).ExportVerifiedBackup(
                         activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup, resume: resumeDirectory != null);
-                    updateResult = ChatReadingUpdate.Update(activeManifest!, target, account.Platform, key, preferences.ChatParallelism,
+                    updateResult = ChatReadingUpdate.Update(activeManifest!, target, account.Platform, key, ChatWorkers("export",target),
                         verifyChatBackup, useLocalConfiguration: true, progress: progress, cancellation: token, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars);
                     return JsonFiles.Read<ChatExportResult>(Path.Combine(target, "export-report.json"));
                 });

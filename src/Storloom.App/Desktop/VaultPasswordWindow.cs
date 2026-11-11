@@ -19,10 +19,10 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
         stack.Children.Add(View.Text(L.T("VaultPassword")));stack.Children.Add(password);
         if(creating){stack.Children.Add(View.Text(L.T("VaultConfirmPassword")));stack.Children.Add(confirmation);}
         var media=new CheckBox{Content=L.T("VaultIncludeMedia"),IsChecked=true,Margin=new Thickness(0,12,0,0)};
-        var workers=new ComboBox{ItemsSource=Enumerable.Range(1,8).ToArray(),SelectedItem=2,MinWidth=75,HorizontalAlignment=HorizontalAlignment.Left};
+        var workers=WorkerRecommendation.Selector(2,true,"encryption",()=>directory);
         if(encrypting){stack.Children.Add(media);stack.Children.Add(View.Text(L.T("VaultPartialHelp"),color:"Muted"));stack.Children.Add(View.Text(L.T("VaultWorkers")));stack.Children.Add(workers);}
         Func<ChatProtectionSelection?> selection=()=>null;
-        if(creating&&encrypting&&directory!=null){
+        if(creating&&encrypting&&directory!=null&&Directory.Exists(directory)){
             var scope=new CheckBox{Content=L.T("VaultSelectScope"),Margin=new Thickness(0,12,0,4)};stack.Children.Add(scope);
             var options=new StackPanel{Visibility=Visibility.Collapsed};stack.Children.Add(options);
             var conversations=new List<(string Id,CheckBox Check)>();
@@ -50,7 +50,7 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
         var okay=new Button{Content=L.T(encrypting?"VaultEncrypt":"VaultUnlock"),IsDefault=true};okay.Click+=(_,_)=>{
             if(creating&&(password.Password.Length<8||password.Password!=confirmation.Password)){error.Text=L.T("VaultPasswordMismatch");return;}
             if(password.Password.Length==0)return;
-            Selection=selection();Password=password.Password;IncludeMedia=media.IsChecked==true;Workers=workers.SelectedItem is int count?count:2;password.Clear();confirmation.Clear();DialogResult=true;
+            Selection=selection();Password=password.Password;IncludeMedia=media.IsChecked==true;Workers=workers.SelectedValue is int count&&count>0?count:WorkerRecommendation.For("encryption",directory);password.Clear();confirmation.Clear();DialogResult=true;
         };row.Children.Add(okay);stack.Children.Add(row);Loaded+=(_,_)=>password.Focus();Closed+=(_,_)=>{password.Clear();confirmation.Clear();};
     }
 }

@@ -586,5 +586,9 @@
   "ReaderArchiveSearch": "搜索整个归档",
   "PhaseTransferPlan": "准备备份: 正在清点文件与大小",
   "LogIssue": "[{0}] {1}: {2}",
-  "ProgressSoFar": "已清点 {0:N0} 个文件, {1}"
+  "ProgressSoFar": "已清点 {0:N0} 个文件, {1}",
+  "WorkersAutomatic": "自动 (推荐: {0})",
+  "WorkersRecommended": "{0} (推荐)",
+  "WorkersAutomaticHelp": "自动根据任务类型, 目标磁盘寻道特性, CPU 数量和可用内存选择线程数. 推荐是起点, 磁盘负载和数据规模可能改变最优值.",
+  "ReaderSupplementedAvatar": "此头像来自后续补充的资料. 历史身份记录保持原样."
 }

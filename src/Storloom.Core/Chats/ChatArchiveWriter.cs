@@ -15,6 +15,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
         bool? Ordered = null, long? LastTimestamp = null);
     private readonly string source, destination, work;
     private readonly string account;
+    private readonly bool? defaultReaderDark;
+    private readonly string? defaultReaderPalette;
     private readonly Dictionary<string, string> contacts;
     private readonly IReadOnlyDictionary<string,ChatIdentity> identities;
     private readonly Dictionary<string,ChatIdentity> identityVersions = [];
@@ -52,7 +54,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null, bool downloadQQGroupAvatars = false, IReadOnlyDictionary<string,ChatIdentity>? identities = null) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null, bool downloadQQGroupAvatars = false, IReadOnlyDictionary<string,ChatIdentity>? identities = null, bool? defaultReaderDark = null, string? defaultReaderPalette = null) {
+        this.defaultReaderDark=defaultReaderDark;this.defaultReaderPalette=defaultReaderPalette;
         this.identities = identities ?? new Dictionary<string,ChatIdentity>();
         this.avatars=avatars==null?new(StringComparer.Ordinal):new(avatars,StringComparer.Ordinal);
         this.downloadQQGroupAvatars=downloadQQGroupAvatars;
@@ -397,7 +400,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));
         File.WriteAllText(Path.Combine(destination, "archive-index.js"), "window.archiveIndex=" + JsonSerializer.Serialize(new {
-            language = L.Language, labels, identityVersions, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported, avatars,
+            preferenceScope=JsonFiles.Hash(account), defaultDark=defaultReaderDark, defaultPalette=defaultReaderPalette, language = L.Language, labels, identityVersions, unresolvedMedia = UnresolvedMedia, unsupportedMessages = UnsupportedMessages, builtInEmoji = emoji.Exported, avatars,
             conversationAvatars=conversationIds.Where(c=>avatars?.ContainsKey(c.Key)==true||avatars?.ContainsKey(c.Key.StartsWith("direct:",StringComparison.Ordinal)?c.Key[7..]:c.Key)==true).ToDictionary(c=>c.Value,c=>avatars!.GetValueOrDefault(c.Key,avatars!.GetValueOrDefault(c.Key.StartsWith("direct:",StringComparison.Ordinal)?c.Key[7..]:c.Key)!)),
             conversationKeys = conversationIds.ToDictionary(c=>c.Value,c=>c.Key),
             conversations = conversations.Values.OrderBy(c => c.Name).Select(c => new { id = c.Id, name = c.Name, count = c.Count, pages = c.Pages }) }) + ";");

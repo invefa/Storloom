@@ -586,5 +586,9 @@
   "ReaderArchiveSearch": "Search archive",
   "PhaseTransferPlan": "Preparing backup: inventorying files and sizes",
   "LogIssue": "[{0}] {1}: {2}",
-  "ProgressSoFar": "{0:N0} files, {1} inventoried"
+  "ProgressSoFar": "{0:N0} files, {1} inventoried",
+  "WorkersAutomatic": "Auto (recommended: {0})",
+  "WorkersRecommended": "{0} (recommended)",
+  "WorkersAutomaticHelp": "Auto selects a bounded worker count from the task, target disk seek behavior, CPU count and available memory. Estimates are a starting point; disk load and data sizes can change the best setting.",
+  "ReaderSupplementedAvatar": "Supplemented avatar from a later observation. The historical identity record is unchanged."
 }

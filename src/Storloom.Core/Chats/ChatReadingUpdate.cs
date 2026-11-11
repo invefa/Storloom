@@ -193,6 +193,7 @@ public static class ChatReadingUpdate {
                 target[map]![pair.Key] = pair.Value?.DeepClone();
             }
         }
+        foreach(string setting in new[]{"preferenceScope","defaultPalette","defaultDark"})if(target[setting]==null&&latest[setting]!=null)target[setting]=latest[setting]!.DeepClone();
         if (latest["labels"] != null) target["labels"] = latest["labels"]!.DeepClone();
     }
     private static void CopyAssets(string delta, string directory, CancellationToken cancellation) {

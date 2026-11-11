@@ -40,7 +40,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
     public bool CanResume { get; init; }
 }
 
-public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false, bool downloadQQGroupAvatars = false) {
+public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false, bool downloadQQGroupAvatars = false, bool? defaultReaderDark = null) {
     private readonly int parallelism = maximumParallelism is >= 1 and <= 8 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     public ChatExportResult Export(string source, string destination, ChatPlatform platform,
         byte[]? secret = null, IProgress<ScanProgress>? progress = null,
@@ -204,7 +204,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
             if (verified != null && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
             using var voices = platform == ChatPlatform.WeChat ? new WeChatVoices(source, work, secret, cancellation) : null;
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism, voices, avatars, downloadQQGroupAvatars, identities);
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, verified != null, parallelism, voices, avatars, downloadQQGroupAvatars, identities, defaultReaderDark, platform.ToString().ToLowerInvariant());
             progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {

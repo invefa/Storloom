@@ -257,6 +257,18 @@ public sealed class ChatReaderTests : IDisposable {
         }
         emoji.UseParts("WeChat",[new("text","/斜眼笑 [斜眼笑]")]);Assert.Contains("WeChat:/斜眼笑",emoji.Exported.Keys);
     }
+    [Fact]
+    public void WeChatLegacyAliasesFollowResourceOrderAcrossInsertedFacesAndGestures() {
+        string destination=Path.Combine(root,"legacy-emoji");Directory.CreateDirectory(destination);
+        string[] names=Enumerable.Range(1,110).Select(i=>"[fixture"+i+"]").ToArray();names[21]="[白眼]";names[30]="[疑问]";names[85]="[爱你]";names[87]="[飞吻]";
+        var files=new Dictionary<string,byte[]>{["base-aliases.txt"]=Encoding.UTF8.GetBytes(string.Join('|',names))};
+        foreach(int resource in new[]{23,33,88,92,103})files["expression_"+resource+".png"]=Png.Concat(new[]{(byte)resource}).ToArray();
+        var emoji=new BuiltInEmoji(root,destination);emoji.AddWeChat(files);
+        foreach(var pair in new[]{("白眼",23),("疑问",33),("爱你",88),("飞吻",92),("fixture99",103)}){
+            string asset=emoji.Use("WeChat:["+pair.Item1+"]")!;Assert.NotNull(asset);Assert.Equal(pair.Item2,File.ReadAllBytes(Path.Combine(destination,asset))[^1]);
+        }
+        Assert.Null(emoji.Use("WeChat:[fixture100]"));
+    }
     private static void Database(string path, string sql) {
         Assert.Equal(0, sqlite3_open_v2(path, out nint db, 6, 0));
         try { Assert.Equal(0, sqlite3_exec(db, sql, 0, 0, 0)); } finally { sqlite3_close_v2(db); }

@@ -11,7 +11,7 @@
   <Setter Property="local:ControlFeedback.Enabled" Value="True"/>
   <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/>
   <Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/>
-  <Setter Property="Padding" Value="9,3"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/><Setter Property="MinWidth" Value="64"/>
+  <Setter Property="Padding" Value="10,4"/><Setter Property="Height" Value="32"/><Setter Property="MinHeight" Value="32"/><Setter Property="MinWidth" Value="64"/>
   <Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,8,0"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
    <Border x:Name="frame" CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
@@ -36,7 +36,7 @@
  <Style x:Key="EditorBase" TargetType="Control">
   <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/>
   <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}"/><Setter Property="BorderThickness" Value="1"/>
-  <Setter Property="Padding" Value="8,0"/><Setter Property="MinHeight" Value="28"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+  <Setter Property="Padding" Value="8,0"/><Setter Property="MinHeight" Value="32"/><Setter Property="VerticalContentAlignment" Value="Center"/>
   <Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control">
    <Border x:Name="frame" CornerRadius="3" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">

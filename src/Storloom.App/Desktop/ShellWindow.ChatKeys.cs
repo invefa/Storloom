@@ -7,7 +7,7 @@ namespace Storloom.App;
 public sealed partial class ShellWindow {
     private async Task ImportChatKey() {
         var picker=new Microsoft.Win32.OpenFileDialog{Title=L.T("KeyImport"),Filter="All files|*.*"};
-        if(picker.ShowDialog(this)!=true)return;
+        if(PickerHistory.Show(picker,this,"database-key-import")!=true)return;
         byte[]? candidate=null;
         try {
             if(new FileInfo(picker.FileName).Length>1024)throw new InvalidOperationException(L.T("KeyFormatInvalid"));
@@ -34,7 +34,7 @@ public sealed partial class ShellWindow {
         reveal.Unchecked+=(_,_)=>{visible.Clear();visible.Visibility=Visibility.Collapsed;masked.Visibility=Visibility.Visible;};
         var actions=View.Row(View.Button("KeyCopy",()=>Clipboard.SetText(text)),View.Button("KeySave",()=>{
             var save=new Microsoft.Win32.SaveFileDialog{Title=L.T("KeySave"),Filter="All files|*.*",AddExtension=false,FileName=""};
-            if(save.ShowDialog(window)!=true)return;
+            if(PickerHistory.Show(save,window,"database-key-export")!=true)return;
             if(!Notice.Show(window,L.T("KeySave"),L.T("KeySaveConfirm"),true))return;
             // Only an explicit user action writes a key. Never include its value in task logs.
             try{File.WriteAllText(save.FileName,text,new UTF8Encoding(false));}

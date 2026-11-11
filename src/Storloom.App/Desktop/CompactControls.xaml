@@ -11,7 +11,7 @@
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style x:Key="LogIconToggle" TargetType="CheckBox">
-  <Setter Property="Width" Value="24"/><Setter Property="Height" Value="24"/><Setter Property="MinHeight" Value="0"/><Setter Property="Margin" Value="0"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
+  <Setter Property="Width" Value="28"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="0"/><Setter Property="Margin" Value="0"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox"><Border x:Name="frame" Background="Transparent" CornerRadius="3"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="frame" Property="Background" Value="{DynamicResource Hover}"/></Trigger><Trigger Property="IsChecked" Value="True"><Setter TargetName="frame" Property="Background" Value="{DynamicResource Selection}"/><Setter Property="Foreground" Value="{DynamicResource AccentText}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style x:Key="OperationProgress" TargetType="ProgressBar">
@@ -55,7 +55,7 @@
  <Style TargetType="ComboBox">
   <Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
   <Setter Property="local:ControlFeedback.Enabled" Value="True"/>
-  <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalContentAlignment" Value="Left"/>
+  <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Height" Value="32"/><Setter Property="MinHeight" Value="32"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalContentAlignment" Value="Left"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
    <Grid>
     <ToggleButton x:Name="toggle" Focusable="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="0" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">

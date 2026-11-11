@@ -13,8 +13,8 @@ internal static class View {
         var text = new TextBlock { Text = value, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         text.SetResourceReference(TextBlock.ForegroundProperty, color); return text;
     }
-    public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 28, VerticalAlignment = VerticalAlignment.Center };
-    public static PasswordBox SecretInput() => new() { MinHeight = 28, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
+    public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 32, VerticalAlignment = VerticalAlignment.Center };
+    public static PasswordBox SecretInput() => new() { MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
     public static Grid Field(string key, FrameworkElement control, double labelWidth = 112) {
         var row = new Grid { Margin = new Thickness(0, 4, 0, 8) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(labelWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -57,7 +57,7 @@ internal static class View {
     }
     public static Button IconButton(string geometry, string tooltip, Action action) {
         var button = Button(tooltip, action); button.Content = Icon(geometry,12); button.ToolTip = L.T(tooltip);
-        button.Width = 24; button.Height = button.MinHeight = 24; button.MinWidth = 24; button.Padding = new Thickness(4); button.Margin = new Thickness(0);
+        button.Width = 28; button.Height = button.MinHeight = 28; button.MinWidth = 28; button.Padding = new Thickness(4); button.Margin = new Thickness(0);
         button.BorderThickness = new Thickness(0); button.Background = Brushes.Transparent;
         System.Windows.Automation.AutomationProperties.SetName(button, L.T(tooltip)); return button;
     }
@@ -93,11 +93,7 @@ internal static class View {
         while (number >= 1024 && index < units.Length - 1) { number /= 1024; index++; }
         return $"{number:N1} {units[index]}";
     }
-    public static string Folder(Window owner, string? initial = null) {
-        var dialog = new Microsoft.Win32.OpenFolderDialog();
-        if (Directory.Exists(initial)) dialog.InitialDirectory = initial;
-        return dialog.ShowDialog(owner) == true ? dialog.FolderName : "";
-    }
+    public static string Folder(Window owner, string? initial = null, [System.Runtime.CompilerServices.CallerMemberName] string purpose = "folder") => PickerHistory.Folder(owner,initial,purpose);
 }
 
 public class ThemeWindow : FluentWindow {
