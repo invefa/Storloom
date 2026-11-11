@@ -100,8 +100,8 @@ public sealed partial class ShellWindow {
         byte[]? key=capturedKey?.ToArray();try{
             if(!string.IsNullOrEmpty(keyInput?.Password)){if(key!=null)CryptographicOperations.ZeroMemory(key);key=ChatDatabaseKey.Parse(keyInput.Password,project.Platform);}keyInput?.Clear();
             string taskFile=project.TaskFile??Path.Combine(dataRoot,"archive-tasks",project.Id+".json");Directory.CreateDirectory(Path.GetDirectoryName(taskFile)!);
-            bool automatic=preferences.ChatWorkersAutomatic;int manual=preferences.ChatParallelism;var progress=Progress();
-            await RunPausable(async token=>{await Task.Run(()=>ChatArchiveWorkflow.Update(project,taskFile,key,password,ChatWorkers("export",project.BackupRoot),p=>Dispatcher.Invoke(()=>{SaveArchive(p);verifiedBackups[p.Source]=p.Manifest!;JsonFiles.Write(Path.Combine(dataRoot,"chat-backups.json"),verifiedBackups);}),request,progress,token,Theme.IsDark,phase=>automatic?WorkerRecommendation.For(phase,project.BackupRoot):manual),token);});
+            JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);bool automatic=preferences.ChatWorkersAutomatic;int manual=preferences.ChatParallelism;var progress=Progress();
+            await RunPausable(async token=>{await Task.Run(()=>ChatArchiveWorkflow.Update(project,taskFile,key,password,ChatWorkers("export",project.BackupRoot),p=>Dispatcher.Invoke(()=>{SaveArchive(p);verifiedBackups[p.Source]=p.Manifest!;JsonFiles.Write(Path.Combine(dataRoot,"chat-backups.json"),verifiedBackups);}),request,progress,token,Theme.IsDark,phase=>automatic?WorkerRecommendation.For(phase,project.BackupRoot):manual,downloadGroupAvatars:preferences.DownloadQQGroupAvatars),token);});
         }finally{if(key!=null)CryptographicOperations.ZeroMemory(key);password=null;archivePassword?.Clear();if(operationIncomplete)SetCapturedKey(null);chatStep=-1;RenderChatStage();}
     }
     private async Task ConfigureArchiveProtection(ChatArchiveProject project){

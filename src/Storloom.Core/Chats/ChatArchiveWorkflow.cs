@@ -14,7 +14,7 @@ public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild
 /// <summary>Write immutable generations. Only the caller's verified catalog checkpoint switches the visible reader.</summary>
 public static class ChatArchiveWorkflow {
     public static ChatArchiveProject Update(ChatArchiveProject project,string taskFile,byte[]? databaseKey,string? password,int workers,
-        Action<ChatArchiveProject> checkpoint,ChatArchiveUpdateRequest? request=null,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default,bool? defaultDark=null,Func<string,int>? selectWorkers=null,bool checkRunningClients=true){
+        Action<ChatArchiveProject> checkpoint,ChatArchiveUpdateRequest? request=null,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default,bool? defaultDark=null,Func<string,int>? selectWorkers=null,bool checkRunningClients=true,bool downloadGroupAvatars=false){
         request??=new();if(!System.Text.RegularExpressions.Regex.IsMatch(project.Id,"^[a-f0-9]{64}$",System.Text.RegularExpressions.RegexOptions.IgnoreCase)||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source)||string.IsNullOrEmpty(project.Account)||Path.GetFileName(project.Account)!=project.Account)throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,8);int backupWorkers=Math.Clamp(selectWorkers?.Invoke("backup")??workers,1,8),encryptionWorkers=Math.Clamp(selectWorkers?.Invoke("encryption")??workers,1,8);string accountRoot=Path.Combine(PathPolicy.Normalize(project.BackupRoot),project.Platform.ToString(),project.Account);
         if(PathPolicy.Under(accountRoot,project.Source)||PathPolicy.Under(project.Source,accountRoot)||accountRoot.Equals(project.Source,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Archive backup and source must be separate directories.");CreateDirectorySafe(accountRoot);PathPolicy.AssertNoLinks(Path.GetDirectoryName(Path.GetFullPath(taskFile))!);
         string lockPath=Path.Combine(accountRoot,".archive-project-"+project.Id+".lock");PathPolicy.AssertNoLinks(accountRoot);
@@ -75,10 +75,10 @@ public static class ChatArchiveWorkflow {
             if(state.Phase=="reading"){
                 progress?.Report(new("archive-reading",0,0));
                 if(policy.ProtectionOnly){ }
-                else if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.Update(state.Manifest,stage,project.Platform,databaseKey,workers,true,true,progress,cancellation,originalReadingDirectory:state.PreviousReading);
+                else if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.Update(state.Manifest,stage,project.Platform,databaseKey,workers,true,true,progress,cancellation,downloadQQGroupAvatars:downloadGroupAvatars,originalReadingDirectory:state.PreviousReading);
                 else{
                     bool resume=Directory.Exists(stage)&&File.Exists(Path.Combine(stage,"export-report.json"));
-                    var result=new ChatExporter(workers,true,defaultReaderDark:defaultDark).ExportVerifiedBackup(state.Manifest,stage,project.Platform,databaseKey,progress,cancellation,resume:resume);
+                    var result=new ChatExporter(workers,true,downloadGroupAvatars,defaultReaderDark:defaultDark).ExportVerifiedBackup(state.Manifest,stage,project.Platform,databaseKey,progress,cancellation,resume:resume);
                     if(result.CanResume){if(cancellation.IsCancellationRequested)throw new OperationCanceledException(cancellation);throw new IOException("Reading export is incomplete; continue the archive task.");}
                 }
                 Save("protection");
