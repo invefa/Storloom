@@ -26,6 +26,17 @@ public sealed class ArchiveWorkflowTests:IDisposable {
         var resumed=Update(latest);Assert.Equal(2,File.ReadLines(Path.Combine(resumed.Reading!,"messages.jsonl")).Count());var newest=Update(resumed);Assert.Equal(3,File.ReadLines(Path.Combine(newest.Reading!,"messages.jsonl")).Count());
     }
     [Fact]public void BackupOnlyLeavesReaderPointerAndHistoryUntouched(){var initial=Update(Project());var next=Update(initial,request:new(BackupOnly:true));Assert.Equal(initial.Reading,next.Reading);Assert.NotEqual(initial.Manifest,next.Manifest);Assert.Null(next.TaskFile);}
+    [Fact]public void VerifiedGenerationCopyReusesIndexOnFollowingUpdates(){
+        var first=Update(Project());var second=Update(first);var phases=new List<string>();
+        var third=Update(second,progress:new Callback(p=>phases.Add(p.RuleId)));
+        Assert.DoesNotContain("chat-update-index",phases);Assert.NotEqual(second.Reading,third.Reading);
+        Assert.Equal(File.ReadAllBytes(Path.Combine(second.Reading!,"messages.jsonl")),File.ReadAllBytes(Path.Combine(third.Reading!,"messages.jsonl")));
+    }
+    [Fact]public void ModifiedCopiedIndexIsRebuiltInsteadOfTrusted(){
+        var second=Update(Update(Project()));string index=Path.Combine(second.Reading!,".reading-update-index.db");File.WriteAllText(index,"invalid fixture cache");
+        var phases=new List<string>();var third=Update(second,progress:new Callback(p=>phases.Add(p.RuleId)));
+        Assert.Contains("chat-update-index",phases);Assert.Single(File.ReadLines(Path.Combine(third.Reading!,"messages.jsonl")));
+    }
     [Fact]public void ProtectedUpdateUsesEncryptedWorkspaceAndPreservesOldCiphertext(){
         string efs=Path.Combine(root,"efs-capability");try{ChatArchiveWorkspace.Create(efs,true);}catch(IOException){var p=Project() with{Protection=ChatArchiveProtectionMode.All};Assert.Throws<IOException>(()=>Update(p,Password));Assert.False(Directory.EnumerateFiles(p.BackupRoot,"messages.jsonl",SearchOption.AllDirectories).Any());return;}
         var first=Update(Project(),Password,new(Mode:ChatArchiveProtectionMode.All));Assert.True(ChatVault.Exists(first.Reading!));

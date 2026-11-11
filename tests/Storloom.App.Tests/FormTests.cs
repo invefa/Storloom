@@ -1371,6 +1371,37 @@ public sealed class FormTests {
             Assert.False(File.Exists(Path.Combine(reading,"archive-index.js")));Assert.False(File.Exists(Path.Combine(reading,"messages.jsonl")));
         }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
+    [Theory][InlineData(false)][InlineData(true)]
+    public void PackedArchiveReaderSearchesAndExportsCurrentMessagesWithoutExtractingPrivateData(bool encrypted)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");string fixture=Fixture(),source=Path.Combine(fixture,"account"),reading=Path.Combine(fixture,"reading"),packed=Path.Combine(fixture,"packed");Directory.CreateDirectory(source);
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);"+string.Join("",Enumerable.Range(0,215).Select(i=>$"INSERT INTO MSG VALUES(1,{1700000000+i},'alpha','indexed needle {i}');"))+"INSERT INTO MSG VALUES(1,1700000300,'beta','indexed needle beta');");
+        var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));new ChatExporter().ExportVerifiedBackup(backup.Manifest,reading,ChatPlatform.WeChat);
+        using(var store=ArchiveStore.Create(packed,encrypted?"fixture-reader-password":default))store.ImportReader(reading);
+        var window=new ChatReaderWindow(packed,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};typeof(ChatReaderWindow).GetProperty("VaultPasswordProvider",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,(Func<string?>)(()=>"fixture-reader-password"));
+        try{
+            window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.True(window.Browser.CoreWebView2!=null,"Stage: "+typeof(ChatReaderWindow).GetProperty("LoadingStage",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)+" | "+string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string code)=>Wait(core.ExecuteScriptAsync(code));
+            void Until(string script,string expected){var limit=DateTime.UtcNow.AddSeconds(20);while(DateTime.UtcNow<limit&&Query(script)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(script));}
+            Until("document.querySelectorAll('.message').length","215");Assert.Contains("indexed needle 0",Query("document.querySelector('#messages').textContent"));Assert.Equal(encrypted,core.Profile.IsInPrivateModeEnabled);
+            Query("document.querySelector('#search-scope').value='archive';document.querySelector('#message-search').value='indexed needle';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();true");
+            Until("document.querySelectorAll('.message').length","100");Until("document.querySelector('#stop-search').hidden","true");Assert.Contains("indexed needle 0",Query("document.querySelector('#messages').textContent"));
+            Query("document.querySelector('#next').click();true");Until("document.querySelector('#messages').textContent.includes('indexed needle 100')","true");Until("document.querySelector('#stop-search').hidden","true");
+            Query("document.querySelector('#next').click();true");Until("document.querySelectorAll('.message').length","16");Until("document.querySelector('#stop-search').hidden","true");Assert.Contains("indexed needle beta",Query("document.querySelector('#messages').textContent"));
+            using var store=ArchiveStore.Open(packed,encrypted?"fixture-reader-password":default);Assert.ThrowsAny<IOException>(()=>store.ImportReader(reading));
+            string exported=Path.Combine(fixture,"exported");store.ExportReader(exported);Assert.Equal(216,File.ReadLines(Path.Combine(exported,"messages.jsonl")).Count());Assert.False(File.Exists(Path.Combine(packed,"messages.jsonl")));
+            if(encrypted){using var png=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,png)));File.WriteAllBytes(Path.Combine(AppContext.BaseDirectory,"packed-reader.png"),png.ToArray());}
+        }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Theory][InlineData("en")][InlineData("zh-CN")]
+    public void ArchiveLibraryAndExportOptionsFitCompactWindows(string language)=>OnUi(()=>{
+        string fixture=Fixture(),data=Path.Combine(fixture,"data");JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=language,Theme=AppTheme.OneDark,ReduceMotion=true});var window=new ShellWindow(data){ShowInTaskbar=false,Width=850,Height=650};
+        try{
+            window.Show();window.Navigate("chats");Pump();var nav=Descendants(window).OfType<Button>().Single(b=>b.Name=="store_home_nav");nav.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();window.UpdateLayout();Assert.Single(Descendants(window).OfType<DataGrid>().Where(g=>g.Name=="storage_archives"));Assert.All(Descendants(window).OfType<Button>().Where(b=>b.Name is "store_open" or "store_backup" or "store_update"),b=>Assert.False(b.IsEnabled));Capture(window,"archive-library-"+language);
+            foreach(string name in new[]{"StoreMigrationWindow","StoreExportWindow"}){
+                var type=typeof(ShellWindow).Assembly.GetType("Storloom.App."+name)!;var dialog=(Window)Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public,null,name=="StoreMigrationWindow"?[data,null,null]:[data,"Fixture archive"],null)!;
+                try{dialog.ShowInTaskbar=false;dialog.Show();Pump();dialog.UpdateLayout();Assert.Equal(ResizeMode.NoResize,dialog.ResizeMode);foreach(var button in Descendants(dialog).OfType<Button>().Where(b=>b.Name is "store_migrate_start" or "store_export_start")){var point=button.TranslatePoint(new Point(),dialog);Assert.InRange(point.Y+button.ActualHeight,0,dialog.ActualHeight);Assert.InRange(point.X+button.ActualWidth,0,dialog.ActualWidth);}Assert.DoesNotContain(Descendants(dialog).OfType<TextBlock>(),t=>t.Text.StartsWith("Store",StringComparison.Ordinal));Capture(dialog,name+"-"+language);}finally{dialog.Close();Pump();}
+            }
+        }finally{window.Close();Pump();Directory.Delete(fixture,true);}
+    });
     private static double Contrast(Color foreground,Color background) {
         static double Luminance(Color c) {static double Linear(byte channel){double x=channel/255d;return x<=.04045?x/12.92:Math.Pow((x+.055)/1.055,2.4);}return .2126*Linear(c.R)+.7152*Linear(c.G)+.0722*Linear(c.B);}
         double a=Luminance(foreground),b=Luminance(background);return (Math.Max(a,b)+.05)/(Math.Min(a,b)+.05);

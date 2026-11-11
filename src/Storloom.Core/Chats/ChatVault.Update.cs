@@ -14,6 +14,7 @@ public sealed partial class ChatVault {
     private void WriteProtection(ChatArchiveProtection policy){byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(policy);string target=Path.Combine(store,"protection.enc"),temporary=target+"."+Guid.NewGuid().ToString("N")+".tmp";try{if(File.Exists(target)){PathPolicy.AssertNoLinks(target);if(NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared protection metadata.");}WriteEnvelope(temporary,key,bytes,"protection");File.Move(temporary,target,true);}finally{CryptographicOperations.ZeroMemory(bytes);if(File.Exists(temporary))File.Delete(temporary);}}
     public bool MetadataProtected=>!UnplannedFiles().Any()&&entries.Where(e=>e.Selected&&!e.Path.StartsWith("assets/",StringComparison.Ordinal)).All(Protected);
     public IReadOnlyList<string> Files=>entries.Select(e=>e.Path).ToArray();
+    internal IReadOnlyList<(string Path,FileStamp Stamp)> SnapshotFiles=>entries.Select(e=>(e.Path,e.Stamp)).ToArray();
     internal void RestoreTo(string directory,int workers,IProgress<ScanProgress>? progress,CancellationToken cancellation,bool skipProtectedMedia=false){
         using var lease=new FileStream(Path.Combine(root,".export.lock"),FileMode.OpenOrCreate,FileAccess.Read,FileShare.Read);
         var selected=entries.Where(e=>!(skipProtectedMedia&&e.Path.StartsWith("assets/",StringComparison.Ordinal)&&committed.ContainsKey(e.Id))).ToArray();
@@ -25,6 +26,8 @@ public sealed partial class ChatVault {
             ChatWorkspaceCopy.File(()=>OpenRead(entry.Path),target,Path.Combine(temporaryRoot,entry.Id+".part"),cancellation,count=>{Interlocked.Add(ref bytes,count);if(entry.Stamp.Bytes>=1024*1024)Report();});
             Interlocked.Increment(ref done);Report(entry.Path);
         });
+        var transcript=entries.SingleOrDefault(e=>e.Path=="messages.jsonl");
+        if(transcript!=null)ChatReadingUpdate.RebindVerifiedCopy(directory,transcript.Stamp);
     }
     private void ImportProtectedMedia(ChatVault previous,IProgress<ScanProgress>? progress,CancellationToken cancellation){
         var added=new List<Entry>();foreach(var entry in previous.entries.Where(e=>e.Path.StartsWith("assets/",StringComparison.Ordinal)&&!paths.ContainsKey(e.Path))){

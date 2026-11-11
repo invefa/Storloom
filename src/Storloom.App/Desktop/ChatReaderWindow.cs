@@ -11,36 +11,43 @@ namespace Storloom.App;
 public sealed class ChatReaderWindow : ThemeWindow {
     public WebView2 Browser { get; } = new();
     private bool closed;
+    internal string LoadingStage { get; private set; }="created";
     internal Func<string?>? VaultPasswordProvider { get; set; }
     private ChatVault? vault;
+    private ArchiveStore? store;
     private FileStream? readerLease;
     internal string? LastClipboardError { get; private set; }
     internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
     public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false,string? archiveScope = null) : base(L.T("ChatArchive"), 1200, 820) {
         WindowGeometry.Attach(this,dataRoot,"reader",480,360);PickerHistory.Attach(this,dataRoot);
-        Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); };
+        Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); store?.Dispose(); };
         Loaded += async (_, _) => {
             try {
-                directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
-                string lockPath=Path.Combine(directory,".export.lock");
+                LoadingStage="opening archive";directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
+                if(File.Exists(Path.Combine(directory,".storloom-export.json")))throw new IOException(L.T("StoreFinishExport"));
+                bool packed=ArchiveStore.Exists(directory);
+                string lockPath=Path.Combine(directory,packed?"operation.lock":".export.lock");
                 if(!File.Exists(lockPath)){using var create=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.Write,FileShare.Read);}
                 PathPolicy.AssertNoLinks(lockPath);readerLease=new FileStream(lockPath,FileMode.Open,FileAccess.Read,FileShare.Read);
-                if(ChatVault.Exists(directory)){
+                if(ChatVault.Exists(directory)||packed&&ArchiveStore.NeedsPassword(directory)){
                     string? secret;
                     if(VaultPasswordProvider!=null){secret=VaultPasswordProvider();VaultPasswordProvider=null;}
                     else{var password=new VaultPasswordWindow(false,false){Owner=this};secret=password.ShowDialog()==true?password.Password:null;password.ClearSecret();}
                     if(secret==null){Close();return;}
-                    try{vault=await Task.Run(()=>ChatVault.Open(directory,secret.AsSpan()));}finally{secret=null;}
-                    if(closed){vault.Dispose();return;}
-                    var protection=await Task.Run(()=>vault.Status);
-                    Title=L.T("ChatArchive")+" — "+L.T(protection.Complete?"VaultReaderProtected":"VaultReaderPartial");Caption.Title=Title;
+                    try{if(packed)store=await Task.Run(()=>ArchiveStore.Open(directory,secret.AsSpan()));else vault=await Task.Run(()=>ChatVault.Open(directory,secret.AsSpan()));}finally{secret=null;}
+                    if(closed){vault?.Dispose();store?.Dispose();return;}
+                    bool complete=store!=null||(await Task.Run(()=>vault!.Status)).Complete;
+                    Title=L.T("ChatArchive")+" — "+L.T(complete?"VaultReaderProtected":"VaultReaderPartial");Caption.Title=Title;
                 }
-                var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.Combine(dataRoot, "reader-browser"));
+                else if(packed)store=await Task.Run(()=>ArchiveStore.Open(directory));
+                if(closed){store?.Dispose();return;}
+                if(store!=null&&store.ImportCursor?.Stage!="complete")throw new IOException(L.T("StoreFinishMigration"));
+                LoadingStage="starting browser environment";var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.Combine(dataRoot, "reader-browser"));
                 if (closed) return;
-                if(vault!=null){var options=environment.CreateCoreWebView2ControllerOptions();options.IsInPrivateModeEnabled=true;options.ProfileName="ProtectedReader";await Browser.EnsureCoreWebView2Async(environment,options);}
+                LoadingStage="initializing browser";if(vault!=null||store?.Protected==true){var options=environment.CreateCoreWebView2ControllerOptions();options.IsInPrivateModeEnabled=true;options.ProfileName="ProtectedReader";await Browser.EnsureCoreWebView2Async(environment,options);}
                 else await Browser.EnsureCoreWebView2Async(environment); if (closed) return;
-                var core = Browser.CoreWebView2;
-                string preferenceScope=archiveScope==null?JsonFiles.Hash(directory.ToUpperInvariant()):JsonFiles.Hash(new{archive=archiveScope});
+                LoadingStage="configuring browser";var core = Browser.CoreWebView2;
+                string preferenceScope=store?.Id??(archiveScope==null?JsonFiles.Hash(directory.ToUpperInvariant()):JsonFiles.Hash(new{archive=archiveScope}));
                 string preferenceFile=Path.Combine(dataRoot,"reader-preferences",preferenceScope+".json");
                 await core.AddScriptToExecuteOnDocumentCreatedAsync("window.readerPreferenceScope="+JsonSerializer.Serialize(preferenceScope)+";window.readerHostPreferences="+ReaderPreferences.Load(preferenceFile).ToJsonString()+";window.readerDefaults="+JsonSerializer.Serialize(new{dark=Theme.IsDark})+";");
                 core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = true;
@@ -52,24 +59,31 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         if(args.WebMessageAsJson.Length>34*1024*1024)return;
                         using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
                         string? action=root.GetProperty("action").GetString();
+                        if(action=="store-reference"&&store!=null){int requestId=root.GetProperty("requestId").GetInt32();try{string conversation=root.GetProperty("conversation").GetString()??"",reference=root.GetProperty("reference").GetString()??"";byte[] target=await Task.Run(()=>store.ReaderReference(conversation,reference));if(!closed)core.PostWebMessageAsJson("{\"action\":\"store-reference-result\",\"requestId\":"+requestId+",\"result\":"+Encoding.UTF8.GetString(target)+"}");}catch{if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="store-reference-result",requestId,error=true}));}return;}
+                        if(action=="store-search"&&store!=null){
+                            int searchId=root.GetProperty("requestId").GetInt32();
+                            try{string query=root.GetProperty("text").GetString()??"";string? cursor=root.TryGetProperty("cursor",out var c)&&c.ValueKind==JsonValueKind.String?c.GetString():null;bool reverse=root.TryGetProperty("reverse",out var r)&&r.GetBoolean();
+                                byte[] result=await Task.Run(()=>store.ReaderSearch(query,cursor,reverse));if(!closed)core.PostWebMessageAsJson("{\"action\":\"store-search-result\",\"requestId\":"+searchId+",\"result\":"+Encoding.UTF8.GetString(result)+"}");
+                            }catch{if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="store-search-result",requestId=searchId,error=true}));}return;
+                        }
                         if(action!="clipboard-image"&&args.WebMessageAsJson.Length>1024*1024)return;
                         if(action=="reader-preferences"){if(args.WebMessageAsJson.Length<=8192)ReaderPreferences.Save(preferenceFile,root.GetProperty("preferences"));return;}
                         if(action=="copy-text"){string value=root.GetProperty("text").GetString()??"";if(value.Length>0)await WriteClipboardAsync(()=>Clipboard.SetText(value));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action=="clipboard-image"){copyingImage=true;var bitmap=DecodeClipboardImage(root.GetProperty("data").GetString());await WriteClipboardAsync(()=>ImageClipboardWriter(bitmap));core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T("ReaderCopied")}));return;}
                         if(action is not ("save-image" or "save-file"))return;
-                        string? path=root.GetProperty("path").GetString();string source=vault!=null?ValidateVaultResource(path,action=="save-image"):action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
+                        string? path=root.GetProperty("path").GetString();string source=vault!=null||store!=null?ValidateVaultResource(path,action=="save-image"):action=="save-image"?ResolveImagePath(directory,path):ResolveResourcePath(directory,path);
                         string name=Path.GetFileName(root.TryGetProperty("name",out var valueName)?valueName.GetString():null)??"image";
                         foreach(char invalid in Path.GetInvalidFileNameChars())name=name.Replace(invalid,'_');
                         string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
                         var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T(action=="save-image"?"ReaderSaveImage":"ReaderSaveFile"),FileName=name,Filter="File|*"+extension,AddExtension=true,DefaultExt=extension};
                         if(PickerHistory.Show(picker,this,action=="save-image"?"reader-save-image":"reader-save-file")!=true)return;
-                        if(vault==null)SaveResourceFile(source,picker.FileName);
-                        else{using var input=vault.OpenRead(source);SaveDecryptedResource(input,picker.FileName);}
+                        if(vault==null&&store==null)SaveResourceFile(source,picker.FileName);
+                        else{using var input=store!=null?store.OpenFile(source):vault!.OpenRead(source);SaveDecryptedResource(input,picker.FileName);}
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
                     }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException or CryptographicException){if(copyingImage)LastClipboardError=ex.GetType().Name+":"+ex.HResult.ToString("X");if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
                 };
                 core.Settings.AreDefaultScriptDialogsEnabled = false; core.Settings.AreDevToolsEnabled = false; core.Settings.IsStatusBarEnabled = false;
-                if(vault==null)core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
+                if(vault==null&&store==null)core.SetVirtualHostNameToFolderMapping("archive.storloom.invalid", directory, CoreWebView2HostResourceAccessKind.DenyCors);
                 bool Allowed(string uri) => Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.Scheme == "https" && parsed.Port == 443 && parsed.UserInfo.Length == 0 && parsed.Host is "archive.storloom.invalid" or "reader.storloom.invalid";
                 core.NavigationStarting += (_, args) => { if (!Allowed(args.Uri)) args.Cancel = true; };
                 core.FrameNavigationStarting += (_, args) => args.Cancel = true;
@@ -80,15 +94,20 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 var assets = ReaderAssets();
                 core.WebResourceRequested += (_, args) => {
                     if (!Allowed(args.Request.Uri)) args.Response = environment.CreateWebResourceResponse(null, 403, "Local archive only", "");
-                    else if(vault!=null&&new Uri(args.Request.Uri).Host=="archive.storloom.invalid") {
-                        try{string relative=Uri.UnescapeDataString(new Uri(args.Request.Uri).AbsolutePath.TrimStart('/'));var input=vault.OpenRead(relative);
+                    else if((vault!=null||store!=null)&&new Uri(args.Request.Uri).Host=="archive.storloom.invalid") {
+                        try{string relative=Uri.UnescapeDataString(new Uri(args.Request.Uri).AbsolutePath.TrimStart('/'));
+                            Stream input;
+                            if(store!=null&&relative=="archive-index.js")input=new MemoryStream(store.ReaderIndex(),false);
+                            else if(store!=null&&System.Text.RegularExpressions.Regex.Match(relative,"^conversations/([a-f0-9]{24})-refs\\.js$") is{Success:true} reference)input=new MemoryStream(store.ReaderReferences(reference.Groups[1].Value),false);
+                            else if(store!=null&&System.Text.RegularExpressions.Regex.Match(relative,"^conversations/([a-f0-9]{24})-([0-9]+)\\.js$") is{Success:true} match)input=new MemoryStream(store.ReaderPage(match.Groups[1].Value,int.Parse(match.Groups[2].Value,System.Globalization.CultureInfo.InvariantCulture)),false);
+                            else input=store!=null?store.OpenFile(relative):vault!.OpenRead(relative);
                             args.Response=VaultResponse(environment,args.Request,input,ContentType(relative));
-                        }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException){args.Response=environment.CreateWebResourceResponse(null,404,"Protected resource unavailable","Cache-Control: no-store");}
+                        }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or OverflowException or JsonException){args.Response=environment.CreateWebResourceResponse(null,404,"Protected resource unavailable","Cache-Control: no-store");}
                     }
                     else if (new Uri(args.Request.Uri).Host == "reader.storloom.invalid") {
                         string relative=new Uri(args.Request.Uri).AbsolutePath;
                         if(relative.StartsWith("/image-copy/",StringComparison.Ordinal)) {
-                            try {string path=vault!=null?ValidateVaultResource("assets/"+relative[12..],true):ResolveImagePath(directory,"assets/"+relative[12..]);var input=vault!=null?vault.OpenRead(path):File.OpenRead(path);if(input.Length>32*1024*1024){input.Dispose();throw new InvalidDataException("Image exceeds clipboard source limit.");}
+                            try {string path=vault!=null||store!=null?ValidateVaultResource("assets/"+relative[12..],true):ResolveImagePath(directory,"assets/"+relative[12..]);var input=store!=null?store.OpenFile(path):vault!=null?vault.OpenRead(path):File.OpenRead(path);if(input.Length>32*1024*1024){input.Dispose();throw new InvalidDataException("Image exceeds clipboard source limit.");}
                                 args.Response=environment.CreateWebResourceResponse(input,200,"OK","Content-Type: "+ContentType(path)+"\r\nCache-Control: no-store");
                             }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException or CryptographicException){args.Response=environment.CreateWebResourceResponse(null,404,"Image unavailable","");}
                         }
@@ -98,9 +117,9 @@ public sealed class ChatReaderWindow : ThemeWindow {
                     }
                 };
                 if (reduceMotion) await core.AddScriptToExecuteOnDocumentCreatedAsync("document.addEventListener('DOMContentLoaded',()=>document.documentElement.classList.add('reduce-motion'));");
-                core.Navigate("https://reader.storloom.invalid/messages.html" + (Theme.IsDark ? "#dark" : "#light"));
+                LoadingStage="loading page";core.Navigate("https://reader.storloom.invalid/messages.html" + (Theme.IsDark ? "#dark" : "#light"));
             } catch (Exception ex) when (!closed) {
-                readerLease?.Dispose();vault?.Dispose();Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T(ChatVault.Exists(directory)?"VaultOpenFailed":"ReaderRuntimeMissing") + (ChatVault.Exists(directory)?"":"\n"+ex.Message)));
+                readerLease?.Dispose();vault?.Dispose();store?.Dispose();Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T(ChatVault.Exists(directory)||ArchiveStore.Exists(directory)?"VaultOpenFailed":"ReaderRuntimeMissing")+"\n"+ex.Message));
             }
         };
     }

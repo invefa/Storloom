@@ -123,6 +123,9 @@ public static class ChatArchiveWorkflow {
     }
     private static void CopyPlain(string source,string destination,int workers,IProgress<ScanProgress>? progress,CancellationToken cancellation){
         PathPolicy.AssertNoLinks(source);using var lease=new FileStream(Path.Combine(source,".export.lock"),FileMode.OpenOrCreate,FileAccess.Read,FileShare.Read);
+        string sourceTranscript=Path.Combine(source,"messages.jsonl");
+        using var transcriptLease=File.Exists(sourceTranscript)?new FileStream(sourceTranscript,FileMode.Open,FileAccess.Read,FileShare.Read):null;
+        FileStamp? transcriptStamp=transcriptLease==null?null:NativeFile.ReadStamp(sourceTranscript);
         var files=new List<(string Path,string Relative,long Length)>();long total=0;
         foreach(string file in Directory.EnumerateFiles(source,"*",SearchOption.AllDirectories)){
             OperationPause.Check(cancellation);string relative=Path.GetRelativePath(source,file);if(relative==".export.lock")continue;
@@ -140,5 +143,6 @@ public static class ChatArchiveWorkflow {
             if(NativeFile.ReadStamp(file.Path)!=before)throw new IOException("Reading source changed during copying.");
             Interlocked.Increment(ref done);Report(file.Relative);
         });
+        if(transcriptStamp!=null){if(NativeFile.ReadStamp(sourceTranscript)!=transcriptStamp)throw new IOException("Reading source changed during copying.");ChatReadingUpdate.RebindVerifiedCopy(destination,transcriptStamp);}
     }
 }

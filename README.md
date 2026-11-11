@@ -3,6 +3,7 @@
 A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local chat clients archives. C# and WPF, English and Simplified Chinese.
 
 [简体中文](README.zh-CN.md) · [Getting started](docs/quickstart.md) · [Rule reference](docs/rules.md) · [AI rule guide](docs/ai-rules.md) · [Chat compatibility](docs/chat-exporters.md)
+[Archive library](docs/archive-library.md)
 
 ## Screenshots
 

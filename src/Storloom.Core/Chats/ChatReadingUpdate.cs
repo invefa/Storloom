@@ -22,6 +22,14 @@ public static class ChatReadingUpdate {
         return JsonNode.Parse(text["window.archiveIndex=".Length..].Trim().TrimEnd(';'))!.AsObject();
     }
     private static ChatMessage Message(string line) => JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid archived message.");
+    // Called only after every destination byte has been verified against this immutable source snapshot.
+    internal static void RebindVerifiedCopy(string destination,FileStamp sourceTranscript) {
+        string statePath=Path.Combine(destination,StateFile),transcript=Path.Combine(destination,"messages.jsonl");
+        if(!File.Exists(statePath)||!File.Exists(transcript))return;
+        PathPolicy.AssertNoLinks(statePath);PathPolicy.AssertNoLinks(transcript);
+        var state=JsonFiles.Read<UpdateState>(statePath);
+        if(state.Transcript==sourceTranscript)JsonFiles.Write(statePath,state with{Transcript=NativeFile.ReadStamp(transcript)});
+    }
     public static ChatReadingUpdateResult Update(string manifestPath, string directory, ChatPlatform platform, byte[]? secret = null,
         int parallelism = 2, bool verifyBackup = true, bool useLocalConfiguration = false,
         IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool downloadQQGroupAvatars = false, string? originalReadingDirectory = null) {
@@ -82,17 +90,17 @@ public static class ChatReadingUpdate {
                 reuse = Convert.ToHexString(TransferService.Hash(input, cancellation)) == state!.IndexSha256;
                 if (reuse) File.Copy(indexPath, pendingIndex);
             }
+            if(!reuse){
+                string bootstrap=Path.Combine(directory,".reading-update-bootstrap.db");
+                ChatIndexBootstrap.Build(transcript,bootstrap,report.Messages,line=>{
+                    var message=Message(line);RememberConversation(message.Conversation);
+                    return(Key(message),Fingerprint(message),message.Id??throw new InvalidDataException("Missing archived message identity."));
+                },progress,cancellation);
+                File.Copy(bootstrap,pendingIndex);
+            }
             using (var index = new ChatUpdateIndex(pendingIndex)) {
                 if (index.Query("PRAGMA quick_check").Single()[0] != "ok") throw new InvalidDataException("Invalid update index.");
                 index.Execute("BEGIN");
-                if (!reuse) {
-                    long imported = 0;
-                    foreach (string line in File.ReadLines(transcript)) {
-                        OperationPause.Check(cancellation); var message = Message(line);RememberConversation(message.Conversation);
-                        index.Execute("INSERT OR IGNORE INTO messages VALUES(?,?,?)", Key(message), Fingerprint(message), message.Id ?? throw new InvalidDataException("Missing archived message identity."));
-                        if (++imported % 1000 == 0) progress?.Report(new("chat-update-index", (int)Math.Min(imported, int.MaxValue), 0, TotalFiles: (int)Math.Min(report.Messages, int.MaxValue)));
-                    }
-                }
                 string delta = Path.Combine(work, "delta");
                 var deltaResult = new ChatExporter(parallelism, useLocalConfiguration).ExportVerifiedBackup(manifestPath, delta, platform, secret, progress, cancellation, verifyBackup,
                     selectMessage: message => {
@@ -214,17 +222,22 @@ public static class ChatReadingUpdate {
     }
     private static void Publish(string directory, string workName) {
         string work = TransferService.Child(directory, workName), stage = Path.Combine(work, "merged"), backup = Path.Combine(work, "rollback");
+        string stagedTranscript=Path.Combine(stage,"messages.jsonl");
+        FileStamp? stagedStamp=File.Exists(stagedTranscript)?NativeFile.ReadStamp(stagedTranscript):null;
         var paths = Directory.GetFiles(stage, "*", SearchOption.AllDirectories).Select(p => Path.GetRelativePath(stage, p)).ToArray();
         var files = paths.ToDictionary(p => p, p => File.Exists(TransferService.Child(directory, p)), StringComparer.OrdinalIgnoreCase);
         foreach (string path in paths) { PathPolicy.AssertNoLinks(TransferService.Child(stage, path)); if (files[path]) { string target = TransferService.Child(directory, path); PathPolicy.AssertNoLinks(target); if (NativeFile.ReadStamp(target).Links != 1) throw new IOException("Shared reading outputs cannot be replaced."); } }
         JsonFiles.Write(Path.Combine(directory, PendingFile), new Publication(workName, files));
         try {
-            foreach (string path in paths.OrderBy(p => p == "archive-index.js" ? 1 : 0)) {
+            foreach (string path in paths.OrderBy(p => p == "archive-index.js" ? 2 : p==StateFile ? 1 : 0)) {
                 string target = TransferService.Child(directory, path), saved = TransferService.Child(backup, path);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!); PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);
                 if (files[path]) { Directory.CreateDirectory(Path.GetDirectoryName(saved)!); File.Move(target, saved); }
                 File.Move(TransferService.Child(stage, path), target);
+                if(path==StateFile&&stagedStamp!=null)RebindVerifiedCopy(directory,stagedStamp);
             }
+            string bootstrap=Path.Combine(directory,".reading-update-bootstrap.db");
+            if(File.Exists(bootstrap)){PathPolicy.AssertNoLinks(bootstrap);File.Delete(bootstrap);}
             File.Delete(Path.Combine(directory, PendingFile));
         } catch { Recover(directory); throw; }
     }

@@ -3,6 +3,7 @@
 用于审核清理、归档缓存、分析存储空间、保存聊天客户端聊天备份的Windows工具。C# / WPF实现，支持中英文。
 
 [English](README.md) · [快速上手](docs/quickstart.zh-CN.md) · [规则参考](docs/rules.zh-CN.md) · [AI规则指南](docs/ai-rules.zh-CN.md) · [聊天兼容性](docs/chat-exporters.zh-CN.md)
+[归档库](docs/archive-library.zh-CN.md)
 
 ## 界面示例
 

@@ -147,7 +147,7 @@ public sealed class OperationPanel : Grid {
         if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes is >0 ? value.Bytes : value.Files; if(seenPhases.Add(phase))AddLog(L.T(PhaseKey(phase))); if(DebugToggle.IsChecked==true)AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; if(DebugToggle.IsChecked==true)AddDebugDetail("file."+phase,detail); }
         var counts=new List<string>();
-        bool messages=phase is "chat-reader" or "chat-export" or "chat-update-index" or "chat-update-merge";
+        bool messages=phase is "chat-reader" or "chat-export" or "chat-update-index" or "chat-update-merge" or "archive-migration-messages";
         string unit=L.T(messages?"ProgressUnitMessages":phase=="chat-pages"?"ProgressUnitConversations":"ProgressUnitFiles");
         if(value.TotalFiles is int files)counts.Add(L.T("ProgressCountTotal",value.Files,files,unit));
         else if(value.Files>0)counts.Add(L.T("ProgressCount",value.Files,unit));
@@ -188,6 +188,7 @@ public sealed class OperationPanel : Grid {
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
+        "archive-store-backup"=>"PhaseArchiveBackup","archive-query-replay"=>"PhaseStoreReplay","archive-migration-plan"=>"PhaseStorePlan","archive-migration-unlock"=>"PhaseStoreUnlock","archive-migration-messages"=>"PhaseStoreMessages","archive-migration-files"=>"PhaseStoreFiles","archive-reader-export"=>"PhaseStoreExport","archive-verify"=>"PhaseStoreVerify",
         "archive-workspace-plan"=>"PhaseArchiveWorkspacePlan","archive-backup"=>"PhaseArchiveBackup","archive-workspace"=>"PhaseArchiveWorkspace","archive-reading"=>"PhaseArchiveReading","archive-protect"=>"PhaseArchiveProtect","archive-publish"=>"PhaseArchivePublish","archive-reuse-encrypted"=>"PhaseArchiveReuse",
         "chat-encryption-open"=>"PhaseEncryptionOpen","chat-encryption-check"=>"PhaseEncryptionCheck","chat-encryption-select"=>"PhaseEncryptionSelect","chat-encryption-plan"=>"PhaseEncryptionPlan","chat-encryption-derive"=>"PhaseEncryptionDerive","chat-encryption-save-plan"=>"PhaseEncryptionSavePlan",
         "transfer-plan"=>"PhaseTransferPlan", "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-resume" => "PhaseResumeExport", "chat-discovery" => "FindAccounts",

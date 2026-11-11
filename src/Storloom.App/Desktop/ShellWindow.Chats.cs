@@ -28,6 +28,7 @@ public sealed partial class ShellWindow {
         LoadArchiveProjects();
         var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,0)};
         var home=Button("ArchiveHome",()=>{chatStep=-1;RenderChatStage();});home.Name="archive_home_nav";entries.Children.Add(home);
+        var stored=Button("StoreHome",()=>{chatStep=5;RenderChatStage();});stored.Name="store_home_nav";entries.Children.Add(stored);
         entries.Children.Add(Button("ArchiveImport",OpenChatBackup));
         entries.Children.Add(Button("ArchiveCreate",()=>{chatStep=0;activeChat=null;SetCapturedKey(null);RenderChatStage();},true));
         var more=new ContextMenu();var moreButton=Button("ArchiveMore",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
@@ -51,7 +52,7 @@ public sealed partial class ShellWindow {
         var home=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="archive_home_nav");if(home!=null)home.Visibility=chatStep<0?Visibility.Collapsed:Visibility.Visible;
         foreach(var frame in chatStepFrames)frame.Visibility=chatStep is >=0 and <=3?Visibility.Visible:Visibility.Collapsed;
         for (int i = 0; i < chatSteps.Length; i++) { chatStepFrames[i].SetResourceReference(Border.BackgroundProperty, i == Math.Min(chatStep, 2) ? "Selection" : "Canvas"); }
-        if(chatStep<0)BuildArchiveHome();else if(chatStep==4)BuildArchiveAccess();else if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
+        if(chatStep<0)BuildArchiveHome();else if(chatStep==5)BuildStores();else if(chatStep==4)BuildArchiveAccess();else if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
         chatFooter.Children.Add(Button("QuickStart", () => ShowHelp(2))); Theme.Enter(chatContent);
     }
     private void BuildChatAccounts() {

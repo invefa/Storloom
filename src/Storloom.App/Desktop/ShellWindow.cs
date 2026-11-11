@@ -293,7 +293,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         cleanupPlan = JsonFiles.Read<CleanupPlan>(dialog.FileName); excluded.Clear(); RenderRules(); Navigate("cleanup");
     }
     private void OpenReaderArchive() {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom reading copy|messages.html;vault.storloom.json" };
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom archive|messages.html;vault.storloom.json;archive.json" };
         if (PickerHistory.Show(dialog,this,"reader-open") == true) new ChatReaderWindow(Path.GetDirectoryName(dialog.FileName)!, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog();
     }
     private void SetCapturedKey(byte[]? key) { if (capturedKey != null) CryptographicOperations.ZeroMemory(capturedKey); capturedKey = key; }

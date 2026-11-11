@@ -109,3 +109,7 @@ Backup, incremental backup, export and encryption accept 1-8 workers. Copy and v
 Workers default to Auto. The task and target volume seek behavior determine the recommendation, bounded by CPU count and available memory; the selector shows the current recommendation and still accepts manual values from 1 to 8. Unknown storage uses a conservative fallback. These are estimates, not guaranteed optimal settings under every disk load.
 
 Each file/folder picker remembers its directory by purpose. Reading copies remember appearance and page/navigation choices independently. New copies initially match their source style and the application's brightness; later choices take priority. The page-size preset menu always lists every preset, with custom numeric entry alongside it. Protected reader preferences contain only presentation choices, not message text or passwords.
+
+## Archive library
+
+Chat archives > Archive library offers optional import of completed reading copies, direct indexed reading and search, incremental pack backup, password changes, verification and compatible export. See [Archive library](archive-library.md) for recovery and protection limits.

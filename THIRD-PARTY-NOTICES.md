@@ -2,6 +2,15 @@
 
 Storloom is MIT licensed. The following components retain their original licenses.
 
+## Archive query storage
+
+- Microsoft.Data.Sqlite.Core 10.0.14: https://github.com/dotnet/efcore/tree/v10.0.14, MIT.
+- SQLite3MC.PCLRaw.bundle/provider/lib 2.6.1: https://github.com/utelle/SQLite3MultipleCiphers-NuGet, package source revision ce660b9f2a1ee2aa2d20feda926cf6bf4477ad77, MIT.
+- SQLite3 Multiple Ciphers 2.6.1: https://github.com/utelle/SQLite3MultipleCiphers/tree/v2.6.1, based on SQLite 3.54.0. SQLite is public domain; encryption extension is MIT, with retained component notices.
+- SQLitePCLRaw.core 3.0.2: https://github.com/ericsink/SQLitePCL.raw/tree/v3.0.2, Apache-2.0.
+
+These dependencies are isolated from the system SQLite source adapters. Query data and postings can be encrypted with the native ChaCha20-Poly1305 cipher. Package versions are pinned; existing archive formats are not converted automatically. Full licenses and native component notices are in docs/licenses in the source tree and licenses/ArchiveStorage in distribution packages.
+
 ## chatlog-keeper
 
 Source: https://github.com/labazhou2024/chatlog-keeper

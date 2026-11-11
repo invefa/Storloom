@@ -187,7 +187,7 @@
   const sourceRow=block?.closest('.message')?.resultRow;const conversation = sourceRow?.conversation||current.id;
   const local = (sourceRow?[sourceRow.message]:messages).find(m => m.ServerId === reference || ('seq:' + m.Sequence) === reference);
   if (local) { if(sourceRow)resultContext({...sourceRow,message:local},block);else showContext(local.Id,page,block); return; }
-  let map = referenceMaps.get(conversation);
+  let map = index.nativeStore&&window.chrome?.webview?{[reference]:await storeRequest('store-reference',{conversation,reference}).catch(()=>null)}:referenceMaps.get(conversation);
   if (!map) map = await new Promise(resolve => {
    if (referenceLoads.has(conversation)) { resolve(null); return; }
    referenceLoads.set(conversation, resolve);
@@ -235,8 +235,11 @@
   return [{Kind:structured?'unsupported':'text',Text:structured?'':m.DisplayText || visibleText(m,m.Text)}];
  }
  const positionKey='storloom.reader.position:'+index.conversations.map(c=>c.id+':'+c.count).join('|');
- const pageLoads=new Map();let searching=0;
- function stopSearch(){searching++;for(const pending of pageLoads.values())pending.cancel?.();pageLoads.clear();$('stop-search').hidden=true;$('find-page').disabled=$('find-previous').disabled=false;}
+ const pageLoads=new Map(),storeRequests=new Map();let searching=0,storeRequestId=0;
+ function stopSearch(){searching++;for(const pending of pageLoads.values())pending.cancel?.();pageLoads.clear();for(const pending of storeRequests.values())pending.reject(Error('cancelled'));storeRequests.clear();$('stop-search').hidden=true;$('find-page').disabled=$('find-previous').disabled=false;}
+ window.chrome?.webview?.addEventListener('message',e=>{if(!['store-search-result','store-reference-result'].includes(e.data?.action))return;const pending=storeRequests.get(e.data.requestId);if(!pending)return;storeRequests.delete(e.data.requestId);e.data.error?pending.reject(Error('search')):pending.resolve(e.data.result);});
+ function storeRequest(action,args){return new Promise((resolve,reject)=>{const requestId=++storeRequestId,timer=setTimeout(()=>{storeRequests.delete(requestId);reject(Error('timeout'));},30000),finish=callback=>value=>{clearTimeout(timer);callback(value);};storeRequests.set(requestId,{resolve:finish(resolve),reject:finish(reject)});window.chrome.webview.postMessage({action,requestId,...args});});}
+ function indexedSearch(text,cursor,reverse){return storeRequest('store-search',{text,cursor,reverse});}
  const derivedParts=new WeakMap();
  function effectiveParts(m){if(!derivedParts.has(m))derivedParts.set(m,deriveParts(m));return derivedParts.get(m);}
  function deriveParts(m){
@@ -282,7 +285,19 @@
   });callback.promise=promise;return promise;
  }
  function resultPager(){const n=archiveSearch.batch;for(const id of ['first','previous'])$(id).disabled=n===0;$('next').disabled=archiveSearch.finished;$('last').disabled=archiveSearch.endBatch==null||n===archiveSearch.endBatch;$('page-input').max=archiveSearch.starts.length;$('page-input').value=n+1;text('page',label('ReaderResultBatch').replace('{0}',n+1));text('chat-title',label('ReaderScopeArchive'));text('chat-meta',archiveResults.length+' '+label('ReaderMatches'));}
+ async function searchStore(batch,direction){
+  stopSearch();leaveContext();const generation=searching,fingerprint=JSON.stringify(readFilters())+':native:'+direction;
+  if(!archiveSearch||archiveSearch.fingerprint!==fingerprint)archiveSearch={fingerprint,direction,starts:[null],batch:0,finished:false,origin:{conversation:current.id,page,items:messages}};
+  const session=archiveSearch;if(batch===undefined)batch=session.batch+1;if(!(batch in session.starts))return;
+  $('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;
+  try{const result=await indexedSearch($('message-search').value,session.starts[batch],direction<0);if(generation!==searching)return;
+   session.batch=batch;session.finished=result.next===null;if(session.finished){session.endBatch=batch;session.starts.length=batch+1;}else session.starts[batch+1]=result.next;
+   archiveResults=result.rows;render();resultPager();text('filter-status',result.rows.length?label('ReaderMatchFound'):label('ReaderNoMoreMatches'));toggleFilters(false);
+  }catch(error){if(generation===searching&&error.message!=='cancelled')text('filter-status',label('ReaderSearchFailed'));}
+  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;}}
+ }
  async function searchArchive(batch,direction=archiveSearch?.direction||1){
+  if(index.nativeStore&&window.chrome?.webview&&$('message-search').value&&!$('kind-filter').value&&!$('sender-filter').value&&!$('date-from').value&&!$('date-to').value&&!$('self-filter').checked)return searchStore(batch,direction);
   stopSearch();leaveContext();const generation=searching;
   const fingerprint=JSON.stringify(readFilters())+':'+direction;
   if(!archiveSearch||archiveSearch.fingerprint!==fingerprint){const c=direction>0?0:index.conversations.length-1;
