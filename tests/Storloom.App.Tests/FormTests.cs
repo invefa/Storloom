@@ -1274,6 +1274,9 @@ public sealed class FormTests {
             panel.WrapToggle.IsChecked=true;Assert.Equal(TextWrapping.Wrap,panel.Log.TextWrapping);Assert.Equal(ScrollBarVisibility.Disabled,panel.Log.HorizontalScrollBarVisibility);
             panel.ToggleExpanded();Pump();Assert.True(panel.Expanded);Assert.True(panel.ActualHeight>80);
             foreach(var button in new[]{panel.PauseButton,panel.CancelButton}){var icon=Assert.IsType<System.Windows.Shapes.Path>(button.Content);var bounds=icon.RenderedGeometry.Bounds;var center=icon.TranslatePoint(new Point(bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2),button);Assert.InRange(Math.Abs(center.X-button.ActualWidth/2),0,1.5);Assert.InRange(Math.Abs(center.Y-button.ActualHeight/2),0,1.5);}
+            foreach(var control in Descendants(panel).OfType<Control>().Where(c=>new[]{"pause_operation","cancel_operation","debug_log","wrap_log","follow_log","auto_show_log","export_log","toggle_log"}.Contains(c.Name))){
+                double top=control.TranslatePoint(new Point(0,0),panel).Y;Assert.InRange(control.ActualWidth,23.5,24.5);Assert.InRange(control.ActualHeight,23.5,24.5);Assert.Equal(new Thickness(2,0,2,0),control.Margin);Assert.InRange(top,3.5,4.5);Assert.InRange(32-top-control.ActualHeight,3.5,4.5);
+            }
             Capture(window,"compact-persistent-log");panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,31,34);finish.SetResult();Wait(AsResult(task));
         }finally{finish.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
     });

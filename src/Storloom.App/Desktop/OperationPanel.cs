@@ -55,7 +55,8 @@ public sealed class OperationPanel : Grid {
         ToggleIcon(DebugToggle,"M 3,3 L 9,3 9,10 3,10 Z M 4,0 L 5,3 M 8,0 L 7,3 M 0,5 L 3,5 M 9,5 L 12,5 M 0,9 L 3,9 M 9,9 L 12,9","DebugLog","debug_log");
         ToggleIcon(WrapToggle,"M 0,2 L 12,2 M 0,6 L 9,6 Q 14,6 11,10 L 5,10 M 7,8 L 5,10 7,12 M 0,10 L 2,10","WrapLog","wrap_log");
         ToggleIcon(AutoShowToggle,"M 1,3 L 11,3 11,12 1,12 Z M 3,0 L 9,0 M 6,0 L 6,7 M 4,5 L 6,7 8,5","AutoShowLog","auto_show_log");
-        var actions=View.Row(PauseButton,CancelButton,DebugToggle,WrapToggle,FollowToggle,AutoShowToggle,export,collapse);actions.Margin=new Thickness(4,0,0,0);
+        var actions=View.Row(PauseButton,CancelButton,DebugToggle,WrapToggle,FollowToggle,AutoShowToggle,export,collapse);actions.Margin=new Thickness(4,4,2,4);
+        foreach(Control action in actions.Children){action.Width=action.MinWidth=action.Height=action.MinHeight=24;action.Margin=new Thickness(2,0,2,0);action.VerticalAlignment=VerticalAlignment.Center;}
         state.TextTrimming=TextTrimming.CharacterEllipsis;state.TextWrapping=TextWrapping.NoWrap;state.FontSize=13;state.Margin=new Thickness(0);timing.FontSize=12;timing.Margin=new Thickness(8,0,4,0);
         View.Add(row,state,0);View.Add(row,timing,0,1);View.Add(row,actions,0,2);View.Add(this,row,0);View.Add(this,progress,0);View.Add(this,Log,2);
         void WrapChanged(){Log.TextWrapping=WrapToggle.IsChecked==true?TextWrapping.Wrap:TextWrapping.NoWrap;Log.HorizontalScrollBarVisibility=WrapToggle.IsChecked==true?ScrollBarVisibility.Disabled:ScrollBarVisibility.Auto;OptionsChanged?.Invoke();}
