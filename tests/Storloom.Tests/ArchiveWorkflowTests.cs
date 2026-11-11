@@ -1,0 +1,75 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Storloom.Core;
+using Storloom.Core.Chats;
+using Xunit;
+namespace Storloom.Tests;
+public sealed class ArchiveWorkflowTests:IDisposable {
+    private readonly string root=Path.Combine(AppContext.BaseDirectory,"fixtures","archive-flow-"+Guid.NewGuid().ToString("N"));
+    private const string Password="fixture-archive-password";
+    public ArchiveWorkflowTests()=>Directory.CreateDirectory(root);
+    private ChatArchiveProject Project(){string source=Path.Combine(root,"account");Directory.CreateDirectory(source);Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','first message');");return new(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"account",ChatPlatform.WeChat,source,Path.Combine(root,"backups"));}
+    private string TaskFile=>Path.Combine(root,"state","task.json");
+    private ChatArchiveProject Update(ChatArchiveProject p,string? password=null,ChatArchiveUpdateRequest? request=null,IProgress<ScanProgress>? progress=null,CancellationToken token=default){Directory.CreateDirectory(Path.GetDirectoryName(TaskFile)!);return ChatArchiveWorkflow.Update(p,TaskFile,null,password,2,changed=>latest=changed,request,progress,token,checkRunningClients:false);}
+    private ChatArchiveProject? latest;
+    [Fact]public void IncrementalUpdatesPublishNewGenerationsAndRetainPreviousReaders(){
+        var first=Update(Project());string old=first.Reading!;byte[] transcript=File.ReadAllBytes(Path.Combine(old,"messages.jsonl"));
+        Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000001,'fixture','second message');");
+        var next=Update(first);Assert.NotEqual(old,next.Reading);Assert.Equal(transcript,File.ReadAllBytes(Path.Combine(old,"messages.jsonl")));Assert.Equal(2,File.ReadLines(Path.Combine(next.Reading!,"messages.jsonl")).Count());Assert.Null(next.TaskFile);Assert.False(File.Exists(TaskFile));Assert.NotEqual(first.Manifest,next.Manifest);
+    }
+    [Fact]public void CancellationBeforePublicationKeepsVisibleReaderAndResumesCapturedBackup(){
+        var first=Update(Project());Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000001,'fixture','second message');");using var stop=new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(()=>Update(first,progress:new Callback(p=>{if(p.RuleId=="archive-publish")stop.Cancel();}),token:stop.Token));
+        Assert.Equal(first.Reading,latest!.Reading);Assert.NotNull(latest.TaskFile);Assert.True(File.Exists(Path.Combine(first.Reading!,"messages.jsonl")));
+        Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000002,'fixture','after checkpoint');");
+        var resumed=Update(latest);Assert.Equal(2,File.ReadLines(Path.Combine(resumed.Reading!,"messages.jsonl")).Count());var newest=Update(resumed);Assert.Equal(3,File.ReadLines(Path.Combine(newest.Reading!,"messages.jsonl")).Count());
+    }
+    [Fact]public void BackupOnlyLeavesReaderPointerAndHistoryUntouched(){var initial=Update(Project());var next=Update(initial,request:new(BackupOnly:true));Assert.Equal(initial.Reading,next.Reading);Assert.NotEqual(initial.Manifest,next.Manifest);Assert.Null(next.TaskFile);}
+    [Fact]public void ProtectedUpdateUsesEncryptedWorkspaceAndPreservesOldCiphertext(){
+        string efs=Path.Combine(root,"efs-capability");try{ChatArchiveWorkspace.Create(efs,true);}catch(IOException){var p=Project() with{Protection=ChatArchiveProtectionMode.All};Assert.Throws<IOException>(()=>Update(p,Password));Assert.False(Directory.EnumerateFiles(p.BackupRoot,"messages.jsonl",SearchOption.AllDirectories).Any());return;}
+        var first=Update(Project(),Password,new(Mode:ChatArchiveProtectionMode.All));Assert.True(ChatVault.Exists(first.Reading!));
+        using(var vault=ChatVault.Open(first.Reading!,Password)){Assert.True(vault.Status.Complete);Assert.True(vault.ReadProtection().IncludeMedia);}
+        var original=Directory.GetFiles(Path.Combine(first.Reading!,".vault"),"*.enc").ToDictionary(p=>Path.GetFileName(p)!,File.ReadAllBytes);
+        Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000001,'fixture','protected addition');");
+        var next=Update(first,Password);Assert.NotEqual(first.Reading,next.Reading);Assert.False(File.Exists(Path.Combine(next.Reading!,"messages.jsonl")));
+        using(var vault=ChatVault.Open(next.Reading!,Password)){Assert.True(vault.Status.Complete);using var reader=new StreamReader(vault.OpenRead("messages.jsonl"));Assert.Contains("protected addition",reader.ReadToEnd());}
+        Assert.Contains(original,p=>p.Key.Length==36&&File.Exists(Path.Combine(next.Reading!,".vault",p.Key))&&p.Value.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(next.Reading!,".vault",p.Key))));
+        foreach(var entry in original)Assert.Equal(entry.Value,File.ReadAllBytes(Path.Combine(first.Reading!,".vault",entry.Key!)));
+        Assert.DoesNotContain(Password,JsonSerializer.Serialize(latest));
+    }
+    [Fact]public void ProtectedCancellationRequiresTheSamePasswordAndNeverPublishesPlaintext(){
+        string capability=Path.Combine(root,"efs");try{ChatArchiveWorkspace.Create(capability,true);}catch(IOException){return;}
+        var original=Update(Project());using var stop=new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(()=>Update(original,Password,new(Mode:ChatArchiveProtectionMode.All,UseExistingBackup:true,ProtectionOnly:true),new Callback(p=>{if(p.RuleId=="archive-protect")stop.Cancel();}),stop.Token));
+        Assert.Equal(original.Reading,latest!.Reading);var saved=JsonFiles.Read<ChatArchiveTask>(TaskFile);ChatArchiveWorkspace.AssertEncrypted(saved.Work);
+        Assert.Throws<CryptographicException>(()=>Update(latest!,"wrong-password"));Assert.Equal(original.Reading,latest!.Reading);
+        var completed=Update(latest!,Password);Assert.True(ChatVault.Exists(completed.Reading!));Assert.False(File.Exists(Path.Combine(completed.Reading!,"messages.jsonl")));Assert.True(File.Exists(Path.Combine(original.Reading!,"messages.jsonl")));
+    }
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void SavedConversationRulesAlsoProtectFutureMatchingMessages(bool strict){
+        string capability=Path.Combine(root,"efs");try{ChatArchiveWorkspace.Create(capability,true);}catch(IOException){return;}
+        var initial=Update(Project());string text=File.ReadAllText(Path.Combine(initial.Reading!,"archive-index.js"));using var index=JsonDocument.Parse(text["window.archiveIndex=".Length..].TrimEnd(';'));string id=index.RootElement.GetProperty("conversations")[0].GetProperty("id").GetString()!;
+        var protectedCopy=Update(initial,Password,new(Protection:new(true,new(Conversations:[id],Strict:strict)),Mode:ChatArchiveProtectionMode.Selected,UseExistingBackup:true,ProtectionOnly:true));
+        Database(Path.Combine(initial.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000001,'fixture','future protected message');");
+        var next=Update(protectedCopy,Password);Assert.Equal(ChatArchiveProtectionMode.Selected,next.Protection);
+        using var vault=ChatVault.Open(next.Reading!,Password);Assert.Equal(id,Assert.Single(vault.ReadProtection().Selection!.Conversations!));Assert.True(vault.MetadataProtected);using var reader=new StreamReader(vault.OpenRead("messages.jsonl"));Assert.Contains("future protected message",reader.ReadToEnd());
+        Assert.DoesNotContain("future protected message",string.Join("",Directory.EnumerateFiles(next.Reading!,"*.js",SearchOption.AllDirectories).Select(File.ReadAllText)));
+    }
+    [Fact]public void FullProtectionReusesMediaWithoutRestoringItsPlaintext(){
+        string capability=Path.Combine(root,"efs");try{ChatArchiveWorkspace.Create(capability,true);}catch(IOException){return;}
+        var plain=Update(Project());string media="assets/fixture-media.bin";Directory.CreateDirectory(Path.Combine(plain.Reading!,"assets"));byte[] bytes=Enumerable.Range(0,4096).Select(i=>(byte)i).ToArray();File.WriteAllBytes(Path.Combine(plain.Reading!,media),bytes);
+        var protectedCopy=Update(plain,Password,new(Mode:ChatArchiveProtectionMode.All,UseExistingBackup:true,ProtectionOnly:true));
+        using var stop=new CancellationTokenSource();Assert.ThrowsAny<OperationCanceledException>(()=>Update(protectedCopy,Password,progress:new Callback(p=>{if(p.RuleId=="archive-protect")stop.Cancel();}),token:stop.Token));
+        var state=JsonFiles.Read<ChatArchiveTask>(TaskFile);Assert.False(File.Exists(Path.Combine(state.Work,"reader",media)));
+        var next=Update(latest!,Password);using var vault=ChatVault.Open(next.Reading!,Password);using var input=vault.OpenRead(media);using var output=new MemoryStream();input.CopyTo(output);Assert.Equal(bytes,output.ToArray());Assert.True(vault.Status.Complete);
+    }
+    [Fact]public void InvalidProjectIdentityCannotCreateWorkspace(){var p=Project() with{Id="../outside"};Assert.Throws<InvalidDataException>(()=>Update(p));Assert.False(Directory.Exists(p.BackupRoot));}
+    private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
+    private static void Database(string path,string sql){Assert.Equal(0,sqlite3_open_v2(path,out nint handle,6,0));try{Assert.Equal(0,sqlite3_exec(handle,sql,0,0,0));}finally{sqlite3_close_v2(handle);}}
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)]string path,out nint handle,int flags,nint vfs);
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_exec(nint handle,[MarshalAs(UnmanagedType.LPUTF8Str)]string sql,nint callback,nint state,nint error);
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_close_v2(nint handle);
+    public void Dispose(){if(!PathPolicy.Under(root,Path.Combine(AppContext.BaseDirectory,"fixtures")))throw new IOException("Fixture boundary changed.");Directory.Delete(root,true);}
+}

@@ -36,6 +36,7 @@ public sealed class SqliteReader : IDisposable {
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern int sqlite3_test_control(int operation, uint value);
 
+    internal static string NativePath(string path)=>NativeFile.ExtendedPath(path);
     public SqliteReader(string path, bool shiftedQQ = false) {
         exclusive = shiftedQQ && new FileInfo(path).Length > 0x3ffff000;
         if (exclusive) Gate.EnterWriteLock(); else Gate.EnterReadLock();
@@ -46,7 +47,7 @@ public sealed class SqliteReader : IDisposable {
                 if (previousPendingByte != 0x40000000)
                     throw new InvalidDataException("SQLite pending-byte state is not pristine.");
             }
-            if (sqlite3_open_v2(path, out database, 1, IntPtr.Zero) != 0)
+            if (sqlite3_open_v2(NativePath(path), out database, 1, IntPtr.Zero) != 0)
                 throw new InvalidDataException("Cannot open the decrypted database as read-only SQLite.");
             _ = Query("PRAGMA query_only=ON").ToList();
             _ = Query("PRAGMA trusted_schema=OFF").ToList();

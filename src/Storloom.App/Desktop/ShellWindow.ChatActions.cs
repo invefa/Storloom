@@ -28,7 +28,7 @@ public sealed partial class ShellWindow {
         return (account, archive: ReadChatArchive(dialog.FileName, account, manifest));
         }, token);
         activeChat = selected.account; activeManifest = dialog.FileName; preparedArchive = selected.archive; SetCapturedKey(null);
-        readingDirectory = exportReport = null; chatStep = 2; RenderChatStage(); Navigate("chats");
+        readingDirectory = exportReport = null;RegisterCurrentArchive();chatStep = -1; RenderChatStage(); Navigate("chats");
         });
     }
 
@@ -138,7 +138,7 @@ public sealed partial class ShellWindow {
         string directory = View.Folder(this);
         if (directory != "" && Confirm(L.T("UpdateReadingConfirm", directory))) await ExportChatTo(directory, update: true);
     }
-    private Task ExportChat() => ExportChatTo(null);
+    private Task ExportChat() => CreateArchiveFromSetup();
     private async Task ResumeChat() {
         string directory = View.Folder(this);
         if (directory != "") await ExportChatTo(directory);

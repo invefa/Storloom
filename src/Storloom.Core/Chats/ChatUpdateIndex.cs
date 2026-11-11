@@ -15,7 +15,7 @@ internal sealed class ChatUpdateIndex : IDisposable {
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] private static extern nint sqlite3_column_text(nint statement, int column);
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_column_count(nint statement);
     public ChatUpdateIndex(string path) {
-        if (sqlite3_open_v2(path, out database, 6, 0) != 0) { Dispose(); throw new IOException("Cannot create update index."); }
+        if (sqlite3_open_v2(SqliteReader.NativePath(path), out database, 6, 0) != 0) { Dispose(); throw new IOException("Cannot create update index."); }
         Execute("PRAGMA trusted_schema=OFF");
         Execute("CREATE TABLE IF NOT EXISTS messages(k TEXT PRIMARY KEY,h TEXT NOT NULL,id TEXT NOT NULL) WITHOUT ROWID");
         Execute("CREATE TABLE IF NOT EXISTS changes(k TEXT PRIMARY KEY,data TEXT NOT NULL) WITHOUT ROWID");

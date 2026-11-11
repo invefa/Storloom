@@ -24,7 +24,7 @@ public static class ChatReadingUpdate {
     private static ChatMessage Message(string line) => JsonSerializer.Deserialize<ChatMessage>(line) ?? throw new InvalidDataException("Invalid archived message.");
     public static ChatReadingUpdateResult Update(string manifestPath, string directory, ChatPlatform platform, byte[]? secret = null,
         int parallelism = 2, bool verifyBackup = true, bool useLocalConfiguration = false,
-        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool downloadQQGroupAvatars = false) {
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool downloadQQGroupAvatars = false, string? originalReadingDirectory = null) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
         string lockPath = Path.Combine(directory, ".export.lock"); if (File.Exists(lockPath)) PathPolicy.AssertNoLinks(lockPath);
         using var lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -48,9 +48,10 @@ public static class ChatReadingUpdate {
                 originalSource = old.Source;
             } else {
                 // Older readers have no checkpoint. Their original sibling backup name is still unambiguous.
-                int marker = Path.GetFileName(directory).LastIndexOf("-reading-", StringComparison.Ordinal);
+                string origin=originalReadingDirectory==null?directory:PathPolicy.Normalize(originalReadingDirectory);
+                int marker = Path.GetFileName(origin).LastIndexOf("-reading-", StringComparison.Ordinal);
                 if (marker < 1 || report.Messages < 1) throw new InvalidDataException("Cannot identify the original verified backup of this older reader.");
-                originalSource = Path.Combine(Path.GetDirectoryName(directory)!, Path.GetFileName(directory)[..marker]);
+                originalSource = Path.Combine(Path.GetDirectoryName(origin)!, Path.GetFileName(origin)[..marker]);
                 var firstMessage = File.ReadLines(transcript).Select(Message).FirstOrDefault();
                 if (firstMessage?.Platform != platform.ToString()) throw new InvalidDataException("Reader platform does not match the selected backup.");
             }
@@ -105,7 +106,7 @@ public static class ChatReadingUpdate {
                     }, includeDatabase: relative => changedDatabases.Contains(relative));
                 OperationPause.Check(cancellation);
                 if (deltaResult.CanResume || (deltaResult.Databases != changedDatabases.Count) || deltaResult.Issues.Any(i => i.RuleId == "chat-export"))
-                    throw new IOException("New database processing failed; the previous reading copy was retained.");
+                    throw new IOException("New database processing failed; the previous reading copy was retained.",new AggregateException(deltaResult.Issues.Select(i=>new IOException(i.Reason))));
                 foreach (string line in File.ReadLines(Path.Combine(delta, "messages.jsonl"))) {
                     var message = Message(line);RememberConversation(message.Conversation); index.Execute("INSERT OR REPLACE INTO changes VALUES(?,?)", Key(message), line);
                 }

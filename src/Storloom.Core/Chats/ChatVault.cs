@@ -8,7 +8,7 @@ namespace Storloom.Core.Chats;
 public sealed record ChatVaultProgress(int ProtectedFiles,int TotalFiles,long ProtectedBytes,long TotalBytes,bool Complete){public bool SelectionComplete{get;init;}public int SelectedFiles{get;init;}}
 
 /// <summary>Password-protected, resumable encryption of a completed derived reading copy.</summary>
-public sealed class ChatVault : IDisposable {
+public sealed partial class ChatVault : IDisposable {
     public const string Marker="vault.storloom.json";
     private const int Chunk=1024*1024, HeaderSize=52, Iterations=600000;
     private static readonly byte[] Magic="SLVAULT1"u8.ToArray();
@@ -24,7 +24,9 @@ public sealed class ChatVault : IDisposable {
     private bool disposed;
     public static bool Exists(string directory)=>File.Exists(Path.Combine(directory,Marker));
     private ChatVault(string directory,byte[] secret,Entry[] plan){root=directory;store=Path.Combine(root,".vault");key=secret;entries=plan;paths=entries.ToDictionary(e=>e.Path,StringComparer.Ordinal);}
-    public static ChatVault Create(string directory,ReadOnlySpan<char> password,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null,ChatProtectionSelection? selection=null) {
+    public static ChatVault Create(string directory,ReadOnlySpan<char> password,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null,ChatProtectionSelection? selection=null) => CreateCore(directory,password,cancellation,progress,selection,null,false);
+    internal static ChatVault CreateUpdated(string directory,ReadOnlySpan<char> password,ChatVault previous,CancellationToken cancellation,IProgress<ScanProgress>? progress,ChatProtectionSelection? selection,bool reuseProtectedMedia=false) => CreateCore(directory,password,cancellation,progress,selection,previous,reuseProtectedMedia);
+    private static ChatVault CreateCore(string directory,ReadOnlySpan<char> password,CancellationToken cancellation,IProgress<ScanProgress>? progress,ChatProtectionSelection? selection,ChatVault? previous,bool reuseProtectedMedia) {
         if(password.Length<8)throw new ArgumentException("Use a password of at least 8 characters.");
         directory=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(directory);
         if(Exists(directory)||Directory.Exists(Path.Combine(directory,".vault")))throw new IOException("An encryption task already exists.");
@@ -38,12 +40,12 @@ public sealed class ChatVault : IDisposable {
             if(stamp.Links!=1)throw new IOException("Shared files cannot be encrypted in place.");
             string relative=Path.GetRelativePath(directory,file).Replace('\\','/');
             if(relative==".export.lock")continue;
-            if(relative.Split('/').Any(p=>p.StartsWith(".work-",StringComparison.Ordinal)||p.StartsWith(".reading-update-",StringComparison.Ordinal)))throw new IOException("An unfinished task remains in this reading copy.");
+            if(relative.Split('/').SkipLast(1).Any(p=>p.StartsWith(".work-",StringComparison.Ordinal)||p.StartsWith(".reading-update-",StringComparison.Ordinal)))throw new IOException("An unfinished task remains in this reading copy.");
             plan.Add(new(relative,Guid.NewGuid().ToString("N"),stamp));plannedBytes+=stamp.Bytes;
             if(clock.Elapsed.TotalSeconds-lastReport>=.5){progress?.Report(new("chat-encryption-plan",plan.Count,plannedBytes));lastReport=clock.Elapsed.TotalSeconds;}
         }
         progress?.Report(new("chat-encryption-derive",plan.Count,plannedBytes));
-        byte[] salt=RandomNumberGenerator.GetBytes(32),secret=Rfc2898DeriveBytes.Pbkdf2(password,salt,Iterations,HashAlgorithmName.SHA256,32);
+        byte[] salt=previous==null?RandomNumberGenerator.GetBytes(32):Convert.FromBase64String(JsonFiles.Read<Configuration>(Path.Combine(previous.root,Marker)).Salt),secret=Rfc2898DeriveBytes.Pbkdf2(password,salt,Iterations,HashAlgorithmName.SHA256,32);
         var vault=new ChatVault(directory,secret,plan.ToArray());
         try {
             progress?.Report(new("chat-encryption-save-plan",plan.Count,plannedBytes));
@@ -57,6 +59,8 @@ public sealed class ChatVault : IDisposable {
                     return entry with{Selected=protect,PublicFile=publicFile,PublicStamp=publicFile==null?null:NativeFile.ReadStamp(Path.Combine(vault.store,publicFile))};
                 }).ToArray();vault.paths=vault.entries.ToDictionary(e=>e.Path,StringComparer.Ordinal);
             }
+            if(previous!=null){vault.ReuseCiphertext(previous,progress,cancellation);if(reuseProtectedMedia)vault.ImportProtectedMedia(previous,progress,cancellation);}
+            vault.WriteProtection(new(true,selection));
             byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(vault.entries);
             if(bytes.Length>256*1024*1024)throw new InvalidDataException("Too many files for this vault format.");
             try{WriteEnvelope(Path.Combine(vault.store,"plan.enc"),secret,bytes,"plan");}finally{CryptographicOperations.ZeroMemory(bytes);}
@@ -69,7 +73,7 @@ public sealed class ChatVault : IDisposable {
             if(!Exists(directory)&&Directory.Exists(vault.store)){
                 PathPolicy.AssertNoLinks(vault.store);
                 var staged=Directory.GetFiles(vault.store);
-                if(staged.All(p=>Path.GetFileName(p)=="plan.enc"||System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(p),"^[a-f0-9]{32}\\.public$"))){foreach(string file in staged){PathPolicy.AssertNoLinks(file);File.Delete(file);}Directory.Delete(vault.store);}
+                if(staged.All(p=>Path.GetFileName(p) is "plan.enc" or "commits.enc" or "protection.enc"||System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(p),"^[a-f0-9]{32}\\.(public|enc)$"))){foreach(string file in staged){PathPolicy.AssertNoLinks(file);File.Delete(file);}Directory.Delete(vault.store);}
             }
             throw;
         }
@@ -137,6 +141,7 @@ public sealed class ChatVault : IDisposable {
         progress?.Report(new("chat-encryption-check",0,0));
         if(UnplannedFiles().Any())throw new IOException("Unplanned files were added after encryption started. They remain plaintext and must be retained separately before this plan can resume.");
         string log=Path.Combine(store,"commits.enc");if(File.Exists(log)){PathPolicy.AssertNoLinks(log);using var tail=new FileStream(log,FileMode.Open,FileAccess.Write,FileShare.Read);tail.SetLength(validLogLength);}
+        WriteProtection(ReadProtection() with{IncludeMedia=includeMedia});
         var selected=entries.Where(e=>e.Selected&&(includeMedia||!e.Path.StartsWith("assets/",StringComparison.Ordinal))).ToArray();
         var initial=InspectStatus(progress,cancellation);long done=initial.ProtectedBytes,total=initial.TotalBytes;int files=initial.ProtectedFiles;
         Parallel.ForEach(selected,new ParallelOptions{MaxDegreeOfParallelism=workers,CancellationToken=cancellation},entry=>{

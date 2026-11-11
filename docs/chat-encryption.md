@@ -15,7 +15,7 @@ Important limits:
 - Encryption protects the selected reading copy, not raw backups, other copies, previously created browser caches, files you saved separately, screenshots or operating-system memory.
 - Ordinary deletion cannot promise secure erasure of prior plaintext on SSDs, backups or filesystem snapshots. Full-disk encryption is complementary protection.
 - Unfinished/unselected files remain plaintext. Files added after the encryption plan are outside that plan.
-- Encrypted readers cannot currently be incrementally updated or repaired in place. Retain raw backups and perform such updates on a separate ordinary reading copy before protecting it.
+- Direct in-place updates remain unsupported. Use Update archive on the account archive page: it creates an EFS working generation, applies the saved protection rules and switches the catalog only after verification. The prior reader is retained. See the account archive section of Quick start for workspace access and storage limits.
 - This is a new file format with automated corruption/recovery tests; it has not undergone an independent security audit. A damaged or lost vault, or a lost password, can prevent recovery. Keep an appropriate independent backup.
 
 Pause / Resume is also available during raw backups, incremental backups and exports. It is cooperative: workers finish their current bounded operation before waiting. Cancellation remains available while paused. Pausing a backup retains its running process; it does not add restart-resume support to a raw-backup transfer. Interrupted reading exports retain their existing export checkpoint workflow.

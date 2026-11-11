@@ -16,7 +16,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
     private FileStream? readerLease;
     internal string? LastClipboardError { get; private set; }
     internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
-    public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false) : base(L.T("ChatArchive"), 1200, 820) {
+    public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false,string? archiveScope = null) : base(L.T("ChatArchive"), 1200, 820) {
         WindowGeometry.Attach(this,dataRoot,"reader",480,360);PickerHistory.Attach(this,dataRoot);
         Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); };
         Loaded += async (_, _) => {
@@ -40,7 +40,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 if(vault!=null){var options=environment.CreateCoreWebView2ControllerOptions();options.IsInPrivateModeEnabled=true;options.ProfileName="ProtectedReader";await Browser.EnsureCoreWebView2Async(environment,options);}
                 else await Browser.EnsureCoreWebView2Async(environment); if (closed) return;
                 var core = Browser.CoreWebView2;
-                string preferenceScope=JsonFiles.Hash(directory.ToUpperInvariant());
+                string preferenceScope=archiveScope==null?JsonFiles.Hash(directory.ToUpperInvariant()):JsonFiles.Hash(new{archive=archiveScope});
                 string preferenceFile=Path.Combine(dataRoot,"reader-preferences",preferenceScope+".json");
                 await core.AddScriptToExecuteOnDocumentCreatedAsync("window.readerPreferenceScope="+JsonSerializer.Serialize(preferenceScope)+";window.readerHostPreferences="+ReaderPreferences.Load(preferenceFile).ToJsonString()+";window.readerDefaults="+JsonSerializer.Serialize(new{dark=Theme.IsDark})+";");
                 core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = true;

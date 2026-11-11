@@ -135,9 +135,10 @@ public sealed class FormTests {
             type.GetField("activeManifest",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,backup.Manifest);
             type.GetField("chatStep",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,2);
             type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);window.Navigate("chats");
+            var confirm=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(20)};confirm.Tick+=(_,_)=>{foreach(var dialog in Application.Current.Windows.OfType<Window>().Where(w=>w.Owner==window).ToArray()){var accept=Descendants(dialog).OfType<Button>().FirstOrDefault(b=>Equals(b.Content,L.T("ConfirmExecute")));if(accept!=null)accept.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));}};confirm.Start();
             var task=(Task)type.GetMethod("ExportChat",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null)!;
             Wait(AsResult(task));
-            string target=Directory.GetDirectories(fixture,"raw-reading-*").Single();
+            confirm.Stop();string target=JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")).Single().Reading!;Assert.True(PathPolicy.Under(target,fixture));
             var report=JsonFiles.Read<ChatExportResult>(Path.Combine(target,"export-report.json"));Assert.True(report.Complete);Assert.Equal(1,report.Messages);
             Assert.Equal(!removeSource,Directory.Exists(source));Capture(window,locale+"-wizard-complete");
         } finally {window.Close();Directory.Delete(fixture,true);}
@@ -374,7 +375,7 @@ public sealed class FormTests {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true});
         var window=new ShellWindow(fixture){ShowInTaskbar=false};
         try {
-            window.Show();window.Navigate("chats");Pump();
+            window.Show();window.Navigate("chats");Pump();Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveCreate"))).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();
             var task=(Task)typeof(ShellWindow).GetMethod("DiscoverChats",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[fixture])!;
             Wait(AsResult(task));Pump();
             var notice=Descendants(window).OfType<TextBlock>().Single(t=>t.Name=="account_discovery_notice");Assert.Equal(L.T("DiscoveryEmpty"),notice.Text);
@@ -764,6 +765,32 @@ public sealed class FormTests {
             DirectoryInfo? repo=new(AppContext.BaseDirectory);while(repo!=null&&!File.Exists(Path.Combine(repo.FullName,"Storloom.sln")))repo=repo.Parent;
             File.WriteAllBytes(Path.Combine(repo!.FullName,"artifacts/ui-review/wpf/reader-compact-search.png"),screenshot.ToArray());
         }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
+    [Theory]
+    [InlineData(AppTheme.Light,"en")] [InlineData(AppTheme.Dark,"en")] [InlineData(AppTheme.OneDark,"en")] [InlineData(AppTheme.OneDark,"zh-CN")]
+    public void AccountArchiveHomeExposesReadingUpdateAndProtectionWithoutSetupSteps(AppTheme theme,string locale)=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);Directory.CreateDirectory(data);
+        Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','managed archive fixture');");
+        var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"Fixture account",ChatPlatform.WeChat,source,Path.Combine(fixture,"backups"));
+        project=ChatArchiveWorkflow.Update(project,Path.Combine(data,"task.json"),null,null,2,_=>{},checkRunningClients:false);
+        project=project with{BackedUpAt=DateTimeOffset.FromUnixTimeSeconds(1700000000),ReadableAt=DateTimeOffset.FromUnixTimeSeconds(1700000000)};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true});
+        var window=new ShellWindow(data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
+            var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Single(table.Items.Cast<object>());
+            foreach(string name in new[]{"archive_open","archive_update","archive_protection"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
+            Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
+            Capture(window,"archive-home-"+theme);
+            if(theme==AppTheme.OneDark){var detail=Descendants(window).OfType<TextBlock>().First(t=>t.Text.Contains(project.Source,StringComparison.Ordinal));detail.Text=L.T("ArchiveDetail",@"D:\Example\Account",@"E:\Example\Archives\Reading")+"\n"+L.T("ArchiveRawProtectionNotice");Capture(window,"public-"+locale+"-archives");}
+            Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveCreate"))).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();Assert.True(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts").IsVisible);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]
+    public void ArchiveCatalogAdoptsVerifiedBackupWithoutMovingOriginalData()=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);Directory.CreateDirectory(data);
+        Database(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,'catalog import fixture');");
+        var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));string reading=Path.Combine(fixture,"raw-reading-legacy");new ChatExporter().ExportVerifiedBackup(backup.Manifest,reading,ChatPlatform.QQ);
+        var stamp=NativeFile.ReadStamp(Path.Combine(reading,"messages.jsonl"));JsonFiles.Write(Path.Combine(data,"chat-backups.json"),new Dictionary<string,string>{{source,backup.Manifest}});
+        var window=new ShellWindow(data){ShowInTaskbar=false};try{window.Show();Pump();var project=Assert.Single(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")));Assert.Equal(ChatPlatform.QQ,project.Platform);Assert.Equal(reading,project.Reading);Assert.True(PathPolicy.Under(project.BackupRoot,fixture));Assert.Equal(stamp,NativeFile.ReadStamp(Path.Combine(reading,"messages.jsonl")));}
+        finally{window.Close();Directory.Delete(fixture,true);}
     });
     [Fact]
     public void ClipboardImagesRequireBoundedPngData() => OnUi(() => {

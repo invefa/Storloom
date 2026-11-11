@@ -1,5 +1,21 @@
 # Getting started
 
+## Account archives
+
+![Account archives](figures/archives.en.png)
+
+Open Chats to select an account archive. **Create archive** provides initial setup; **Import existing backup** registers an existing verified backup. Daily actions are **Open reading**, **Update archive** and **Protection settings**. The list shows the backup time, reader time and current reading protection separately.
+
+Update checks source changes, creates a verified backup, updates the reader and applies the saved protection rules. Pause retains the running task; Cancel stops work while preserving its checkpoint. **Continue update** resumes the captured backup, so changes made after that snapshot require another update. More actions include backing up originals only, rebuilding from the verified backup and abandoning a pending task without deleting its backups or workspace.
+
+Updates produce independent reading generations. The catalog switches only after verification. The previous reader remains readable and is retained, including any plaintext it already contained. **Protecting the new reader does not protect or remove older plaintext readers or raw backups.** Handle those copies separately.
+
+Protection is a lasting archive setting. Full protection includes matching new content. Saved conversation, type, sender and content rules also match future messages; explicit message IDs select only those messages, subject to the displayed shared-page/resource scope. Strict scope keeps sanitized public pages. Passwords and captured database keys are never saved. Scope metadata is authenticated and encrypted in the vault.
+
+Protected updates use a Windows EFS encrypted working directory on the backup volume. **The signed-in Windows account can access temporary restored data.** This protects files at rest from other accounts/offline access; it is not password isolation against software running as that same account. EFS must be supported and enabled; the task refuses a plaintext fallback. Keep enough free space. Fully protected, unchanged media can be authenticated and reused as ciphertext without restoring a second plaintext media copy. Other transformations still need working space.
+
+A protection change also creates a new reader generation. Removing protection deliberately publishes plaintext and requires confirmation. Existing protected readers keep the same password during update. Old generations are not automatically deleted. Keep the EFS certificate/key recoverable if you need to resume an interrupted protected workspace after reinstalling Windows.
+
 Storloom starts on **Cleanup and archive**. Nothing is cleaned on startup. Press F1 for contextual help; open Tools > Preferences to choose language, archive/backup destinations, and rule sets. File > Open local data opens private plans, custom rules, and records. Help > About shows version, developer, and the repository.
 
 ## Clean or archive caches

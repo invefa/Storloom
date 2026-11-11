@@ -39,9 +39,10 @@ public static class NativeFile {
     private static IOException Failure(string path) =>
         new($"{path}: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
 
+    internal static string ExtendedPath(string path){if(!OperatingSystem.IsWindows()||path.Length<240||path.StartsWith(@"\\?\",StringComparison.Ordinal))return path;path=Path.GetFullPath(path);return path.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+path[2..]:@"\\?\"+path;}
     private static SafeFileHandle Open(string path, bool delete, bool directory = false) {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
-        var handle = CreateFileW(path, ReadAttributes | (delete ? DeleteAccess : 0),
+        var handle = CreateFileW(ExtendedPath(path), ReadAttributes | (delete ? DeleteAccess : 0),
             delete ? FileShare.Read : directory ? FileShare.ReadWrite :
                 FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, OpenExisting,
             OpenReparsePoint | BackupSemantics, IntPtr.Zero);
@@ -60,7 +61,8 @@ public static class NativeFile {
         uint count = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
         if (count == 0 || count >= buffer.Capacity) throw Failure(expected);
         string actual = buffer.ToString();
-        if (actual.StartsWith(@"\\?\")) actual = actual[4..];
+        if(actual.StartsWith(@"\\?\UNC\",StringComparison.OrdinalIgnoreCase))actual=@"\\"+actual[8..];
+        else if (actual.StartsWith(@"\\?\")) actual = actual[4..];
         if (!PathPolicy.Normalize(actual).Equals(PathPolicy.Normalize(expected),
             StringComparison.OrdinalIgnoreCase)) throw new IOException($"Resolved path changed: {expected}");
         return info;

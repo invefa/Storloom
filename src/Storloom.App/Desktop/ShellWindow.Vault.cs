@@ -6,6 +6,7 @@ public sealed partial class ShellWindow {
     private async void EncryptReaderArchive() {
         if(operation!=null)return;
         string directory=View.Folder(this);if(directory=="")return;
+        var managed=archiveProjects.Values.FirstOrDefault(p=>p.Reading!=null&&Path.GetFullPath(p.Reading).Equals(Path.GetFullPath(directory),StringComparison.OrdinalIgnoreCase));if(managed!=null){try{await ConfigureArchiveProtection(managed);}catch(Exception ex){Error(ex);}return;}
         bool creating=!ChatVault.Exists(directory);
         var password=new VaultPasswordWindow(creating,true,creating?directory:null){Owner=this};if(password.ShowDialog()!=true||password.Password==null)return;
         // This confirmation describes the concrete in-place mutation before any plaintext is removed.

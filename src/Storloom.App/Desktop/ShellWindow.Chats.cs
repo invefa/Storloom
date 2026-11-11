@@ -8,7 +8,7 @@ namespace Storloom.App;
 public sealed partial class ShellWindow {
     private List<ChatLocation> locations = [];
     private ChatLocation? activeChat;
-    private int chatStep;
+    private int chatStep=-1;
     private Grid chatContent = null!;
     private WrapPanel chatFooter = null!;
     private DataGrid chatList = null!;
@@ -25,8 +25,14 @@ public sealed partial class ShellWindow {
     private ChatExportResult? latestExportResult;
     private void BuildChats() {
         var layout = Page("chats", "ChatTitle", "ChatLead", View.Auto, View.Fill, View.Auto);
+        LoadArchiveProjects();
         var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,0)};
-        entries.Children.Add(Button("OpenChatBackup",OpenChatBackup));entries.Children.Add(Button("OpenReaderArchive",OpenReaderArchive));entries.Children.Add(Button("VaultManage",EncryptReaderArchive));
+        var home=Button("ArchiveHome",()=>{chatStep=-1;RenderChatStage();});home.Name="archive_home_nav";entries.Children.Add(home);
+        entries.Children.Add(Button("ArchiveImport",OpenChatBackup));
+        entries.Children.Add(Button("ArchiveCreate",()=>{chatStep=0;activeChat=null;SetCapturedKey(null);RenderChatStage();},true));
+        var more=new ContextMenu();var moreButton=Button("ArchiveMore",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
+        void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
+        Entry("OpenChatBackup",OpenChatBackup);Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
         ((StackPanel)layout.Children[0]).Children.Add(entries);
         var steps = new Grid { Margin = new Thickness(0, 0, 0, 10) }; chatSteps = new TextBlock[3]; chatStepFrames = new Border[3];
         string[] keys = ["ChatStepAccount", "ChatStepBackup", "ChatStepExport"];
@@ -42,8 +48,10 @@ public sealed partial class ShellWindow {
     }
     private void RenderChatStage() {
         chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null; chatUpdate = null;
+        var home=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="archive_home_nav");if(home!=null)home.Visibility=chatStep<0?Visibility.Collapsed:Visibility.Visible;
+        foreach(var frame in chatStepFrames)frame.Visibility=chatStep is >=0 and <=3?Visibility.Visible:Visibility.Collapsed;
         for (int i = 0; i < chatSteps.Length; i++) { chatStepFrames[i].SetResourceReference(Border.BackgroundProperty, i == Math.Min(chatStep, 2) ? "Selection" : "Canvas"); }
-        if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
+        if(chatStep<0)BuildArchiveHome();else if(chatStep==4)BuildArchiveAccess();else if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
         chatFooter.Children.Add(Button("QuickStart", () => ShowHelp(2))); Theme.Enter(chatContent);
     }
     private void BuildChatAccounts() {
@@ -131,7 +139,7 @@ public sealed partial class ShellWindow {
         var help=new Expander{Header=L.T("ExportHelpTitle"),Margin=new Thickness(0,10,0,0),HorizontalContentAlignment=HorizontalAlignment.Stretch,
             Content=View.Stack(View.Text(L.T("VerifyBackupHelp"),color:"Muted"),View.Text(L.T("UpdateReadingHelp"),color:"Muted"),View.Text(L.T("ResumeReadingHelp"),color:"Muted"))};
         stack.Children.Add(help);
-        chatNext = AsyncButton("ExportReading", ExportChat, true); chatNext.Name = "chat_export"; chatNext.IsEnabled = !encrypted || capturedKey != null;
+        chatNext = AsyncButton("ArchiveCreate", ExportChat, true); chatNext.Name = "chat_export"; chatNext.IsEnabled = !encrypted || capturedKey != null;
         chatResume = AsyncButton("ResumeReading", ResumeChat); chatResume.IsEnabled = chatNext.IsEnabled;
         chatUpdate = AsyncButton("UpdateReading", UpdateChatReading); chatUpdate.IsEnabled = chatNext.IsEnabled;
 
@@ -147,6 +155,7 @@ public sealed partial class ShellWindow {
         if (chatUpdate != null) chatUpdate.IsEnabled = chatNext.IsEnabled;
     }
     private void BuildChatFinished() {
+        RegisterCurrentArchive();
         var report = exportReport != null && File.Exists(exportReport) ? JsonFiles.Read<ChatExportResult>(exportReport) : readingDirectory != null ? latestExportResult : null;
         bool failed = report is { Databases: 0 };
         var stack = View.Stack(View.Text(L.T(failed ? "ReadingFailedTitle" : report is { Complete: false } ? "ReadingPartialTitle" : "ArchiveFinished"), 23),
