@@ -6,10 +6,11 @@ public sealed record ChatArchiveProject(string Id,string Account,ChatPlatform Pl
     public string? Manifest{get;init;}public string? Reading{get;init;}
     public DateTimeOffset? BackedUpAt{get;init;}public DateTimeOffset? ReadableAt{get;init;}
     public ChatArchiveProtectionMode Protection{get;init;}public bool IncludeMedia{get;init;}=true;public bool ProtectionKnown{get;init;}=true;
+    public bool VerifyBackupBeforeReading{get;init;}=true;
     public string? TaskFile{get;init;}
     public static string Identity(ChatPlatform platform,string source)=>JsonFiles.Hash(new{platform,source=PathPolicy.Normalize(source).ToUpperInvariant()});
 }
-public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false);
+public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false){public bool VerifyBackupBeforeReading{get;init;}=true;}
 public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false);
 /// <summary>Write immutable generations. Only the caller's verified catalog checkpoint switches the visible reader.</summary>
 public static class ChatArchiveWorkflow {
@@ -29,7 +30,7 @@ public static class ChatArchiveWorkflow {
         }else{
             bool secure=!request.BackupOnly&&(project.Protection!=ChatArchiveProtectionMode.None||project.Reading!=null&&ChatVault.Exists(project.Reading)||request.Mode is ChatArchiveProtectionMode.All or ChatArchiveProtectionMode.Selected);
             string id=Guid.NewGuid().ToString("N"),work=Path.Combine(accountRoot,".archive-work-"+id),generation=Path.Combine(accountRoot,"reading-"+id);
-            state=new(1,project.Id,work,generation,project.Reading,project.Manifest,request.UseExistingBackup&&project.Manifest!=null?"workspace":"backup",secure,request.BackupOnly,request.ProtectionOnly);
+            state=new(1,project.Id,work,generation,project.Reading,project.Manifest,request.UseExistingBackup&&project.Manifest!=null?"workspace":"backup",secure,request.BackupOnly,request.ProtectionOnly){VerifyBackupBeforeReading=project.VerifyBackupBeforeReading};
             JsonFiles.Write(taskFile,state);project=project with{TaskFile=taskFile};checkpoint(project);
         }
         void Save(string phase){state=state with{Phase=phase};JsonFiles.Write(taskFile,state);}
@@ -75,10 +76,10 @@ public static class ChatArchiveWorkflow {
             if(state.Phase=="reading"){
                 progress?.Report(new("archive-reading",0,0));
                 if(policy.ProtectionOnly){ }
-                else if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.Update(state.Manifest,stage,project.Platform,databaseKey,workers,true,true,progress,cancellation,downloadQQGroupAvatars:downloadGroupAvatars,originalReadingDirectory:state.PreviousReading);
+                else if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.Update(state.Manifest,stage,project.Platform,databaseKey,workers,state.VerifyBackupBeforeReading,true,progress,cancellation,downloadQQGroupAvatars:downloadGroupAvatars,originalReadingDirectory:state.PreviousReading);
                 else{
                     bool resume=Directory.Exists(stage)&&File.Exists(Path.Combine(stage,"export-report.json"));
-                    var result=new ChatExporter(workers,true,downloadGroupAvatars,defaultReaderDark:defaultDark).ExportVerifiedBackup(state.Manifest,stage,project.Platform,databaseKey,progress,cancellation,resume:resume);
+                    var result=new ChatExporter(workers,true,downloadGroupAvatars,defaultReaderDark:defaultDark).ExportVerifiedBackup(state.Manifest,stage,project.Platform,databaseKey,progress,cancellation,verifyBackup:state.VerifyBackupBeforeReading,resume:resume);
                     if(result.CanResume){if(cancellation.IsCancellationRequested)throw new OperationCanceledException(cancellation);throw new IOException("Reading export is incomplete; continue the archive task.");}
                 }
                 Save("protection");

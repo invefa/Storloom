@@ -65,6 +65,39 @@ public sealed class ArchiveWorkflowTests:IDisposable {
         var state=JsonFiles.Read<ChatArchiveTask>(TaskFile);Assert.False(File.Exists(Path.Combine(state.Work,"reader",media)));
         var next=Update(latest!,Password);using var vault=ChatVault.Open(next.Reading!,Password);using var input=vault.OpenRead(media);using var output=new MemoryStream();input.CopyTo(output);Assert.Equal(bytes,output.ToArray());Assert.True(vault.Status.Complete);
     }
+    [Theory][InlineData(false)][InlineData(true)]
+    public void DeferredVerificationDetectsChangedBackupWithoutReexporting(bool rebuild){
+        var initial=Project();File.WriteAllText(Path.Combine(initial.Source,"unused.bin"),"original");
+        var first=Update(initial with{VerifyBackupBeforeReading=false});
+        var journal=JsonFiles.Read<TransferJournal>(first.Manifest!);
+        string media=ChatIncrementalBackup.Resolve(journal.Plan.Destination,journal.Receipts.Single(r=>r.RelativePath=="unused.bin"));
+        ChatExporter.VerifyBackup(first.Manifest!);
+        File.WriteAllText(media,"modified");
+        byte[] old=File.ReadAllBytes(Path.Combine(first.Reading!,"messages.jsonl"));
+        var next=Update(first,request:new(Rebuild:rebuild,UseExistingBackup:true));
+        Assert.False(next.VerifyBackupBeforeReading);
+        Assert.Throws<InvalidDataException>(()=>ChatExporter.VerifyBackup(next.Manifest!));
+        Assert.Equal(old,File.ReadAllBytes(Path.Combine(first.Reading!,"messages.jsonl")));
+        Assert.True(File.Exists(Path.Combine(next.Reading!,"messages.html")));
+        Assert.Throws<InvalidDataException>(()=>Update(next with{VerifyBackupBeforeReading=true},request:new(Rebuild:true,UseExistingBackup:true)));
+    }
+    [Fact]public void EnabledVerificationRunsDuringDailyUpdate(){
+        var first=Update(Project());bool verified=false;
+        Update(first,request:new(UseExistingBackup:true),progress:new Callback(p=>{if(p.RuleId=="chat-verify")verified=true;}));
+        Assert.True(verified);
+    }
+    [Fact]public void ResumeRetainsVerificationChoiceAndStandaloneVerificationCanCancel(){
+        var p=Project() with{VerifyBackupBeforeReading=false};using var stop=new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(()=>Update(p,progress:new Callback(x=>{if(x.RuleId=="archive-reading")stop.Cancel();}),token:stop.Token));
+        Assert.False(JsonFiles.Read<ChatArchiveTask>(TaskFile).VerifyBackupBeforeReading);
+        var resumed=Update(latest! with{VerifyBackupBeforeReading=true});
+        Assert.False(JsonFiles.Read<ChatExportResult>(Path.Combine(resumed.Reading!,"export-report.json")).BackupReverified);
+        using var cancelled=new CancellationTokenSource();cancelled.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(()=>ChatExporter.VerifyBackup(resumed.Manifest!,cancellation:cancelled.Token));
+        ChatExporter.VerifyBackup(resumed.Manifest!);
+        var journal=JsonFiles.Read<TransferJournal>(resumed.Manifest!);File.AppendAllText(ChatIncrementalBackup.Resolve(journal.Plan.Destination,journal.Receipts[0]),"changed length");
+        Assert.Throws<InvalidDataException>(()=>ChatExporter.VerifyBackup(resumed.Manifest!));
+    }
     [Fact]public void InvalidProjectIdentityCannotCreateWorkspace(){var p=Project() with{Id="../outside"};Assert.Throws<InvalidDataException>(()=>Update(p));Assert.False(Directory.Exists(p.BackupRoot));}
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
     private static void Database(string path,string sql){Assert.Equal(0,sqlite3_open_v2(path,out nint handle,6,0));try{Assert.Equal(0,sqlite3_exec(handle,sql,0,0,0));}finally{sqlite3_close_v2(handle);}}

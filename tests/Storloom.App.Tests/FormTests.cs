@@ -776,7 +776,11 @@ public sealed class FormTests {
         project=project with{BackedUpAt=DateTimeOffset.FromUnixTimeSeconds(1700000000),ReadableAt=DateTimeOffset.FromUnixTimeSeconds(1700000000)};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true});
         var window=new ShellWindow(data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
             var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Single(table.Items.Cast<object>());
-            foreach(string name in new[]{"archive_open","archive_update","archive_protection"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
+            foreach(string name in new[]{"archive_open","archive_update","archive_protection","archive_verify_now"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
+            var verification=Descendants(window).OfType<CheckBox>().Single(c=>c.Name=="archive_verify_before");Assert.True(verification.IsChecked);
+            verification.IsChecked=false;verification.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Assert.False(Assert.Single(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json"))).VerifyBackupBeforeReading);
+            var selected=(ChatArchiveProject)typeof(ShellWindow).GetMethod("SelectedArchive",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(window,null)!;Assert.False(selected.VerifyBackupBeforeReading);
             Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
             Capture(window,"archive-home-"+theme);
             if(theme==AppTheme.OneDark){var detail=Descendants(window).OfType<TextBlock>().First(t=>t.Text.Contains(project.Source,StringComparison.Ordinal));detail.Text=L.T("ArchiveDetail",@"D:\Example\Account",@"E:\Example\Archives\Reading")+"\n"+L.T("ArchiveRawProtectionNotice");Capture(window,"public-"+locale+"-archives");}

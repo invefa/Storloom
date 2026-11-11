@@ -396,8 +396,8 @@
   "KeyNotFound": "No database key matching this backup was found in the running client. Read-only search depends on retained memory and can time out. Use Start QQ login capture to observe the key during login, or enter a database key obtained separately.",
   "KeyFormatInvalid": "Invalid database key format. QQ requires 16 or 32 printable ASCII characters; WeChat requires 64 hexadecimal characters.",
   "DatabaseKeyMismatch": "The database key does not match this backup, or the database format is unsupported. Use the chat database encryption key, not your login password.",
-  "VerifyBackupBeforeExport": "Recheck every backup file before exporting (recommended)",
-  "VerifyBackupHelp": "Recheck compares backup hashes before export. Disabling it saves time but may miss later file changes. Database authentication remains enabled.",
+  "VerifyBackupBeforeExport": "Recheck every backup file before export / update",
+  "VerifyBackupHelp": "Compare every raw backup file with its recorded SHA-256 before export / update. Turn off to save time, then use Verify backup independently after completion. Structure, file size and database authentication checks remain enabled. The choice is saved per archive; unfinished tasks retain their original choice.",
   "WeChatKeyMethodsHelp": "For newer WeChat clients, use login capture. Read from logged-in client is a best-effort, read-only search and may not find a retained key. Login capture asks you to close the daily client and log in to a separate debugger-managed instance.",
   "WeChatPassiveUnavailable": "No key matching this backup was found by read-only search. Some WeChat versions do not retain a supported key representation after login. Use Start WeChat login capture, or enter a database key obtained separately. No debugger was started automatically.",
   "ReadQQLogin": "Start QQ login capture...",
@@ -637,5 +637,7 @@
   "ArchiveAbandonTask": "Abandon pending update",
   "ArchiveAbandonConfirm": "Abandon this task and keep the previous reader? Its backup and unpublished workspace are retained. A new update can then be started.",
   "ArchiveProtectionLocked": "Protected, unlock to confirm scope",
-  "ArchiveLegacyRules": "This older protected reader did not retain reusable scope rules. Choose the intended protection again before updating."
+  "ArchiveLegacyRules": "This older protected reader did not retain reusable scope rules. Choose the intended protection again before updating.",
+  "VerifyBackupNow": "Verify backup",
+  "VerifyBackupComplete": "Backup verification completed. All recorded file hashes match."
 }

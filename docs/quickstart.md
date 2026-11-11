@@ -8,6 +8,8 @@ Open Chats to select an account archive. **Create archive** provides initial set
 
 Update checks source changes, creates a verified backup, updates the reader and applies the saved protection rules. Pause retains the running task; Cancel stops work while preserving its checkpoint. **Continue update** resumes the captured backup, so changes made after that snapshot require another update. More actions include backing up originals only, rebuilding from the verified backup and abandoning a pending task without deleting its backups or workspace.
 
+The account archive home includes a saved **Recheck every backup file before export / update** option. Disable it to skip the repeated full SHA-256 pass. After completion, **Verify backup** runs that pass independently without a password or another export. Structural, size, database authentication and transfer verification checks remain active. Unfinished tasks retain the verification choice made when they started.
+
 Updates produce independent reading generations. The catalog switches only after verification. The previous reader remains readable and is retained, including any plaintext it already contained. **Protecting the new reader does not protect or remove older plaintext readers or raw backups.** Handle those copies separately.
 
 Protection is a lasting archive setting. Full protection includes matching new content. Saved conversation, type, sender and content rules also match future messages; explicit message IDs select only those messages, subject to the displayed shared-page/resource scope. Strict scope keeps sanitized public pages. Passwords and captured database keys are never saved. Scope metadata is authenticated and encrypted in the vault.

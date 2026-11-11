@@ -53,23 +53,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         OperationPause.Check(cancellation);
         var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
         var verificationClock = System.Diagnostics.Stopwatch.StartNew();
-        if (manifest.Version != 1 || manifest.State is not ("Verified" or "Completed" or
-            "CopiedWithRetainedSources" or "CancelledAfterVerification") ||
-            manifest.Receipts.Count != manifest.Plan.Files.Count)
-            throw new InvalidDataException("The backup has not completed verification.");
-        var expected = manifest.Plan.Files.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
-        var received = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        long verifiedBytes = 0, totalBytes = manifest.Receipts.Sum(e => e.Bytes);
-        int verifiedFiles = 0;
-        foreach (var entry in manifest.Receipts) {
-            OperationPause.Check(cancellation);
-            if (!received.Add(entry.RelativePath) || !expected.TryGetValue(entry.RelativePath, out var planned) ||
-                planned.Stamp.Bytes != entry.Bytes)
-                throw new InvalidDataException("Backup receipts do not match the planned files.");
-            string path = ChatIncrementalBackup.Resolve(manifest.Plan.Destination, entry);
-            PathPolicy.AssertNoLinks(path);
-            if (new FileInfo(path).Length != entry.Bytes) throw new InvalidDataException("The archived copy changed since verification.");
-        }
+        var received = ValidateBackup(manifest, cancellation);
         foreach (string database in FindDatabases(manifest.Plan.Destination, platform))
             foreach (string file in new[] { database, database + "-wal", database + "-shm" }.Where(File.Exists))
                 if (!received.Contains(Path.GetRelativePath(manifest.Plan.Destination, file)))
@@ -84,7 +68,43 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             if (!plain && (secret == null || ChatCipher.Detect(prefix, secret, platform) == null))
                 throw new CryptographicException(L.T("DatabaseKeyMismatch"));
         }
-        if (verifyBackup) foreach (var entry in manifest.Receipts) {
+        if (verifyBackup) VerifyBackupContents(manifest, progress, cancellation);
+        return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false,
+            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume, selectMessage, includeDatabase);
+    }
+
+    /// <summary>Recheck the immutable raw backup against its receipts without exporting or unlocking databases.</summary>
+    public static void VerifyBackup(string manifestPath, IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default) {
+        OperationPause.Check(cancellation);
+        PathPolicy.AssertNoLinks(manifestPath);
+        var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
+        ValidateBackup(manifest, cancellation);
+        VerifyBackupContents(manifest, progress, cancellation);
+    }
+
+    private static HashSet<string> ValidateBackup(TransferJournal manifest, CancellationToken cancellation) {
+        if (manifest.Version != 1 || manifest.State is not ("Verified" or "Completed" or
+            "CopiedWithRetainedSources" or "CancelledAfterVerification") ||
+            manifest.Receipts.Count != manifest.Plan.Files.Count)
+            throw new InvalidDataException("The backup has not completed verification.");
+        var expected = manifest.Plan.Files.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var received = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in manifest.Receipts) {
+            OperationPause.Check(cancellation);
+            if (!received.Add(entry.RelativePath) || !expected.TryGetValue(entry.RelativePath, out var planned) ||
+                planned.Stamp.Bytes != entry.Bytes)
+                throw new InvalidDataException("Backup receipts do not match the planned files.");
+            string path = ChatIncrementalBackup.Resolve(manifest.Plan.Destination, entry);
+            PathPolicy.AssertNoLinks(path);
+            if (new FileInfo(path).Length != entry.Bytes) throw new InvalidDataException("The archived copy changed since verification.");
+        }
+        return received;
+    }
+
+    private static void VerifyBackupContents(TransferJournal manifest, IProgress<ScanProgress>? progress, CancellationToken cancellation) {
+        long verifiedBytes = 0, totalBytes = manifest.Receipts.Sum(e => e.Bytes);
+        int verifiedFiles = 0;
+        foreach (var entry in manifest.Receipts) {
             OperationPause.Check(cancellation);
             using var input = File.OpenRead(ChatIncrementalBackup.Resolve(manifest.Plan.Destination, entry));
             if (input.Length != entry.Bytes || Convert.ToHexString(TransferService.Hash(input, cancellation, count => {
@@ -93,8 +113,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             })) != entry.Sha256) throw new InvalidDataException("The archived copy changed since verification.");
             verifiedFiles++;
         }
-        return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false,
-            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume, selectMessage, includeDatabase);
+        progress?.Report(new("chat-verify", verifiedFiles, verifiedBytes, totalBytes, manifest.Receipts.Count));
     }
 
     private ChatExportResult ExportCore(string source, string destination, ChatPlatform platform,

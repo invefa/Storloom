@@ -40,12 +40,15 @@ public sealed partial class ShellWindow {
         public string Protection=>!Project.ProtectionKnown?L.T("ArchiveProtectionLocked"):L.T(Project.Protection==ChatArchiveProtectionMode.None?"ArchiveProtectionNone":Project.Protection==ChatArchiveProtectionMode.Selected?"ArchiveProtectionSelected":Project.IncludeMedia?"ArchiveProtectionAll":"ArchiveProtectionMetadata");
         public string Task=>L.T(Project.TaskFile!=null&&File.Exists(Project.TaskFile)?"ArchiveContinue":"ArchiveReady");
     }
-    private ChatArchiveProject SelectedArchive()=>archiveTable?.SelectedItem is ArchiveRow row?row.Project:throw new InvalidOperationException(L.T("ArchiveSelect"));
+    private ChatArchiveProject SelectedArchive()=>archiveTable?.SelectedItem is ArchiveRow row?archiveProjects[row.Project.Id]:throw new InvalidOperationException(L.T("ArchiveSelect"));
     private void MigrateArchiveReaderPreferences(ChatArchiveProject project){if(project.Reading==null)return;string root=Path.Combine(dataRoot,"reader-preferences"),old=Path.Combine(root,JsonFiles.Hash(PathPolicy.Normalize(project.Reading).ToUpperInvariant())+".json"),target=Path.Combine(root,JsonFiles.Hash(new{archive=project.Id})+".json");if(!File.Exists(target)&&File.Exists(old)){PathPolicy.AssertNoLinks(old);Directory.CreateDirectory(root);File.Copy(old,target,false);}}
     private void BuildArchiveHome(){
         var grid=View.Grid(View.Auto,View.Fill,View.Auto);chatContent.Children.Add(grid);View.Add(grid,View.Text(L.T("ArchiveHomeHelp"),color:"Muted"),0);
         archiveTable=View.Table(("Account","Account",180),("ArchiveLastBackup","Backup",160),("ArchiveLastReading","Reading",160),("ArchiveProtection","Protection",160),("State","Task",0));archiveTable.Name="managed_archives";archiveTable.ItemsSource=archiveProjects.Values.OrderBy(p=>p.Account).Select(p=>new ArchiveRow(p)).ToArray();View.Add(grid,archiveTable,1);
-        var detail=View.Text(L.T("ArchiveSelect"),color:"Muted");detail.Margin=new Thickness(0,12,0,0);View.Add(grid,detail,2);
+        var verify=new CheckBox{Content=L.T("VerifyBackupBeforeExport"),Name="archive_verify_before",Margin=new Thickness(0,8,0,4),ToolTip=L.T("VerifyBackupHelp")};
+        var verifyNow=AsyncButton("VerifyBackupNow",()=>VerifyArchiveBackup(SelectedArchive()));verifyNow.Name="archive_verify_now";
+        verify.Click+=(_,_)=>Guard(()=>{var p=SelectedArchive();SaveArchive(p with{VerifyBackupBeforeReading=verify.IsChecked==true});});
+        var detail=View.Text(L.T("ArchiveSelect"),color:"Muted");detail.Margin=new Thickness(0,12,0,0);View.Add(grid,View.Stack(verify,detail),2);
         var open=Button("OpenReading",()=>{var p=SelectedArchive();if(p.Reading!=null){MigrateArchiveReaderPreferences(p);new ChatReaderWindow(p.Reading,dataRoot,preferences.ReduceMotion,p.Id){Owner=this}.Show();}});open.Name="archive_open";
         var update=AsyncButton("ArchiveUpdate",()=>PrepareArchiveUpdate(SelectedArchive()),true);update.Name="archive_update";
         var protection=AsyncButton("ArchiveProtection",()=>ConfigureArchiveProtection(SelectedArchive()));protection.Name="archive_protection";
@@ -53,15 +56,22 @@ public sealed partial class ShellWindow {
         void Action(string key,ChatArchiveUpdateRequest request){var item=new MenuItem{Header=L.T(key)};item.Click+=async(_,_)=>{try{await PrepareArchiveUpdate(SelectedArchive(),request);}catch(Exception ex){Error(ex);}};more.Items.Add(item);}
         Action("ArchiveBackupOnly",new(BackupOnly:true));Action("ArchiveRebuild",new(Rebuild:true,UseExistingBackup:true));Action("ArchiveUseBackup",new(UseExistingBackup:true));
         var abandon=new MenuItem{Header=L.T("ArchiveAbandonTask")};abandon.Click+=(_,_)=>Guard(()=>{var p=SelectedArchive();if(p.TaskFile==null)return;if(!Confirm(L.T("ArchiveAbandonConfirm")))return;PathPolicy.AssertNoLinks(p.TaskFile);if(!PathPolicy.Under(p.TaskFile,Path.Combine(dataRoot,"archive-tasks")))throw new IOException("Unexpected task location.");File.Move(p.TaskFile,p.TaskFile+"."+Guid.NewGuid().ToString("N")+".abandoned",false);SaveArchive(p with{TaskFile=null});RenderChatStage();});more.Items.Add(abandon);
-        chatFooter.Children.Add(open);chatFooter.Children.Add(update);chatFooter.Children.Add(protection);chatFooter.Children.Add(moreButton);
-        void Selection(){bool selected=archiveTable.SelectedItem is ArchiveRow;open.IsEnabled=selected&&SelectedArchive().Reading!=null;update.IsEnabled=protection.IsEnabled=moreButton.IsEnabled=selected;if(selected){var p=SelectedArchive();selectedArchiveId=p.Id;update.Content=L.T(p.TaskFile!=null&&File.Exists(p.TaskFile)?"ArchiveContinue":"ArchiveUpdate");detail.Text=L.T("ArchiveDetail",p.Source,p.Reading??L.T("ArchiveReadingPending"))+"\n"+L.T("ArchiveRawProtectionNotice");}}
+        chatFooter.Children.Add(open);chatFooter.Children.Add(update);chatFooter.Children.Add(protection);chatFooter.Children.Add(verifyNow);chatFooter.Children.Add(moreButton);
+        void Selection(){bool selected=archiveTable.SelectedItem is ArchiveRow;open.IsEnabled=selected&&SelectedArchive().Reading!=null;update.IsEnabled=protection.IsEnabled=moreButton.IsEnabled=selected;verify.IsEnabled=selected&&PendingState(SelectedArchive())==null;verifyNow.IsEnabled=selected&&SelectedArchive().Manifest!=null&&PendingState(SelectedArchive())==null;if(selected){var p=SelectedArchive();verify.IsChecked=PendingState(p)?.VerifyBackupBeforeReading??p.VerifyBackupBeforeReading;selectedArchiveId=p.Id;update.Content=L.T(p.TaskFile!=null&&File.Exists(p.TaskFile)?"ArchiveContinue":"ArchiveUpdate");detail.Text=L.T("ArchiveDetail",p.Source,p.Reading??L.T("ArchiveReadingPending"))+"\n"+L.T("ArchiveRawProtectionNotice");}}
         archiveTable.SelectionChanged+=(_,_)=>Selection();archiveTable.SelectedItem=archiveTable.Items.OfType<ArchiveRow>().FirstOrDefault(r=>r.Project.Id==selectedArchiveId)??archiveTable.Items.OfType<ArchiveRow>().FirstOrDefault();Selection();
+    }
+    private async Task VerifyArchiveBackup(ChatArchiveProject project){
+        if(project.Manifest==null)return;
+        var progress=Progress();bool completed=false;
+        await RunPausable(async token=>{await Task.Run(()=>ChatExporter.VerifyBackup(project.Manifest,progress,token),token);token.ThrowIfCancellationRequested();completed=true;});
+        if(completed){status.Text=L.T("VerifyBackupComplete");operationView.AddLog(status.Text);}
     }
     private ChatArchiveTask? PendingState(ChatArchiveProject project)=>project.TaskFile!=null&&File.Exists(project.TaskFile)?JsonFiles.Read<ChatArchiveTask>(project.TaskFile):null;
     private bool ArchiveNeedsPassword(ChatArchiveProject project,ChatArchiveUpdateRequest request)=>!request.BackupOnly&&(PendingState(project)?.Secure==true||project.Protection!=ChatArchiveProtectionMode.None||project.Reading!=null&&ChatVault.Exists(project.Reading));
     private bool ArchiveNeedsDatabase(ChatArchiveProject project,ChatArchiveUpdateRequest request)=>!request.BackupOnly&&!request.ProtectionOnly&&PendingState(project)?.ProtectionOnly!=true&&(PendingState(project)?.Phase is null or "backup" or "workspace" or "reading")&&NeedsKey();
     private async Task CreateArchiveFromSetup(){
         RegisterCurrentArchive();var project=archiveProjects[ChatArchiveProject.Identity(Account().Platform,Account().Directory)];
+        project=project with{VerifyBackupBeforeReading=verifyChatBackup};SaveArchive(project);
         pendingArchive=project;pendingArchiveRequest=new(UseExistingBackup:true);string? password=null;
         try{if(encryptAfterExport){var dialog=new VaultPasswordWindow(true,true){Owner=this};if(dialog.ShowDialog()!=true)return;password=dialog.Password;dialog.ClearSecret();pendingArchiveRequest=new(Protection:new(dialog.IncludeMedia),Mode:ChatArchiveProtectionMode.All,UseExistingBackup:true);}
             await StartArchiveUpdate(password);
