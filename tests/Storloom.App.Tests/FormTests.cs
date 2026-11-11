@@ -1227,6 +1227,7 @@ public sealed class FormTests {
             Assert.True(Contrast(ColorOf(pair.Item1),ColorOf(pair.Item2))>=4.5,$"{theme} {pair}");
         // Idle outlines follow the subtle dividers; focus remains visibly accented.
         Assert.Equal(ColorOf("Line"),ColorOf("ControlBorder"));
+        if(theme==AppTheme.OneDark)Assert.InRange(Contrast(ColorOf("Line"),ColorOf("Surface")),1.1,1.3);
         Assert.True(Contrast(ColorOf("AccentText"),ColorOf("Surface"))>=3);
         var button=new Button{Style=(Style)Application.Current.Resources["PrimaryButton"],Content="Primary fixture"};
         var window=new ThemeWindow("Palette fixture",600,350){ShowInTaskbar=false};window.Body.Children.Add(button);

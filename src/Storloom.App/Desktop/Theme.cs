@@ -26,7 +26,7 @@ public static class Theme {
             Wpf.Ui.Controls.WindowBackdropType.None, false);
         string[] colors = Current == AppTheme.Dark ?
             ["#202020", "#2a2a2a", "#191919", "#eeeeee", "#b5b5b5", "#414141", "#dedede", "#202020", "#424242", "#353535", "#eeeeee", "#666666", "#ffffff", "#eeeeee", "#414141"] : Current == AppTheme.OneDark ?
-            ["#23272e", "#282c34", "#1e2227", "#c4ccd8", "#aeb8c8", "#3b414d", "#426bb7", "#ffffff", "#34445d", "#303640", "#ef8d96", "#4e658a", "#ffffff", "#a5c2ff", "#3b414d"] :
+            ["#23272e", "#282c34", "#1e2227", "#c4ccd8", "#aeb8c8", "#343a44", "#426bb7", "#ffffff", "#34445d", "#303640", "#ef8d96", "#4e658a", "#ffffff", "#a5c2ff", "#343a44"] :
             ["#f6f6f6", "#ffffff", "#eeeeee", "#242424", "#5d5d5d", "#dddddd", "#252525", "#ffffff", "#dddddd", "#e8e8e8", "#4b4b4b", "#aaaaaa", "#202020", "#252525", "#dddddd"];
         var palette = names.Zip(colors).ToDictionary(pair => pair.First, pair => (Color)ColorConverter.ConvertFromString(pair.Second));
         if (!string.IsNullOrWhiteSpace(preferences.CustomThemeFile)) {
