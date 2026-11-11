@@ -646,5 +646,6 @@
   "ProgressUnitConversations": "conversations",
   "ProgressUnitFiles": "files",
   "ProgressCountTotal": "{0:N0} / {1:N0} {2}",
-  "ProgressCount": "{0:N0} {1}"
+  "ProgressCount": "{0:N0} {1}",
+  "AutoCollapseLog": "Automatically collapse logs after successful tasks. Keep logs open on failure or cancellation."
 }

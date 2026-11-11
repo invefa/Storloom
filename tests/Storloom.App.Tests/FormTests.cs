@@ -1275,12 +1275,41 @@ public sealed class FormTests {
             panel.WrapToggle.IsChecked=true;Assert.Equal(TextWrapping.Wrap,panel.Log.TextWrapping);Assert.Equal(ScrollBarVisibility.Disabled,panel.Log.HorizontalScrollBarVisibility);
             panel.ToggleExpanded();Pump();Assert.True(panel.Expanded);Assert.True(panel.ActualHeight>80);
             foreach(var button in new[]{panel.PauseButton,panel.CancelButton}){var icon=Assert.IsType<System.Windows.Shapes.Path>(button.Content);var bounds=icon.RenderedGeometry.Bounds;var center=icon.TranslatePoint(new Point(bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2),button);Assert.InRange(Math.Abs(center.X-button.ActualWidth/2),0,1.5);Assert.InRange(Math.Abs(center.Y-button.ActualHeight/2),0,1.5);}
-            foreach(var control in Descendants(panel).OfType<Control>().Where(c=>new[]{"pause_operation","cancel_operation","debug_log","wrap_log","follow_log","auto_show_log","export_log","toggle_log"}.Contains(c.Name))){
+            foreach(var control in Descendants(panel).OfType<Control>().Where(c=>new[]{"pause_operation","cancel_operation","debug_log","wrap_log","follow_log","auto_show_log","auto_collapse_log","export_log","toggle_log"}.Contains(c.Name))){
                 double top=control.TranslatePoint(new Point(0,0),panel).Y;Assert.InRange(control.ActualWidth,23.5,24.5);Assert.InRange(control.ActualHeight,23.5,24.5);Assert.Equal(new Thickness(2,0,2,0),control.Margin);Assert.InRange(top,3.5,4.5);Assert.InRange(32-top-control.ActualHeight,3.5,4.5);
             }
             Capture(window,"compact-persistent-log");panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,31,34);finish.SetResult();Wait(AsResult(task));
         }finally{finish.TrySetResult();if(task!=null)Wait(AsResult(task));window.Close();Directory.Delete(fixture,true);}
     });
+    [Fact]
+    public void SuccessfulTasksAutoCollapseWithoutLosingLogsHeightOrSavedChoice()=>OnUi(()=>{
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{ReduceMotion=true,LogHeight=205});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try{
+            window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();Assert.False(panel.AutoCollapseToggle.IsChecked);
+            panel.AutoCollapseToggle.IsChecked=true;Assert.True(JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogAutoCollapse);
+            Func<CancellationToken,Task> work=_=>{Assert.True(panel.Expanded);panel.AddLog("fixture retained task details");return Task.CompletedTask;};
+            var task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(window,new object[]{work})!;Wait(AsResult(task));Pump();
+            Assert.False(panel.Expanded);Assert.Contains("fixture retained task details",panel.Log.Text);Assert.Equal(205,JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
+            panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,204,206);panel.Start();panel.Finish("Fixture failure or cancellation",false);Assert.True(panel.Expanded);
+            panel.AutoCollapseToggle.IsChecked=false;panel.Start();panel.Finish("Fixture success with auto collapse off",true);Assert.True(panel.Expanded);
+            panel.AutoCollapseToggle.IsChecked=true;window.Close();window=new ShellWindow(fixture){ShowInTaskbar=false};window.Show();Pump();
+            Assert.True(Descendants(window).OfType<OperationPanel>().Single().AutoCollapseToggle.IsChecked);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory][InlineData(AppTheme.Light)][InlineData(AppTheme.Dark)][InlineData(AppTheme.OneDark)]
+    public void SelectedLogTogglesHaveDistinctReadableHover(AppTheme theme)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});var panel=new OperationPanel();var window=new ThemeWindow("Selected hover fixture",900,400){ShowInTaskbar=false};window.Body.Children.Add(panel);
+        try{
+            window.Show();Pump();var toggle=panel.FollowToggle;var frame=(Border)toggle.Template.FindName("frame",toggle);Color idle=((SolidColorBrush)frame.Background).Color;
+            var mouseKey=(DependencyPropertyKey)typeof(UIElement).GetField("IsMouseOverPropertyKey",BindingFlags.Static|BindingFlags.NonPublic)!.GetValue(null)!;
+            toggle.SetValue(mouseKey,true);Pump();Color hovered=((SolidColorBrush)frame.Background).Color;
+            Assert.NotEqual(idle,hovered);Assert.Equal(((SolidColorBrush)Theme.Brush("SelectionHover")).Color,hovered);Assert.True(toggle.IsChecked);
+            Assert.True(Contrast(((SolidColorBrush)toggle.Foreground).Color,hovered)>=4.5);
+            Capture(window,"selected-log-hover-"+theme);toggle.ClearValue(mouseKey);Pump();Assert.Equal(idle,((SolidColorBrush)frame.Background).Color);
+        }finally{window.Close();Theme.Apply(new AppPreferences{ReduceMotion=true});}
+    });
+
     [Fact]
     public void KeyCustodyDialogIsFixedAndUsesASeparatedActionRow() => OnUi(()=>{
         string fixture=Fixture();var owner=new ShellWindow(fixture){ShowInTaskbar=false};

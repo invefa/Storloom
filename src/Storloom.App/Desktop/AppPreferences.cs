@@ -15,6 +15,7 @@ public sealed record AppPreferences {
     public double LogHeight { get; init; } = 160;
     public bool LogExpanded{get;init;}
     public bool LogAutoShow{get;init;}=true;
+    public bool LogAutoCollapse{get;init;}
     public bool LogWrap{get;init;}
     public double SidebarWidth { get; init; } = 136;
     public bool SidebarCollapsed { get; init; }

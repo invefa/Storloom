@@ -32,6 +32,9 @@ public static class Theme {
         if (!string.IsNullOrWhiteSpace(preferences.CustomThemeFile)) {
             foreach (var pair in ReadCustom(preferences.CustomThemeFile)) palette[pair.Key] = pair.Value;
         }
+        Color selected=palette["Selection"],ink=palette["Ink"];
+        byte HoverChannel(byte background,byte foreground)=>(byte)Math.Round(background*.91+foreground*.09);
+        palette["SelectionHover"]=Color.FromArgb(selected.A,HoverChannel(selected.R,ink.R),HoverChannel(selected.G,ink.G),HoverChannel(selected.B,ink.B));
         foreach (var pair in palette) { resources[pair.Key] = new SolidColorBrush(pair.Value); resources[pair.Key + "Color"] = pair.Value; }
         // Keep library templates and Windows caption controls on the same resource palette.
         void Map(string color, params string[] keys) {

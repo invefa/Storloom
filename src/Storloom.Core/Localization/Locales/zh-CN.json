@@ -646,5 +646,6 @@
   "ProgressUnitConversations": "个会话",
   "ProgressUnitFiles": "个文件",
   "ProgressCountTotal": "{0:N0} / {1:N0} {2}",
-  "ProgressCount": "{0:N0} {1}"
+  "ProgressCount": "{0:N0} {1}",
+  "AutoCollapseLog": "任务成功结束后自动收起日志. 失败或取消时保留展开."
 }

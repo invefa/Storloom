@@ -130,8 +130,8 @@ public sealed partial class ShellWindow : ThemeWindow {
         // The persistent log/status panel is the sole status surface, including at startup.
         statusFooter=new DockPanel{Visibility=Visibility.Collapsed};cancel=Button("Cancel",()=>operation?.Cancel());cancel.Visibility=Visibility.Collapsed;
         status=operationView.StatusText;status.Text=L.T("CatalogSummary",engine.Catalog.Rules.Count);
-        operationView.WrapToggle.IsChecked=preferences.LogWrap;operationView.AutoShowToggle.IsChecked=preferences.LogAutoShow;
-        operationView.OptionsChanged+=()=>{preferences=preferences with{LogWrap=operationView.WrapToggle.IsChecked==true,LogAutoShow=operationView.AutoShowToggle.IsChecked==true};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);};
+        operationView.WrapToggle.IsChecked=preferences.LogWrap;operationView.AutoShowToggle.IsChecked=preferences.LogAutoShow;operationView.AutoCollapseToggle.IsChecked=preferences.LogAutoCollapse;
+        operationView.OptionsChanged+=()=>{preferences=preferences with{LogWrap=operationView.WrapToggle.IsChecked==true,LogAutoShow=operationView.AutoShowToggle.IsChecked==true,LogAutoCollapse=operationView.AutoCollapseToggle.IsChecked==true};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);};
         if(preferences.LogExpanded)operationView.ToggleExpanded();
         operationView.Loaded+=(_,_)=>{if(operationView.Expanded)AnimateLog(ExpandedLogHeight());};
         Body.Children.Add(root); BuildOverview(); BuildRules(); BuildChats();

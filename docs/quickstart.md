@@ -12,6 +12,8 @@ Before starting or continuing an update, the connection page groups **Recheck ev
 
 Workspace preparation first counts files and bytes, then copies and verifies with the selected worker count. The status shows the archive stage, file counts, processing bytes, speed and an estimate for the current phase. Counting has no known total yet; estimates do not include later phases. Copy/restore and encryption bytes include their verification pass, rather than only the final archive size. Completed workspace files are checked and reused on continuation. Drag the log divider to set its expanded height; it is saved immediately and reused for later tasks and application launches.
 
+The log toolbar has independent toggles for opening on task start and collapsing after success. Both choices are remembered. Automatic collapse preserves log text and the chosen expanded height; failed or cancelled tasks keep the log open. Selected toolbar toggles also have a distinct hover shade.
+
 Updates produce independent reading generations. The catalog switches only after verification. The previous reader remains readable and is retained, including any plaintext it already contained. **Protecting the new reader does not protect or remove older plaintext readers or raw backups.** Handle those copies separately.
 
 Protection is a lasting archive setting. Full protection includes matching new content. Saved conversation, type, sender and content rules also match future messages; explicit message IDs select only those messages, subject to the displayed shared-page/resource scope. Strict scope keeps sanitized public pages. Passwords and captured database keys are never saved. Scope metadata is authenticated and encrypted in the vault.
