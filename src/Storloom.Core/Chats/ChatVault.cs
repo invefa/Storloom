@@ -143,28 +143,33 @@ public sealed partial class ChatVault : IDisposable {
         string log=Path.Combine(store,"commits.enc");if(File.Exists(log)){PathPolicy.AssertNoLinks(log);using var tail=new FileStream(log,FileMode.Open,FileAccess.Write,FileShare.Read);tail.SetLength(validLogLength);}
         WriteProtection(ReadProtection() with{IncludeMedia=includeMedia});
         var selected=entries.Where(e=>e.Selected&&(includeMedia||!e.Path.StartsWith("assets/",StringComparison.Ordinal))).ToArray();
-        var initial=InspectStatus(progress,cancellation);long done=initial.ProtectedBytes,total=initial.TotalBytes;int files=initial.ProtectedFiles;
+        InspectStatus(progress,cancellation);
+        long total=checked(selected.Sum(e=>e.Stamp.Bytes)*2),done=selected.Where(Protected).Sum(e=>e.Stamp.Bytes)*2;int files=selected.Count(Protected);var reportGate=new object();
+        void Report(){lock(reportGate)progress?.Report(new("chat-encrypt",Volatile.Read(ref files),Interlocked.Read(ref done),total,selected.Length));}
+        void Advance(int count){Interlocked.Add(ref done,count);Report();}
+        Report();
         Parallel.ForEach(selected,new ParallelOptions{MaxDegreeOfParallelism=workers,CancellationToken=cancellation},entry=>{
             OperationPause.Check(cancellation);string source=Plain(entry),cipher=Cipher(entry);
-            if(committed.TryGetValue(entry.Id,out var expected)){
+            string? expected;lock(gate)committed.TryGetValue(entry.Id,out expected);
+            if(expected!=null){
                 if(!File.Exists(cipher))throw new IOException("A committed encrypted file is missing.");
                 if(entry.PublicStamp!=null&&File.Exists(source)&&PublicMatches(entry,source))return;
                 if(!File.Exists(source)){PublishPublic(entry);return;}
                 using(var verify=OpenProtected(entry)){if(Convert.ToHexString(TransferService.Hash(verify,cancellation))!=expected)throw new IOException("Encrypted file changed before plaintext removal.");}
-                RemovePlain(entry);PublishPublic(entry);return;
+                RemovePlain(entry);PublishPublic(entry);Interlocked.Add(ref done,entry.Stamp.Bytes*2);Interlocked.Increment(ref files);Report();return;
             }
             PathPolicy.AssertNoLinks(source);if(NativeFile.ReadStamp(source)!=entry.Stamp)throw new IOException("Reading copy changed before encryption.");
             using var original=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);
-            string digest=Protect(entry,original,cipher,cancellation,bytes=>{long value=Interlocked.Add(ref done,bytes);progress?.Report(new("chat-encrypt",Volatile.Read(ref files),value,total,entries.Length));});
+            string digest=Protect(entry,original,cipher,cancellation,Advance);
             original.Dispose();
             if(NativeFile.ReadStamp(source)!=entry.Stamp)throw new IOException("Reading copy changed while encrypting.");
-            using(var verify=OpenProtected(entry)){if(Convert.ToHexString(TransferService.Hash(verify,cancellation))!=digest)throw new CryptographicException("Encrypted file verification failed.");}
+            using(var verify=OpenProtected(entry)){if(Convert.ToHexString(TransferService.Hash(verify,cancellation,Advance))!=digest)throw new CryptographicException("Encrypted file verification failed.");}
             OperationPause.Check(cancellation);
             lock(gate){byte[] plain=JsonSerializer.SerializeToUtf8Bytes(new Commit(entry.Id,digest)),record=Seal(key,plain,"commit");CryptographicOperations.ZeroMemory(plain);
                 using var journal=new FileStream(log,FileMode.Append,FileAccess.Write,FileShare.Read);using var writer=new BinaryWriter(journal);writer.Write(record.Length);writer.Write(record);writer.Flush();journal.Flush(true);validLogLength=journal.Length;committed[entry.Id]=digest;}
-            RemovePlain(entry);PublishPublic(entry);Interlocked.Increment(ref files);
+            RemovePlain(entry);PublishPublic(entry);Interlocked.Increment(ref files);Report();
         });
-        return InspectStatus(progress,cancellation);
+        var result=InspectStatus(progress,cancellation);Report();return result;
     }
     private void RemovePlain(Entry entry){string path=Plain(entry);if(!File.Exists(path))return;PathPolicy.AssertNoLinks(path);if(NativeFile.ReadStamp(path)!=entry.Stamp)throw new IOException("Plaintext changed; retained both versions.");NativeFile.DeleteVerified(new("chat-vault",root,path,entry.Stamp));}
     private static bool PublicMatches(Entry entry,string path){
@@ -192,9 +197,9 @@ public sealed partial class ChatVault : IDisposable {
             OperationPause.Check(cancellation);int count=(int)Math.Min(Chunk,entry.Stamp.Bytes-input.Position);input.ReadExactly(buffer.AsSpan(0,count));hash.AppendData(buffer,0,count);
             byte[] aad=Aad(header,entry.Path,n);long start=output.Position;
             if(output.Length-start>=count+28){output.ReadExactly(nonce);output.ReadExactly(cipher.AsSpan(0,count));output.ReadExactly(tag);try{aes.Decrypt(nonce,cipher.AsSpan(0,count),tag,recovered.AsSpan(0,count),aad);if(!CryptographicOperations.FixedTimeEquals(recovered.AsSpan(0,count),buffer.AsSpan(0,count)))throw new IOException("Interrupted encryption source differs.");}finally{CryptographicOperations.ZeroMemory(recovered);}}
-            else{output.SetLength(start);RandomNumberGenerator.Fill(nonce);aes.Encrypt(nonce,buffer.AsSpan(0,count),cipher.AsSpan(0,count),tag,aad);output.Write(nonce);output.Write(cipher.AsSpan(0,count));output.Write(tag);output.Flush(true);}
+            else{output.SetLength(start);RandomNumberGenerator.Fill(nonce);aes.Encrypt(nonce,buffer.AsSpan(0,count),cipher.AsSpan(0,count),tag,aad);output.Write(nonce);output.Write(cipher.AsSpan(0,count));output.Write(tag);if((n+1)%16==0)output.Flush(true);}
             advanced(count);
-        }if(output.Position!=output.Length)throw new InvalidDataException("Unexpected encrypted file tail.");return Convert.ToHexString(hash.GetHashAndReset());}
+        }if(output.Position!=output.Length)throw new InvalidDataException("Unexpected encrypted file tail.");output.Flush(true);return Convert.ToHexString(hash.GetHashAndReset());}
         finally{CryptographicOperations.ZeroMemory(fileKey);CryptographicOperations.ZeroMemory(buffer);}
     }
     public Stream OpenRead(string relative) {

@@ -69,7 +69,7 @@ public static class ChatArchiveWorkflow {
                 if(state.PreviousReading!=null&&!policy.Rebuild){
                     Directory.CreateDirectory(stage);
                     if(previous!=null)previous.RestoreTo(stage,workers,progress,cancellation,sparseMedia);
-                    else CopyPlain(state.PreviousReading,stage,progress,cancellation);
+                    else CopyPlain(state.PreviousReading,stage,workers,progress,cancellation);
                 }
                 Save("reading");
             }
@@ -99,7 +99,6 @@ public static class ChatArchiveWorkflow {
                 progress?.Report(new("archive-publish",0,0));OperationPause.Check(cancellation);
                 if(!Directory.Exists(state.Generation)){VerifyGeneration(stage,policy.Mode,password);ChatArchiveWorkspace.PreparePublication(stage,state.Secure,cancellation);Directory.Move(stage,state.Generation);}
                 // A crash after the directory move is recovered by committing this same generation.
-                VerifyGeneration(state.Generation,policy.Mode,password);
                 Save("published");
             }
             if(state.Phase!="published")throw new InvalidDataException("Unknown archive task phase.");
@@ -122,14 +121,24 @@ public static class ChatArchiveWorkflow {
         if(mode==ChatArchiveProtectionMode.None){if(required.Any(p=>!File.Exists(Path.Combine(directory,p))))throw new IOException("Reading generation is missing required files.");if(!File.Exists(Path.Combine(directory,"messages.jsonl"))||JsonFiles.Read<ChatExportResult>(Path.Combine(directory,"export-report.json")).CanResume)throw new IOException("Reading generation is incomplete.");}
         else{using var vault=ChatVault.Open(directory,(password??"").AsSpan());if(required.Any(p=>!vault.Files.Contains(p))||!vault.MetadataProtected||vault.ReadProtection().IncludeMedia&&!vault.Status.SelectionComplete)throw new IOException("Protected generation is incomplete.");}
     }
-    private static void CopyPlain(string source,string destination,IProgress<ScanProgress>? progress,CancellationToken cancellation){
+    private static void CopyPlain(string source,string destination,int workers,IProgress<ScanProgress>? progress,CancellationToken cancellation){
         PathPolicy.AssertNoLinks(source);using var lease=new FileStream(Path.Combine(source,".export.lock"),FileMode.OpenOrCreate,FileAccess.Read,FileShare.Read);
-        int done=0;foreach(string file in Directory.EnumerateFiles(source,"*",SearchOption.AllDirectories)){
-            OperationPause.Check(cancellation);string relative=Path.GetRelativePath(source,file);if(relative==".export.lock")continue;PathPolicy.AssertNoLinks(file);
-            string target=TransferService.Child(destination,relative);Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            if(File.Exists(target)){PathPolicy.AssertNoLinks(target);using var a=File.OpenRead(file);using var b=File.OpenRead(target);if(!TransferService.Hash(a,cancellation).AsSpan().SequenceEqual(TransferService.Hash(b,cancellation)))throw new IOException("Copied workspace changed.");}
-            else{var before=NativeFile.ReadStamp(file);string copyRoot=Path.Combine(Path.GetDirectoryName(destination)!,"restore");Directory.CreateDirectory(copyRoot);PathPolicy.AssertNoLinks(copyRoot);string part=Path.Combine(copyRoot,JsonFiles.Hash(relative)+".part");if(File.Exists(part)){PathPolicy.AssertNoLinks(part);if(NativeFile.ReadStamp(part).Links!=1)throw new IOException("Shared workspace copy.");}using(var input=File.OpenRead(file))using(var output=new FileStream(part,FileMode.Create,FileAccess.Write,FileShare.None)){byte[] buffer=new byte[1024*1024];try{int count;while((count=input.Read(buffer))>0){OperationPause.Check(cancellation);output.Write(buffer,0,count);}output.Flush(true);}finally{CryptographicOperations.ZeroMemory(buffer);}}File.Move(part,target,false);if(NativeFile.ReadStamp(file)!=before)throw new IOException("Reading source changed during copying.");using var a=File.OpenRead(file);using var b=File.OpenRead(target);if(!TransferService.Hash(a,cancellation).AsSpan().SequenceEqual(TransferService.Hash(b,cancellation)))throw new IOException("Reading workspace verification failed.");}
-            progress?.Report(new("archive-workspace",++done,0));
+        var files=new List<(string Path,string Relative,long Length)>();long total=0;
+        foreach(string file in Directory.EnumerateFiles(source,"*",SearchOption.AllDirectories)){
+            OperationPause.Check(cancellation);string relative=Path.GetRelativePath(source,file);if(relative==".export.lock")continue;
+            long length=new FileInfo(file).Length;files.Add((file,relative,length));total=checked(total+length*2);
+            if(files.Count==1||files.Count%256==0)progress?.Report(new("archive-workspace-plan",files.Count,total/2,Detail:relative));
         }
+        string copyRoot=Path.Combine(Path.GetDirectoryName(destination)!,"restore");Directory.CreateDirectory(copyRoot);PathPolicy.AssertNoLinks(copyRoot);
+        int done=0;long bytes=0;var reportGate=new object();
+        void Report(string? detail=null){lock(reportGate)progress?.Report(new("archive-workspace",Volatile.Read(ref done),Interlocked.Read(ref bytes),total,files.Count,detail));}
+        Report();
+        Parallel.ForEach(files,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},file=>{
+            OperationPause.Check(cancellation);PathPolicy.AssertNoLinks(file.Path);var before=NativeFile.ReadStamp(file.Path);if(before.Bytes!=file.Length)throw new IOException("Reading source changed before copying.");
+            string target=TransferService.Child(destination,file.Relative);Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            ChatWorkspaceCopy.File(()=>System.IO.File.OpenRead(file.Path),target,Path.Combine(copyRoot,JsonFiles.Hash(file.Relative)+".part"),cancellation,count=>{Interlocked.Add(ref bytes,count);if(file.Length>=1024*1024)Report();});
+            if(NativeFile.ReadStamp(file.Path)!=before)throw new IOException("Reading source changed during copying.");
+            Interlocked.Increment(ref done);Report(file.Relative);
+        });
     }
 }

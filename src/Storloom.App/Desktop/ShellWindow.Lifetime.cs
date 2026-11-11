@@ -28,8 +28,7 @@ public sealed partial class ShellWindow {
         }
         SetCapturedKey(null);
         preferences = preferences with {
-            SidebarWidth = preferences.SidebarCollapsed || sidebarAnimating ? preferences.SidebarWidth : sidebarColumn.ActualWidth,
-            LogHeight = operationView.Expanded && logRow.ActualHeight > 80 ? logRow.ActualHeight : preferences.LogHeight
+            SidebarWidth = preferences.SidebarCollapsed || sidebarAnimating ? preferences.SidebarWidth : sidebarColumn.ActualWidth
         };
         JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
     }

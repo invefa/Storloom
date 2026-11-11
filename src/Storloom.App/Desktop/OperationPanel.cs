@@ -35,6 +35,7 @@ public sealed class OperationPanel : Grid {
     private ScanProgress? latest;
     private string phase = "", detail = "";
     private readonly HashSet<string> seenPhases=new(StringComparer.Ordinal);
+    private int archiveStep;
     private double phaseStart;
     private long phaseStartDone;
     private bool followPending;
@@ -130,7 +131,7 @@ public sealed class OperationPanel : Grid {
     public void SetPaused(bool value){paused=value;if(value)clock.Stop();else clock.Start();RefreshTiming();}
     public void Start() {
         paused=false;lastHeartbeat=-2;seenPhases.Clear();
-        latest = null; phase = detail = ""; phaseStart = 0; clock.Restart(); timer.Start();
+        latest = null;archiveStep=0; phase = detail = ""; phaseStart = 0; clock.Restart(); timer.Start();
         progress.BeginAnimation(ProgressBar.ValueProperty, null); progress.Value = 0;
         progress.Tag = Theme.ReduceMotion ? "reduced" : "animate";
         progress.Visibility = Visibility.Visible; progress.IsIndeterminate = true; state.Text = L.T("OperationStarting"); AddLog(L.T("OperationStarting"));
@@ -139,10 +140,19 @@ public sealed class OperationPanel : Grid {
     }
     public void Report(ScanProgress value) {
         latest = value;
-        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes != null ? value.Bytes : value.Files; if(seenPhases.Add(phase))AddLog(L.T(PhaseKey(phase))); if(DebugToggle.IsChecked==true)AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
+        archiveStep=value.RuleId switch{"archive-backup"=>1,"archive-workspace-plan" or "archive-workspace"=>2,"archive-reading"=>3,"archive-protect"=>4,"archive-publish"=>5,_=>archiveStep};
+        if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes is >0 ? value.Bytes : value.Files; if(seenPhases.Add(phase))AddLog(L.T(PhaseKey(phase))); if(DebugToggle.IsChecked==true)AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; if(DebugToggle.IsChecked==true)AddDebugDetail("file."+phase,detail); }
-        state.Text = Phase(phase) + (value.TotalBytes is long bytes ? $" | {View.Size(value.Bytes)} / {View.Size(bytes)}" : value.TotalFiles is int files ? $" | {value.Files:N0} / {files:N0}" : value.Files>0||value.Bytes>0 ? " | "+L.T("ProgressSoFar",value.Files,View.Size(value.Bytes)) : "");
-        long total = value.TotalBytes ?? value.TotalFiles ?? 0, done = value.TotalBytes != null ? value.Bytes : value.Files;
+        var counts=new List<string>();
+        bool messages=phase is "chat-reader" or "chat-export" or "chat-update-index" or "chat-update-merge";
+        string unit=L.T(messages?"ProgressUnitMessages":phase=="chat-pages"?"ProgressUnitConversations":"ProgressUnitFiles");
+        if(value.TotalFiles is int files)counts.Add(L.T("ProgressCountTotal",value.Files,files,unit));
+        else if(value.Files>0)counts.Add(L.T("ProgressCount",value.Files,unit));
+        if(value.TotalBytes is long bytes)counts.Add(View.Size(value.Bytes)+" / "+View.Size(bytes));
+        else if(value.Bytes>0)counts.Add(View.Size(value.Bytes));
+        state.Text=(archiveStep>0?L.T("ArchiveStageProgress",archiveStep,5)+" | ":"")+Phase(phase)+(counts.Count>0?" | "+string.Join(" | ",counts):"");
+        state.ToolTip=state.Text+(string.IsNullOrWhiteSpace(value.Detail)?"":"\n"+value.Detail);
+        long total = value.TotalBytes is >0 ? value.TotalBytes.Value : value.TotalFiles ?? 0, done = value.TotalBytes is >0 ? value.Bytes : value.Files;
         progress.IsIndeterminate = total <= 0;
         progress.Visibility = Visibility.Visible;
         if (total > 0) {
@@ -161,10 +171,10 @@ public sealed class OperationPanel : Grid {
         if(paused){timing.Text=L.T("PauseOperation")+" | "+L.T("ElapsedOnly",elapsed);return;}
         if (latest == null) { timing.Text = L.T("ElapsedOnly", elapsed); return; }
         double seconds = Math.Max(0.1, clock.Elapsed.TotalSeconds - phaseStart);
-        long total = latest.TotalBytes ?? latest.TotalFiles ?? 0, done = latest.TotalBytes != null ? latest.Bytes : latest.Files;
+        long total = latest.TotalBytes is >0 ? latest.TotalBytes.Value : latest.TotalFiles ?? 0, done = latest.TotalBytes is >0 ? latest.Bytes : latest.Files;
         long advanced = Math.Max(0, done - phaseStartDone);
         string eta = total > done && advanced > 0 && seconds > 1 ? TimeSpan.FromSeconds(Math.Min(359999, (total - done) * seconds / advanced)).ToString(@"hh\:mm\:ss") : "--:--:--";
-        timing.Text = L.T("OperationTiming", elapsed, eta, latest.TotalBytes != null ? View.Size((long)(advanced / seconds)) + "/s" : $"{advanced / seconds:N0} /s");
+        timing.Text = L.T("OperationTiming", elapsed, eta, latest.TotalBytes is >0 ? View.Size((long)(advanced / seconds)) + "/s" : $"{advanced / seconds:N0} /s");
     }
     public void Finish(string summary, bool complete) {
         timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
@@ -174,7 +184,7 @@ public sealed class OperationPanel : Grid {
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
-        "archive-backup"=>"PhaseArchiveBackup","archive-workspace"=>"PhaseArchiveWorkspace","archive-reading"=>"PhaseArchiveReading","archive-protect"=>"PhaseArchiveProtect","archive-publish"=>"PhaseArchivePublish","archive-reuse-encrypted"=>"PhaseArchiveReuse",
+        "archive-workspace-plan"=>"PhaseArchiveWorkspacePlan","archive-backup"=>"PhaseArchiveBackup","archive-workspace"=>"PhaseArchiveWorkspace","archive-reading"=>"PhaseArchiveReading","archive-protect"=>"PhaseArchiveProtect","archive-publish"=>"PhaseArchivePublish","archive-reuse-encrypted"=>"PhaseArchiveReuse",
         "chat-encryption-open"=>"PhaseEncryptionOpen","chat-encryption-check"=>"PhaseEncryptionCheck","chat-encryption-select"=>"PhaseEncryptionSelect","chat-encryption-plan"=>"PhaseEncryptionPlan","chat-encryption-derive"=>"PhaseEncryptionDerive","chat-encryption-save-plan"=>"PhaseEncryptionSavePlan",
         "transfer-plan"=>"PhaseTransferPlan", "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-resume" => "PhaseResumeExport", "chat-discovery" => "FindAccounts",
         "chat-encrypt" => "Phase_chat-encrypt", "chat-avatars" => "PhaseGroupAvatars", "chat-update-index" => "PhaseUpdateIndex", "chat-update-merge" => "PhaseUpdateMerge", "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };

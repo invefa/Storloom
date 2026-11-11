@@ -45,14 +45,8 @@ public sealed partial class ShellWindow {
     private void BuildArchiveHome(){
         var grid=View.Grid(View.Auto,View.Fill,View.Auto);chatContent.Children.Add(grid);View.Add(grid,View.Text(L.T("ArchiveHomeHelp"),color:"Muted"),0);
         archiveTable=View.Table(("Account","Account",180),("ArchiveLastBackup","Backup",160),("ArchiveLastReading","Reading",160),("ArchiveProtection","Protection",160),("State","Task",0));archiveTable.Name="managed_archives";archiveTable.ItemsSource=archiveProjects.Values.OrderBy(p=>p.Account).Select(p=>new ArchiveRow(p)).ToArray();View.Add(grid,archiveTable,1);
-        var verify=new CheckBox{Content=L.T("VerifyBackupBeforeExport"),Name="archive_verify_before",Margin=new Thickness(0,8,0,4),ToolTip=L.T("VerifyBackupHelp")};
         var verifyNow=AsyncButton("VerifyBackupNow",()=>VerifyArchiveBackup(SelectedArchive()));verifyNow.Name="archive_verify_now";
-        verify.Click+=(_,_)=>Guard(()=>{
-            var p=SelectedArchive();bool enabled=verify.IsChecked==true;
-            if(PendingState(p) is {} task){if(!PathPolicy.Under(p.TaskFile!,Path.Combine(dataRoot,"archive-tasks")))throw new IOException("Unexpected task location.");PathPolicy.AssertNoLinks(p.TaskFile!);JsonFiles.Write(p.TaskFile!,task with{VerifyBackupBeforeReading=enabled});}
-            SaveArchive(p with{VerifyBackupBeforeReading=enabled});
-        });
-        var detail=View.Text(L.T("ArchiveSelect"),color:"Muted");detail.Margin=new Thickness(0,12,0,0);View.Add(grid,View.Stack(verify,detail),2);
+        var detail=View.Text(L.T("ArchiveSelect"),color:"Muted");detail.Margin=new Thickness(0,12,0,0);View.Add(grid,detail,2);
         var open=Button("OpenReading",()=>{var p=SelectedArchive();if(p.Reading!=null){MigrateArchiveReaderPreferences(p);new ChatReaderWindow(p.Reading,dataRoot,preferences.ReduceMotion,p.Id){Owner=this}.Show();}});open.Name="archive_open";
         var update=AsyncButton("ArchiveUpdate",()=>PrepareArchiveUpdate(SelectedArchive()),true);update.Name="archive_update";
         var protection=AsyncButton("ArchiveProtection",()=>ConfigureArchiveProtection(SelectedArchive()));protection.Name="archive_protection";
@@ -61,7 +55,7 @@ public sealed partial class ShellWindow {
         Action("ArchiveBackupOnly",new(BackupOnly:true));Action("ArchiveRebuild",new(Rebuild:true,UseExistingBackup:true));Action("ArchiveUseBackup",new(UseExistingBackup:true));
         var abandon=new MenuItem{Header=L.T("ArchiveAbandonTask")};abandon.Click+=(_,_)=>Guard(()=>{var p=SelectedArchive();if(p.TaskFile==null)return;if(!Confirm(L.T("ArchiveAbandonConfirm")))return;PathPolicy.AssertNoLinks(p.TaskFile);if(!PathPolicy.Under(p.TaskFile,Path.Combine(dataRoot,"archive-tasks")))throw new IOException("Unexpected task location.");File.Move(p.TaskFile,p.TaskFile+"."+Guid.NewGuid().ToString("N")+".abandoned",false);SaveArchive(p with{TaskFile=null});RenderChatStage();});more.Items.Add(abandon);
         chatFooter.Children.Add(open);chatFooter.Children.Add(update);chatFooter.Children.Add(protection);chatFooter.Children.Add(verifyNow);chatFooter.Children.Add(moreButton);
-        void Selection(){bool selected=archiveTable.SelectedItem is ArchiveRow;open.IsEnabled=selected&&SelectedArchive().Reading!=null;update.IsEnabled=protection.IsEnabled=moreButton.IsEnabled=selected;verify.IsEnabled=selected;verifyNow.IsEnabled=selected&&SelectedArchive().Manifest!=null&&PendingState(SelectedArchive())==null;if(selected){var p=SelectedArchive();verify.IsChecked=PendingState(p)?.VerifyBackupBeforeReading??p.VerifyBackupBeforeReading;selectedArchiveId=p.Id;update.Content=L.T(p.TaskFile!=null&&File.Exists(p.TaskFile)?"ArchiveContinue":"ArchiveUpdate");detail.Text=L.T("ArchiveDetail",p.Source,p.Reading??L.T("ArchiveReadingPending"))+"\n"+L.T("ArchiveRawProtectionNotice");}}
+        void Selection(){bool selected=archiveTable.SelectedItem is ArchiveRow;open.IsEnabled=selected&&SelectedArchive().Reading!=null;update.IsEnabled=protection.IsEnabled=moreButton.IsEnabled=selected;verifyNow.IsEnabled=selected&&SelectedArchive().Manifest!=null&&PendingState(SelectedArchive())==null;if(selected){var p=SelectedArchive();selectedArchiveId=p.Id;update.Content=L.T(p.TaskFile!=null&&File.Exists(p.TaskFile)?"ArchiveContinue":"ArchiveUpdate");detail.Text=L.T("ArchiveDetail",p.Source,p.Reading??L.T("ArchiveReadingPending"))+"\n"+L.T("ArchiveRawProtectionNotice");}}
         archiveTable.SelectionChanged+=(_,_)=>Selection();archiveTable.SelectedItem=archiveTable.Items.OfType<ArchiveRow>().FirstOrDefault(r=>r.Project.Id==selectedArchiveId)??archiveTable.Items.OfType<ArchiveRow>().FirstOrDefault();Selection();
     }
     private async Task VerifyArchiveBackup(ChatArchiveProject project){
@@ -81,19 +75,16 @@ public sealed partial class ShellWindow {
             await StartArchiveUpdate(password);
         }finally{password=null;}
     }
-    private async Task PrepareArchiveUpdate(ChatArchiveProject project,ChatArchiveUpdateRequest? request=null){
+    private Task PrepareArchiveUpdate(ChatArchiveProject project,ChatArchiveUpdateRequest? request=null){
         if(PendingState(project)!=null&&request!=null)throw new InvalidOperationException(L.T("ArchiveFinishTaskFirst"));
-        if(archivePreparing||operation!=null)return;
+        if(archivePreparing||operation!=null)return Task.CompletedTask;
         pendingArchive=project;pendingArchiveRequest=request??new();
         activeManifest=project.Manifest;readingDirectory=project.Reading;
         if(project.Manifest==null)throw new InvalidOperationException(L.T("ArchiveFirstBackup"));
         var journal=JsonFiles.Read<TransferJournal>(project.Manifest);string? database=ChatExporter.FindDatabases(journal.Plan.Destination,project.Platform).FirstOrDefault();if(database==null)throw new InvalidDataException(L.T("NoAccounts"));
         if(activeChat?.Directory!=project.Source||activeChat?.Platform!=project.Platform)SetCapturedKey(null);
         activeChat=new(project.Platform,project.Source,project.Account,TransferService.Child(project.Source,Path.GetRelativePath(journal.Plan.Destination,database)),new FileInfo(database).Length);preparedArchive=ReadChatArchive(project.Manifest,activeChat,journal);
-        bool password=ArchiveNeedsPassword(project,pendingArchiveRequest);
-        bool databaseAccess=ArchiveNeedsDatabase(project,pendingArchiveRequest)&&capturedKey==null;
-        if(password||databaseAccess){chatStep=4;RenderChatStage();return;}
-        await StartArchiveUpdate(null);
+        chatStep=4;RenderChatStage();return Task.CompletedTask;
     }
     private void BuildArchiveAccess(){
         var project=pendingArchive??throw new InvalidOperationException();var request=pendingArchiveRequest??new();
@@ -103,6 +94,15 @@ public sealed partial class ShellWindow {
             keyInput=View.SecretInput();keyInput.Name="archive_database_key";stack.Children.Add(View.Field("DatabaseKeyLabel",keyInput));stack.Children.Add(View.Text(L.T(capturedKey==null?"DatabaseKeyEntryHelp":"KeyReady"),color:"Muted"));
         }
         if(ArchiveNeedsPassword(project,request)){archivePassword=View.SecretInput();archivePassword.Name="archive_unlock";stack.Children.Add(View.Field("VaultPassword",archivePassword));stack.Children.Add(View.Text(L.T("ArchiveSecureWorkspaceHelp"),color:"Muted"));}
+        var options=View.Text(L.T("ExportOptionsSection"),15);options.Margin=new Thickness(0,18,0,8);stack.Children.Add(options);
+        var verify=new CheckBox{Content=L.T("VerifyBackupBeforeExport"),Name="archive_verify_before",Margin=new Thickness(0,8,0,4),ToolTip=L.T("VerifyBackupHelp")};
+        verify.Click+=(_,_)=>Guard(()=>{
+            var p=archiveProjects[project.Id];bool enabled=verify.IsChecked==true;
+            if(PendingState(p) is {} task){if(!PathPolicy.Under(p.TaskFile!,Path.Combine(dataRoot,"archive-tasks")))throw new IOException("Unexpected task location.");PathPolicy.AssertNoLinks(p.TaskFile!);JsonFiles.Write(p.TaskFile!,task with{VerifyBackupBeforeReading=enabled});}
+            p=p with{VerifyBackupBeforeReading=enabled};SaveArchive(p);pendingArchive=p;
+        });
+        verify.IsChecked=PendingState(project)?.VerifyBackupBeforeReading??project.VerifyBackupBeforeReading;
+        stack.Children.Add(verify);
         stack.Children.Add(View.Field("ChatWorkers",ChatWorkerSelector("export",()=>project.BackupRoot)));
         chatFooter.Children.Add(Button("GoBack",()=>{keyInput?.Clear();archivePassword?.Clear();chatStep=-1;RenderChatStage();}));chatFooter.Children.Add(AsyncButton(project.TaskFile!=null?"ArchiveContinue":"ArchiveStart",async()=>{string? password=archivePassword?.Password;archivePassword?.Clear();await StartArchiveUpdate(password);password=null;},true));
     }

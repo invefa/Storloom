@@ -243,13 +243,15 @@ public sealed class TransferService(int maximumParallelism=1) {
 
     public static byte[] Hash(Stream input, CancellationToken cancellation = default, Action<int>? bytesRead = null) {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        byte[] buffer = new byte[1024 * 1024];
-        int count;
-        while ((count = input.Read(buffer)) > 0) {
-            OperationPause.Check(cancellation); hash.AppendData(buffer, 0, count);
-            bytesRead?.Invoke(count);
-        }
-        return hash.GetHashAndReset();
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(input.CanSeek?(int)Math.Clamp(input.Length-input.Position,4096,1024*1024):1024*1024);
+        try {
+            int count;
+            while ((count = input.Read(buffer,0,buffer.Length)) > 0) {
+                OperationPause.Check(cancellation); hash.AppendData(buffer, 0, count);
+                bytesRead?.Invoke(count);
+            }
+            return hash.GetHashAndReset();
+        } finally {System.Buffers.ArrayPool<byte>.Shared.Return(buffer,clearArray:true);}
     }
 
     internal static void ValidateBoundaries(string source, string destination, TransferMode mode) {

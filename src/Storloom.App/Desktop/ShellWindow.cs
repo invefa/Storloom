@@ -88,13 +88,13 @@ public sealed partial class ShellWindow : ThemeWindow {
         View.Add(center, sidebar, 0); sidebarDivider = SidebarSplitter("Canvas", HorizontalAlignment.Left); View.Add(center, sidebarDivider, 0, 1);
         ApplySidebar();
         pageHost = new Grid { Margin = new Thickness(12, 14, 18, 12) }; View.Add(center, pageHost, 0, 2); View.Add(root, center, 1);
-        var logSplitter = logDivider = new GridSplitter { Height = 1, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Visible };
+        var logSplitter = logDivider = new GridSplitter { Name="log_splitter", Height = 1, ResizeDirection = GridResizeDirection.Rows, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Visibility = Visibility.Visible };
         var logTemplate = new ControlTemplate(typeof(GridSplitter)); var logHit = new FrameworkElementFactory(typeof(Grid));
         logHit.SetResourceReference(Panel.BackgroundProperty, "Canvas"); var logLine = new FrameworkElementFactory(typeof(Border));
         logLine.SetValue(FrameworkElement.HeightProperty, 1d); logLine.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
         logLine.SetResourceReference(Border.BackgroundProperty, "Line"); logHit.AppendChild(logLine); logTemplate.VisualTree = logHit; logSplitter.Template = logTemplate;
-        logSplitter.DragStarted += (_, _) => { logRow.BeginAnimation(RowDefinition.HeightProperty, null); };
-        logSplitter.DragCompleted += (_, _) => { preferences = preferences with { LogHeight = logRow.ActualHeight }; };
+        logSplitter.DragStarted += (_, _) => { double height=logRow.ActualHeight;logRow.BeginAnimation(RowDefinition.HeightProperty, null);logRow.Height=new GridLength(height); };
+        logSplitter.DragCompleted += (_, _) => { RememberLogHeight(); };
         View.Add(root, logSplitter, 2); logRow = root.RowDefinitions[3];
         root.RowDefinitions[1].MinHeight = 320;
         double contentFloor=260;
@@ -122,8 +122,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView.CancelRequested += ()=>operation?.Cancel();
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
-            double target = expanded ? Math.Clamp(preferences.LogHeight, 80, Math.Max(80, ActualHeight * .55)) : 32;
-            if (!expanded && logRow.ActualHeight > 80) preferences = preferences with { LogHeight = logRow.ActualHeight };
+            double target = expanded ? ExpandedLogHeight() : 32;
             AnimateLog(target);logSplitter.IsEnabled=expanded;logSplitter.Height=expanded?3:1;
             preferences=preferences with{LogExpanded=expanded};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);
         };
@@ -134,6 +133,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView.WrapToggle.IsChecked=preferences.LogWrap;operationView.AutoShowToggle.IsChecked=preferences.LogAutoShow;
         operationView.OptionsChanged+=()=>{preferences=preferences with{LogWrap=operationView.WrapToggle.IsChecked==true,LogAutoShow=operationView.AutoShowToggle.IsChecked==true};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);};
         if(preferences.LogExpanded)operationView.ToggleExpanded();
+        operationView.Loaded+=(_,_)=>{if(operationView.Expanded)AnimateLog(ExpandedLogHeight());};
         Body.Children.Add(root); BuildOverview(); BuildRules(); BuildChats();
         navigation.SelectedIndex = currentPage == "overview" ? 0 : currentPage == "chats" ? 2 : 1;
     }
@@ -177,6 +177,14 @@ public sealed partial class ShellWindow : ThemeWindow {
             var contents = (DockPanel)item.Content; var label = contents.Children.OfType<TextBlock>().Single(); label.Visibility = compact || moving ? Visibility.Collapsed : Visibility.Visible;
             contents.Children.OfType<System.Windows.Shapes.Path>().Single().Margin = new Thickness(0, 0, compact ? 0 : 8, 0);
         }
+    }
+    private double ExpandedLogHeight()=>Math.Clamp(preferences.LogHeight,80,Math.Max(80,Math.Min(logRow.MaxHeight,(ActualHeight>0?ActualHeight:Height)*.55)));
+    private void RememberLogHeight(){
+        if(logRow.ActualHeight<80)return;
+        double height=logRow.ActualHeight;
+        logRow.BeginAnimation(RowDefinition.HeightProperty,null);logRow.Height=new GridLength(height);
+        if(logRow.Parent is Grid root)root.RowDefinitions[1].Height=View.Fill;
+        preferences=preferences with{LogHeight=height};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);
     }
     private void AnimateLog(double target) {
         double previous = logRow.ActualHeight; logRow.BeginAnimation(RowDefinition.HeightProperty, null); logRow.Height = new GridLength(target);
@@ -232,7 +240,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (operationButton != null) operationButton.Content = L.T("Cancel");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         if(operationView.AutoShowToggle.IsChecked==true&&!operationView.Expanded)operationView.ToggleExpanded();
-        AnimateLog(operationView.Expanded ? Math.Clamp(preferences.LogHeight,80,Math.Max(80,ActualHeight*.55)) : 32);
+        AnimateLog(operationView.Expanded ? ExpandedLogHeight() : 32);
         operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14",12);operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;
         statusFooter.Visibility=Visibility.Collapsed;
         status.Text = L.T("OperationStarting");if(debugEnabled)operationView.AddDebugDetail("task.options",$"worker_mode: {(preferences.ChatWorkersAutomatic?"auto":"manual")} | manual_workers: {preferences.ChatParallelism} | page: {currentPage} | auto_open_log: {preferences.LogAutoShow}"); bool complete = false;

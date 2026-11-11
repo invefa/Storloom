@@ -777,6 +777,10 @@ public sealed class FormTests {
         var window=new ShellWindow(data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
             var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Single(table.Items.Cast<object>());
             foreach(string name in new[]{"archive_open","archive_update","archive_protection","archive_verify_now"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
+            Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
+            Capture(window,"archive-home-"+theme);
+            if(theme==AppTheme.OneDark){var detail=Descendants(window).OfType<TextBlock>().First(t=>t.Text.Contains(project.Source,StringComparison.Ordinal));detail.Text=L.T("ArchiveDetail",@"D:\Example\Account",@"E:\Example\Archives\Reading")+"\n"+L.T("ArchiveRawProtectionNotice");Capture(window,"public-"+locale+"-archives");}
+            var prepare=(Task)typeof(ShellWindow).GetMethod("PrepareArchiveUpdate",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(window,new object?[]{project,null})!;Wait(AsResult(prepare));Pump();
             var verification=Descendants(window).OfType<CheckBox>().Single(c=>c.Name=="archive_verify_before");Assert.True(verification.IsChecked);
             verification.IsChecked=false;verification.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             Assert.False(Assert.Single(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json"))).VerifyBackupBeforeReading);
@@ -787,9 +791,7 @@ public sealed class FormTests {
             verification.IsChecked=false;verification.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.False(JsonFiles.Read<ChatArchiveTask>(pendingFile).VerifyBackupBeforeReading);
             verification.IsChecked=true;verification.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.True(JsonFiles.Read<ChatArchiveTask>(pendingFile).VerifyBackupBeforeReading);
             typeof(ShellWindow).GetMethod("SaveArchive",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(window,new object[]{selected});
-            Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
-            Capture(window,"archive-home-"+theme);
-            if(theme==AppTheme.OneDark){var detail=Descendants(window).OfType<TextBlock>().First(t=>t.Text.Contains(project.Source,StringComparison.Ordinal));detail.Text=L.T("ArchiveDetail",@"D:\Example\Account",@"E:\Example\Archives\Reading")+"\n"+L.T("ArchiveRawProtectionNotice");Capture(window,"public-"+locale+"-archives");}
+            Capture(window,"archive-update-options-"+theme);
             Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveCreate"))).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();Assert.True(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts").IsVisible);
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
@@ -1089,11 +1091,32 @@ public sealed class FormTests {
             Assert.True(bar.IsVisible);Assert.InRange(bar.ActualHeight,1,3);Assert.Equal(.75,bar.Value,3);
             var track=(FrameworkElement)bar.Template.FindName("PART_Track",bar);var indicator=(FrameworkElement)bar.Template.FindName("PART_Indicator",bar);
             Assert.InRange(indicator.ActualWidth/track.ActualWidth,.74,.76);
+            panel.Report(new("archive-workspace",3,4096,8192,6));Assert.Contains("3",panel.StatusText.Text);Assert.Contains("6",panel.StatusText.Text);Assert.Contains(" / ",panel.StatusText.Text);
             panel.Report(new("chat-resume",0,0));Pump();Assert.True(bar.IsVisible);Assert.True(bar.IsIndeterminate);
             panel.ToggleExpanded();panel.Height=56;Pump();window.UpdateLayout();
             Assert.InRange(bar.TranslatePoint(new Point(0,bar.ActualHeight),panel).Y,0,panel.ActualHeight);
             panel.Finish("Fixture complete",true);panel.Start();Pump();Assert.True(bar.IsVisible);Assert.True(bar.IsIndeterminate);Assert.Equal(0,bar.Value);
         } finally {window.Close();}
+    });
+
+    [Fact]
+    public void LogHeightIsSavedOnDragAndRestoredAcrossReopenAndTaskStart()=>OnUi(()=>{
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{ReduceMotion=true,LogHeight=160});
+        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        try{
+            window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();panel.ToggleExpanded();Pump();
+            var row=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(window)!;
+            row.Height=new GridLength(205);Pump();
+            var divider=Descendants(window).OfType<GridSplitter>().Single(s=>s.Name=="log_splitter");
+            divider.RaiseEvent(new System.Windows.Controls.Primitives.DragCompletedEventArgs(0,0,false){RoutedEvent=System.Windows.Controls.Primitives.Thumb.DragCompletedEvent});Pump();
+            Assert.InRange(JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight,204,206);
+            panel.ToggleExpanded();Pump();panel.ToggleExpanded();Pump();Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 1: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
+            Func<CancellationToken,Task> work=_=>Task.CompletedTask;
+            var task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(window,new object[]{work})!;Wait(AsResult(task));Pump();Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 2: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
+            window.Height+=100;Pump();Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 3: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
+            window.Close();window=new ShellWindow(fixture){ShowInTaskbar=false};window.Show();Pump();
+            row=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(window)!;Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 4: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
+        }finally{window.Close();Directory.Delete(fixture,true);}
     });
 
     [Fact]

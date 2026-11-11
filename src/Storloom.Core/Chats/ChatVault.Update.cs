@@ -16,25 +16,22 @@ public sealed partial class ChatVault {
     public IReadOnlyList<string> Files=>entries.Select(e=>e.Path).ToArray();
     internal void RestoreTo(string directory,int workers,IProgress<ScanProgress>? progress,CancellationToken cancellation,bool skipProtectedMedia=false){
         using var lease=new FileStream(Path.Combine(root,".export.lock"),FileMode.OpenOrCreate,FileAccess.Read,FileShare.Read);
-        int done=0;Parallel.ForEach(entries,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},entry=>{
-            OperationPause.Check(cancellation);if(skipProtectedMedia&&entry.Path.StartsWith("assets/",StringComparison.Ordinal)&&committed.ContainsKey(entry.Id))return;string target=TransferService.Child(directory,entry.Path);Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            if(File.Exists(target)){
-                PathPolicy.AssertNoLinks(target);using var existing=File.OpenRead(target);using var expected=OpenRead(entry.Path);
-                if(existing.Length==expected.Length&&TransferService.Hash(existing,cancellation).AsSpan().SequenceEqual(TransferService.Hash(expected,cancellation)))return;
-                throw new IOException("Workspace file differs from its verified source.");
-            }
-            string temporaryRoot=Path.Combine(Path.GetDirectoryName(directory)!,"restore");Directory.CreateDirectory(temporaryRoot);PathPolicy.AssertNoLinks(temporaryRoot);
-            string temporary=Path.Combine(temporaryRoot,entry.Id+".part");if(File.Exists(temporary)){PathPolicy.AssertNoLinks(temporary);if(NativeFile.ReadStamp(temporary).Links!=1)throw new IOException("Shared restore workspace file.");}
-            using(var input=OpenRead(entry.Path))using(var output=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){byte[] buffer=new byte[1024*1024];try{int count;while((count=input.Read(buffer))>0){OperationPause.Check(cancellation);output.Write(buffer,0,count);}output.Flush(true);}finally{CryptographicOperations.ZeroMemory(buffer);}}
-            File.Move(temporary,target,false);
-            using(var written=File.OpenRead(target))using(var original=OpenRead(entry.Path))if(!TransferService.Hash(written,cancellation).AsSpan().SequenceEqual(TransferService.Hash(original,cancellation)))throw new IOException("Workspace restoration verification failed.");
-            progress?.Report(new("archive-workspace",Interlocked.Increment(ref done),0,TotalFiles:entries.Length));
+        var selected=entries.Where(e=>!(skipProtectedMedia&&e.Path.StartsWith("assets/",StringComparison.Ordinal)&&committed.ContainsKey(e.Id))).ToArray();
+        long total=checked(selected.Sum(e=>e.Stamp.Bytes)*2),bytes=0;int done=0;var reportGate=new object();
+        void Report(string? detail=null){lock(reportGate)progress?.Report(new("archive-workspace",Volatile.Read(ref done),Interlocked.Read(ref bytes),total,selected.Length,detail));}
+        string temporaryRoot=Path.Combine(Path.GetDirectoryName(directory)!,"restore");Directory.CreateDirectory(temporaryRoot);PathPolicy.AssertNoLinks(temporaryRoot);Report();
+        Parallel.ForEach(selected,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},entry=>{
+            OperationPause.Check(cancellation);string target=TransferService.Child(directory,entry.Path);Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            ChatWorkspaceCopy.File(()=>OpenRead(entry.Path),target,Path.Combine(temporaryRoot,entry.Id+".part"),cancellation,count=>{Interlocked.Add(ref bytes,count);if(entry.Stamp.Bytes>=1024*1024)Report();});
+            Interlocked.Increment(ref done);Report(entry.Path);
         });
     }
     private void ImportProtectedMedia(ChatVault previous,IProgress<ScanProgress>? progress,CancellationToken cancellation){
         var added=new List<Entry>();foreach(var entry in previous.entries.Where(e=>e.Path.StartsWith("assets/",StringComparison.Ordinal)&&!paths.ContainsKey(e.Path))){
             OperationPause.Check(cancellation);if(!previous.committed.TryGetValue(entry.Id,out string? digest))throw new IOException("Unprotected media cannot be reused as ciphertext.");
-            using(var source=previous.OpenProtected(entry))if(Convert.ToHexString(TransferService.Hash(source,cancellation))!=digest)throw new CryptographicException("Previous media authentication failed.");
+            // The copied ciphertext must authenticate against the previous commit before it is accepted.
+            // Reading the same source plaintext first adds another full decryption pass without a stronger check.
+            PathPolicy.AssertNoLinks(previous.Cipher(entry));
             File.Copy(previous.Cipher(entry),Cipher(entry),false);using(var copied=OpenProtected(entry))if(Convert.ToHexString(TransferService.Hash(copied,cancellation))!=digest)throw new CryptographicException("Copied media authentication failed.");
             byte[] plain=JsonSerializer.SerializeToUtf8Bytes(new Commit(entry.Id,digest));try{byte[] record=Seal(key,plain,"commit");using var log=new FileStream(Path.Combine(store,"commits.enc"),FileMode.Append,FileAccess.Write,FileShare.Read);using var writer=new BinaryWriter(log);writer.Write(record.Length);writer.Write(record);writer.Flush();log.Flush(true);validLogLength=log.Length;}finally{CryptographicOperations.ZeroMemory(plain);}
             committed[entry.Id]=digest;added.Add(entry with{Selected=true,PublicFile=null,PublicStamp=null});progress?.Report(new("archive-reuse-encrypted",added.Count,0));
@@ -47,7 +44,7 @@ public sealed partial class ChatVault {
             OperationPause.Check(cancellation);var entry=entries[n];
             if(!entry.Selected||!previous.paths.TryGetValue(entry.Path,out var old)||!previous.committed.TryGetValue(old.Id,out string? expected))continue;
             using(var input=File.OpenRead(Plain(entry)))if(Convert.ToHexString(TransferService.Hash(input,cancellation))!=expected)continue;
-            using(var input=previous.OpenProtected(old))if(Convert.ToHexString(TransferService.Hash(input,cancellation))!=expected)throw new CryptographicException("Previous encrypted file changed.");
+            PathPolicy.AssertNoLinks(previous.Cipher(old));
             var reused=entry with{Id=old.Id};string target=Cipher(reused);File.Copy(previous.Cipher(old),target,false);
             using(var copy=new ProtectedStream(target,entry.Path,entry.Stamp.Bytes,key))if(Convert.ToHexString(TransferService.Hash(copy,cancellation))!=expected)throw new CryptographicException("Reused ciphertext verification failed.");
             entries[n]=reused;byte[] plain=JsonSerializer.SerializeToUtf8Bytes(new Commit(reused.Id,expected));

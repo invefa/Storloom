@@ -54,12 +54,13 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
         var verificationClock = System.Diagnostics.Stopwatch.StartNew();
         var received = ValidateBackup(manifest, cancellation);
-        foreach (string database in FindDatabases(manifest.Plan.Destination, platform))
+        var backupDatabases=FindDatabases(manifest.Plan.Destination,platform).ToArray();
+        foreach (string database in backupDatabases)
             foreach (string file in new[] { database, database + "-wal", database + "-shm" }.Where(File.Exists))
                 if (!received.Contains(Path.GetRelativePath(manifest.Plan.Destination, file)))
                     throw new InvalidDataException("An unverified message database or WAL was added to the archive.");
         // Fail on an incorrect key before reading/hash-checking potentially many GB of attachments.
-        foreach (string database in FindDatabases(manifest.Plan.Destination, platform)) {
+        foreach (string database in backupDatabases) {
             OperationPause.Check(cancellation);
             using var input = File.OpenRead(database);
             byte[] prefix = new byte[Math.Min(input.Length, 5120)]; input.ReadExactly(prefix);
@@ -382,8 +383,8 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         pending.Push(root);
         while (pending.TryPop(out string? directory)) {
             PathPolicy.AssertNoLinks(directory);
-            foreach (string path in Directory.EnumerateFileSystemEntries(directory)) {
-                var attrs = File.GetAttributes(path);
+            foreach (var item in new DirectoryInfo(directory).EnumerateFileSystemInfos()) {
+                string path=item.FullName;var attrs = item.Attributes;
                 if ((attrs & FileAttributes.ReparsePoint) != 0) continue;
                 if ((attrs & FileAttributes.Directory) != 0) {
                     // Account structures are shallow. Do not descend media trees to locate databases.

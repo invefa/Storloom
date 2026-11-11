@@ -98,6 +98,25 @@ public sealed class ArchiveWorkflowTests:IDisposable {
         var journal=JsonFiles.Read<TransferJournal>(resumed.Manifest!);File.AppendAllText(ChatIncrementalBackup.Resolve(journal.Plan.Destination,journal.Receipts[0]),"changed length");
         Assert.Throws<InvalidDataException>(()=>ChatExporter.VerifyBackup(resumed.Manifest!));
     }
+    [Fact]public void WorkspaceCopyReadsSourceOnceAndReportsVerificationBytes(){
+        byte[] data=new byte[3*1024*1024+17];RandomNumberGenerator.Fill(data);string target=Path.Combine(root,"copy.bin"),partial=Path.Combine(root,"copy.part");int opens=0;long bytes=0;
+        ChatWorkspaceCopy.File(()=>{opens++;return new MemoryStream(data,false);},target,partial,default,n=>bytes+=n);
+        Assert.Equal(1,opens);Assert.Equal(data.Length*2L,bytes);Assert.Equal(data,File.ReadAllBytes(target));Assert.False(File.Exists(partial));
+        byte[] modified=data.ToArray();modified[0]^=1;Assert.Throws<IOException>(()=>ChatWorkspaceCopy.File(()=>new MemoryStream(modified,false),target,partial,default,_=>{}));Assert.Equal(data,File.ReadAllBytes(target));
+    }
+    [Fact]public void WorkspaceCopyCancellationRetainsOnlyPartialAndCanResume(){
+        byte[] data=new byte[3*1024*1024];RandomNumberGenerator.Fill(data);string target=Path.Combine(root,"resumed.bin"),partial=Path.Combine(root,"resumed.part");using var stop=new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(()=>ChatWorkspaceCopy.File(()=>new MemoryStream(data,false),target,partial,stop.Token,_=>stop.Cancel()));Assert.False(File.Exists(target));
+        ChatWorkspaceCopy.File(()=>new MemoryStream(data,false),target,partial,default,_=>{});Assert.Equal(data,File.ReadAllBytes(target));
+    }
+    [Fact]public void WorkspaceProgressHasTotalsAndResumingDoesNotRecopyCompletedFiles(){
+        var first=Update(Project());for(int n=0;n<32;n++)File.WriteAllBytes(Path.Combine(first.Reading!,"fixture-"+n+".bin"),new byte[1024+n]);
+        using var stop=new CancellationTokenSource();var reports=new List<ScanProgress>();var gate=new object();
+        Assert.ThrowsAny<OperationCanceledException>(()=>Update(first,request:new(UseExistingBackup:true),progress:new Callback(p=>{lock(gate)reports.Add(p);if(p.RuleId=="archive-workspace"&&p.Files>=1)stop.Cancel();}),token:stop.Token));
+        var state=JsonFiles.Read<ChatArchiveTask>(TaskFile);string stage=Path.Combine(state.Work,"reader");var completed=Directory.GetFiles(stage,"*",SearchOption.AllDirectories).ToDictionary(p=>p,NativeFile.ReadStamp);
+        Assert.NotEmpty(completed);Assert.Contains(reports,p=>p.RuleId=="archive-workspace"&&p.TotalFiles>=32&&p.TotalBytes>0);
+        var next=Update(latest!);foreach(var pair in completed){string path=Path.Combine(next.Reading!,Path.GetRelativePath(stage,pair.Key));if(Path.GetFileName(path).StartsWith("fixture-",StringComparison.Ordinal))Assert.Equal(pair.Value,NativeFile.ReadStamp(path));}
+    }
     [Fact]public void InvalidProjectIdentityCannotCreateWorkspace(){var p=Project() with{Id="../outside"};Assert.Throws<InvalidDataException>(()=>Update(p));Assert.False(Directory.Exists(p.BackupRoot));}
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
     private static void Database(string path,string sql){Assert.Equal(0,sqlite3_open_v2(path,out nint handle,6,0));try{Assert.Equal(0,sqlite3_exec(handle,sql,0,0,0));}finally{sqlite3_close_v2(handle);}}
