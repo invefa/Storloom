@@ -14,6 +14,9 @@ public sealed partial class ShellWindow {
     private WrapPanel chatFooter = null!;
     private DataGrid chatList = null!;
     private TextBlock chatTaskTitle=null!;
+    private TabControl chatSections=null!;
+    private Grid chatWorkspace=null!;
+    private bool syncingChatSections;
     private TextBlock accountNotice = null!;
     private Button chatNext = null!;
     private Button? chatResume, chatUpdate;
@@ -25,28 +28,40 @@ public sealed partial class ShellWindow {
     private bool readingComplete;
     private ChatExportResult? latestExportResult;
     private void BuildChats() {
-        var layout = Page("chats", "ChatTitle", "ChatLead", View.Auto, View.Fill, View.Auto);
+        var layout = Page("chats", "ChatTitle", "ChatLead", View.Fill);
         LoadArchiveProjects();
-        var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,0)};
-        var home=Button("ArchiveHome",()=>{chatStep=-1;RenderChatStage();});home.Name="archive_home_nav";entries.Children.Add(home);
-        var add=Button("ArchiveCreate",()=>{chatStep=0;activeChat=null;pendingArchive=null;directChatSource=false;SetCapturedKey(null);RenderChatStage();},true);add.Name="account_add_nav";entries.Children.Add(add);
+        var host=new Grid();View.Add(layout,host,1);
+        chatSections=new TabControl{Name="archive_sections",Background=Brushes.Transparent};
+        chatSections.Items.Add(new TabItem{Header=L.T("ArchiveHome"),Name="archive_home_tab",Style=(Style)FindResource("SectionTab")});
+        chatSections.Items.Add(new TabItem{Header=L.T("ArchiveCreate"),Name="account_add_tab",Style=(Style)FindResource("SectionTab")});
+        host.Children.Add(chatSections);
+        var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top};host.Children.Add(entries);
         var importMenu=new ContextMenu();var import=Button("ConnectExisting",()=>importMenu.IsOpen=true);importMenu.PlacementTarget=import;import.ContextMenu=importMenu;
         void ImportEntry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);importMenu.Items.Add(entry);}
         ImportEntry("OpenChatBackup",OpenChatBackup);ImportEntry("ConnectReader",ConnectReader);ImportEntry("StoreLoad",ConnectStore);entries.Children.Add(import);
         var more=new ContextMenu();var moreButton=Button("ArchiveTools",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
         void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
         Entry("ChatSettings",ConfigureChats);Entry("KeyLibrary",OpenKeyLibrary);Entry("RestoreChatBackup",RestoreChatBackup);Entry("StoreMaintenance",()=>{chatStep=5;RenderChatStage();});Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
-        ((StackPanel)layout.Children[0]).Children.Add(entries);
-        chatTaskTitle=View.Text("",14);chatTaskTitle.Margin=new Thickness(0,6,0,12);View.Add(layout,chatTaskTitle,1);
-        chatContent = new Grid(); View.Add(layout, View.Card(chatContent, 20), 2);
-        chatFooter = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
-        View.Add(layout, chatFooter, 3); RenderChatStage();
+        chatWorkspace=View.Grid(View.Auto,View.Fill,View.Auto);chatWorkspace.Margin=new Thickness(0,12,0,0);
+        chatTaskTitle=View.Text("",14);chatTaskTitle.Margin=new Thickness(0,6,0,12);View.Add(chatWorkspace,chatTaskTitle,0);
+        chatContent=new Grid();View.Add(chatWorkspace,View.Card(chatContent,20),1);
+        chatFooter=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,16,0,0)};View.Add(chatWorkspace,chatFooter,2);
+        chatSections.SelectionChanged+=(_,e)=>{
+            if(syncingChatSections||!ReferenceEquals(e.Source,chatSections))return;
+            if(chatSections.SelectedIndex==1){chatStep=0;activeChat=null;pendingArchive=null;directChatSource=false;SetCapturedKey(null);}else chatStep=-1;
+            RenderChatStage();
+        };
+        RenderChatStage();
     }
     private void RenderChatStage() {
         if(readingRootInput!=null&&pendingArchive!=null)pendingArchive=pendingArchive with{ReadingRoot=readingRootInput.Text};readingRootInput=null;
         chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null; chatUpdate = null;
-        var home=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="archive_home_nav");if(home!=null)home.Visibility=Visibility.Visible;
-        var add=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="account_add_nav");if(add!=null)add.SetResourceReference(FrameworkElement.StyleProperty,chatStep<0?"PrimaryButton":typeof(Button));
+        syncingChatSections=true;
+        try{
+            int selected=chatStep==0?1:chatStep<0||chatStep==5?0:Math.Max(0,chatSections.SelectedIndex);
+            foreach(TabItem item in chatSections.Items)item.Content=null;
+            chatSections.SelectedIndex=selected;((TabItem)chatSections.Items[selected]).Content=chatWorkspace;
+        }finally{syncingChatSections=false;}
         chatTaskTitle.Text=chatStep switch{0=>L.T("SelectAccount"),1=>L.T("AccountTasksTitle",activeChat?.Account??""),6=>L.T("RawTaskTitle",activeChat?.Account??""),2 or 4=>L.T("ReadingTaskTitle",activeChat?.Account??""),3=>L.T("ArchiveFinished"),5=>L.T("StoreMaintenance"),_=>""};
         chatTaskTitle.Visibility=chatStep<0?Visibility.Collapsed:Visibility.Visible;
         if(chatStep<0)BuildArchiveHome();else if(chatStep==5)BuildStores();else if(chatStep==4)BuildArchiveAccess();else if (chatStep == 0) BuildChatAccounts(); else if(chatStep==6)BuildRawBackup();else if (chatStep == 1) BuildChatTasks(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();

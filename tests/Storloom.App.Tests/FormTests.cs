@@ -375,7 +375,7 @@ public sealed class FormTests {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true,ChatAutoDiscover=false});
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
-            window.Show();window.Navigate("chats");Pump();Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveCreate"))).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();
+            window.Show();window.Navigate("chats");Pump();Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections").SelectedIndex=1;Pump();
             var task=(Task)typeof(ShellWindow).GetMethod("DiscoverChats",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[fixture])!;
             Wait(AsResult(task));Pump();
             var notice=Descendants(window).OfType<TextBlock>().Single(t=>t.Name=="account_discovery_notice");Assert.Equal(L.T("DiscoveryEmpty"),notice.Text);
@@ -794,7 +794,7 @@ public sealed class FormTests {
             verification.IsChecked=true;verification.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.True(JsonFiles.Read<ChatArchiveTask>(pendingFile).VerifyBackupBeforeReading);
             typeof(ShellWindow).GetMethod("SaveArchive",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(window,new object[]{selected});
             Capture(window,"archive-update-options-"+theme);
-            Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveCreate"))).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();Assert.True(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts").IsVisible);
+            Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections").SelectedIndex=1;Pump();Assert.True(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts").IsVisible);
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
     [Fact]
@@ -1070,7 +1070,7 @@ public sealed class FormTests {
         var service=new TransferService();var backup=service.Execute(service.Plan(source,raw),Path.Combine(fixture,"journals"));
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:Path.Combine(fixture,"data")){ShowInTaskbar=false};
         try {
-            window.Show();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            window.Show();window.Navigate("chats");Pump();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             type.GetField("activeChat",flags)!.SetValue(window,new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));
             var load=(Task)type.GetMethod("UseChatBackup",flags)!.Invoke(window,new object[]{backup.Manifest})!;
             bool dispatched=false;window.Dispatcher.BeginInvoke(new Action(()=>dispatched=true));Pump();Assert.True(dispatched);Wait(AsResult(load));
@@ -1499,6 +1499,39 @@ public sealed class FormTests {
             var dialog=(Window)Activator.CreateInstance(type.Assembly.GetType("Storloom.App.PreferencesWindow")!,[prefs,Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false])!;
             try{dialog.ShowInTaskbar=false;dialog.Show();Pump();var tabs=Descendants(dialog).OfType<TabControl>().Single();Assert.Equal(3,tabs.Items.Count);for(int tab=0;tab<2;tab++){tabs.SelectedIndex=tab;Pump();Assert.All(Descendants(dialog).OfType<ScrollViewer>().Where(v=>v.IsVisible&&v.Content is Grid),v=>Assert.InRange(v.ScrollableHeight,0,1));Capture(dialog,"grouped-preferences-"+tab+"-"+theme);}}finally{dialog.Close();}
         }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory][InlineData(AppTheme.Light)][InlineData(AppTheme.Dark)][InlineData(AppTheme.OneDark)]
+    public void AccountNavigationUsesTabsAndSearchRootsFillTheirEditor(AppTheme theme)=>OnUi(()=>{
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true,ChatAutoDiscover=false});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false,Width=850,Height=650};
+        try{
+            window.Show();window.Navigate("chats");Pump();var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections");Assert.Equal(2,tabs.Items.Count);
+            for(int cycle=0;cycle<2;cycle++){
+                tabs.SelectedIndex=1;Pump();Assert.True(((TabItem)tabs.Items[1]).IsSelected);Assert.False(((TabItem)tabs.Items[0]).IsSelected);Assert.True(Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="chat_accounts").IsVisible);
+                tabs.SelectedIndex=0;Pump();Assert.True(((TabItem)tabs.Items[0]).IsSelected);Assert.False(((TabItem)tabs.Items[1]).IsSelected);Assert.True(Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="managed_archives").IsVisible);
+            }
+            Capture(window,"archive-tabs-"+theme);
+            var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ChatSettingsWindow")!;var dialog=(Window)Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public,null,[new AppPreferences{ChatSearchRoots=[Path.Combine(fixture,"one"),Path.Combine(fixture,"two")]}],null)!;
+            try{
+                dialog.ShowInTaskbar=false;dialog.Show();Pump();var roots=Descendants(dialog).OfType<TextBox>().Single(t=>t.Name=="account_search_roots");Assert.True(roots.AcceptsReturn);Assert.True(roots.ActualHeight>90);Assert.Equal(VerticalAlignment.Stretch,roots.VerticalAlignment);
+                double original=roots.ActualHeight;dialog.Height+=100;Pump();Assert.True(roots.ActualHeight>original+80);Capture(dialog,"search-roots-stretch-"+theme);
+            }finally{dialog.Close();}
+            var surface=((SolidColorBrush)Theme.Brush("Surface")).Color;var idle=((SolidColorBrush)Theme.Brush("ScrollGrip")).Color;var hover=((SolidColorBrush)Theme.Brush("ScrollGripHover")).Color;var drag=((SolidColorBrush)Theme.Brush("ScrollGripDragging")).Color;
+            Assert.InRange(Contrast(idle,surface),1.35,2.3);Assert.True(Contrast(hover,surface)>Contrast(idle,surface));Assert.True(Contrast(drag,surface)>Contrast(hover,surface));
+            foreach(string key in new[]{"ScrollThumb","HorizontalScrollThumb"}){var thumb=new System.Windows.Controls.Primitives.Thumb{Style=(Style)Application.Current.FindResource(key)};Assert.True(ControlFeedback.GetEnabled(thumb));Assert.Equal(idle,((SolidColorBrush)thumb.Background).Color);}
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    private sealed class ScrollFeedbackThumb:System.Windows.Controls.Primitives.Thumb {public void Dragging(bool value)=>IsDragging=value;}
+    [Theory][InlineData("ScrollThumb")][InlineData("HorizontalScrollThumb")]
+    public void ScrollThumbRetainsDragFeedbackOutsideItsBoundsAndResets(string style)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});var thumb=new ScrollFeedbackThumb{Style=(Style)Application.Current.FindResource(style),Width=90,Height=90};var window=new Window{Content=thumb,Width=140,Height=140,ShowInTaskbar=false};
+        try{window.Show();Pump();var grip=Descendants(thumb).OfType<Border>().Single(b=>b.Name=="grip");Assert.Equal(((SolidColorBrush)Theme.Brush("ScrollGrip")).Color,((SolidColorBrush)grip.Background).Color);
+            thumb.Dragging(true);thumb.RaiseEvent(new System.Windows.Controls.Primitives.DragStartedEventArgs(0,0){RoutedEvent=System.Windows.Controls.Primitives.Thumb.DragStartedEvent});thumb.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice,0){RoutedEvent=System.Windows.Input.Mouse.MouseLeaveEvent});
+            Assert.Equal(((SolidColorBrush)Theme.Brush("ScrollGripDragging")).Color,((SolidColorBrush)grip.Background).Color);
+            thumb.Dragging(false);thumb.RaiseEvent(new System.Windows.Controls.Primitives.DragCompletedEventArgs(0,0,false){RoutedEvent=System.Windows.Controls.Primitives.Thumb.DragCompletedEvent});Assert.Equal(((SolidColorBrush)Theme.Brush("ScrollGrip")).Color,((SolidColorBrush)grip.Background).Color);
+        }finally{window.Close();}
     });
 
 }

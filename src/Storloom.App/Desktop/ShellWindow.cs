@@ -236,7 +236,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         navigation.IsEnabled = menu.IsEnabled = false;
         bool previousEnabled = operationButton?.IsEnabled ?? true;
         if (operationButton != null) operationButton.IsEnabled = true;
-        var disabled = Controls(pageHost).Where(c => c != operationButton && c.IsEnabled && c is System.Windows.Controls.Button or TextBox or ComboBox or CheckBox or PasswordBox or DataGrid).ToArray();
+        var disabled = Controls(pageHost).Where(c => c != operationButton && c.IsEnabled && (c is System.Windows.Controls.Button or TextBox or ComboBox or CheckBox or PasswordBox or DataGrid || c is TabItem{IsSelected:false})).ToArray();
         foreach (var control in disabled) control.IsEnabled = false;
         object? previousContent = operationButton?.Content;
         if (operationButton != null) operationButton.Content = L.T("Cancel");

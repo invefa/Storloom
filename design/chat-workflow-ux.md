@@ -42,3 +42,5 @@ Independent reading tasks hold read locks on the closed client databases and tra
 Packed storage still imports or synchronizes from a completed reader; native client parsing is not connected directly to packed import. Associated packed material appears under the same account. If its source reader has advanced, the row explicitly reports pending synchronization and opens the newest reader rather than presenting stale packed data as current. Format actions provide an explicit synchronization route.
 
 Forms use compact grouping and fixed action footers. Preferences separate general, tasks/logs and rules; account location settings separate search and client programs. Main task forms fit regular and narrow windows without whole-form scrolling. Long lists and exceptionally small windows retain scrolling with a dedicated gutter, never covering controls.
+
+2.3 uses separate Archive list and Add account tabs. Account task selection and setup retain sequential navigation. Connecting materials and tools remain action menus.

@@ -23,6 +23,7 @@ public static class ControlFeedback {
             if (control is TextBox || !control.IsKeyboardFocusWithin) control.SetValue(PressedProperty, false);
             Paint(control, control is not TextBox);
         };
+        if (control is Thumb thumb) { thumb.DragStarted += (_, _) => Paint(thumb,true); thumb.DragCompleted += (_, _) => Paint(thumb,true); }
         if (control is ToggleButton toggle) { toggle.Checked += (_, _) => Paint(control, true); toggle.Unchecked += (_, _) => Paint(control, true); }
         if (control is ListBoxItem item) { item.Selected += (_, _) => Paint(control, true); item.Unselected += (_, _) => Paint(control, true); }
     }
@@ -41,14 +42,14 @@ public static class ControlFeedback {
     private static Color Color(string key) => ((SolidColorBrush)Theme.Brush(key)).Color;
     private static void Paint(Control control, bool animate) {
         if (!GetEnabled(control)) return;
-        string name = control is CheckBox ? "box" : control is ListBoxItem ? "item" : "frame";
+        string name = control is Thumb ? "grip" : control is CheckBox ? "box" : control is ListBoxItem ? "item" : "frame";
         var frame = Frame(control, name); if (frame == null) return;
-        var color = control is CheckBox check ? Color(check.IsChecked == true ? "Accent" : "Surface") :
+        var color = control is Thumb scroll ? Color(scroll.IsDragging ? "ScrollGripDragging" : scroll.IsMouseOver ? "ScrollGripHover" : "ScrollGrip") : control is CheckBox check ? Color(check.IsChecked == true ? "Accent" : "Surface") :
             control is ListBoxItem item ? Color(item.IsSelected ? "Selection" : "Sidebar") :
             (control.Background as SolidColorBrush)?.Color ?? Color("Surface");
         bool passiveEditor = control is TextBox editor && (editor.AcceptsReturn || editor.IsReadOnly || editor.IsKeyboardFocusWithin);
         if (passiveEditor) animate = false;
-        if (!passiveEditor && control.IsEnabled && (control.IsMouseOver || (bool)control.GetValue(PressedProperty))) {
+        if (control is not Thumb && !passiveEditor && control.IsEnabled && (control.IsMouseOver || (bool)control.GetValue(PressedProperty))) {
             if (color.A == 0) color = ParentColor(control);
             double amount = (bool)control.GetValue(PressedProperty) ? .18 : .08;
             var ink = Color("Ink");

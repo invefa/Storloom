@@ -26,7 +26,7 @@ internal sealed class ChatSettingsWindow : ThemeWindow {
         var error=View.Text("",color:"Muted");stack.Children.Add(error);
         var searchLayout=new Grid{Margin=new Thickness(12)};var children=stack.Children.Cast<UIElement>().ToArray();stack.Children.Clear();
         foreach(var child in children){int index=searchLayout.RowDefinitions.Count;searchLayout.RowDefinitions.Add(new RowDefinition{Height=ReferenceEquals(child,roots)?View.Fill:View.Auto});View.Add(searchLayout,child,index);}
-        roots.Height=double.NaN;roots.MinHeight=0;searchTab.Content=searchLayout;
+        roots.Height=double.NaN;roots.MinHeight=0;roots.VerticalAlignment=VerticalAlignment.Stretch;roots.Padding=new Thickness(8,6,8,6);roots.Margin=new Thickness(0,0,0,10);roots.Name="account_search_roots";searchTab.Content=searchLayout;
         var buttons=View.Row(View.Button("Cancel",()=>Close()),View.Button("Apply",()=>{
             try {
                 var paths=roots.Text.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries).Select(PathPolicy.Normalize).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
