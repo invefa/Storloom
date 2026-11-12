@@ -21,6 +21,7 @@ public sealed class OperationPanel : Grid {
     public Button CancelButton { get; }
     public event Action<bool>? DebugLoggingChanged;
     public bool Follow => FollowToggle.IsChecked == true;
+    public bool IsFollowing => Follow && !followSuspended;
     public bool Expanded { get; private set; }
     public TextBlock StatusText=>state;
     public CheckBox WrapToggle {get;}=new();
@@ -39,7 +40,7 @@ public sealed class OperationPanel : Grid {
     private int archiveStep;
     private double phaseStart;
     private long phaseStartDone;
-    private bool followPending;
+    private bool followPending,followSuspended;
     private readonly Queue<string> retained = new();
     private int retainedCharacters;
     private bool earlierLinesDropped;
@@ -65,7 +66,10 @@ public sealed class OperationPanel : Grid {
         WrapToggle.Checked+=(_,_)=>WrapChanged();WrapToggle.Unchecked+=(_,_)=>WrapChanged();AutoShowToggle.Checked+=(_,_)=>OptionsChanged?.Invoke();AutoShowToggle.Unchecked+=(_,_)=>OptionsChanged?.Invoke();AutoCollapseToggle.Checked+=(_,_)=>OptionsChanged?.Invoke();AutoCollapseToggle.Unchecked+=(_,_)=>OptionsChanged?.Invoke();
         progress.SetResourceReference(Control.ForegroundProperty, "AccentText"); progress.SetResourceReference(Control.BackgroundProperty, "Line");
         progress.SetResourceReference(FrameworkElement.StyleProperty, "OperationProgress");
-        FollowToggle.Checked += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { if (Follow) Log.ScrollToEnd(); }));
+        FollowToggle.Checked += (_, _) => ResumeFollowing();
+        Log.LostKeyboardFocus+=(_,_)=>Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>{if(!Log.IsKeyboardFocusWithin&&!Log.IsMouseCaptureWithin)ResumeFollowing();}));
+        Log.MouseLeave+=(_,_)=>{if(!Log.IsKeyboardFocusWithin&&!Log.IsMouseCaptureWithin)ResumeFollowing();};
+        Log.LostMouseCapture+=(_,_)=>{if(!Log.IsKeyboardFocusWithin&&!Log.IsMouseOver)ResumeFollowing();};
         Log.PreviewMouseWheel += (_, _) => PauseFollowing();
         Log.PreviewMouseLeftButtonDown += (_, _) => PauseFollowing();
         Log.PreviewKeyDown += (_, e) => { if (e.Key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End) PauseFollowing(); };
@@ -74,7 +78,12 @@ public sealed class OperationPanel : Grid {
         DebugToggle.Unchecked += (_, _) => { AddLog(L.T("DebugDisabled")); DebugLoggingChanged?.Invoke(false); };
     }
     public void ToggleFollowing() => FollowToggle.IsChecked = !Follow;
-    public void PauseFollowing() => FollowToggle.IsChecked = false;
+    public void PauseFollowing() => followSuspended = true;
+    private void ResumeFollowing(){followSuspended=false;QueueFollow();}
+    private void QueueFollow(){
+        if(!IsFollowing||followPending)return;followPending=true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>{followPending=false;if(IsFollowing)Log.ScrollToEnd();}));
+    }
     public void ToggleExpanded() {
         Expanded = !Expanded; Log.Visibility = Expanded ? Visibility.Visible : Visibility.Collapsed;
         collapse.Content = View.Icon(Expanded ? "M 1,4 L 6,9 11,4" : "M 1,9 L 6,4 11,9",12);
@@ -92,15 +101,13 @@ public sealed class OperationPanel : Grid {
         Log.AppendText(line);
         if (Log.SelectionStart != start || Log.SelectionLength != length) Log.Select(start, length);
         // Keep a bounded live tail. Operation journals remain on disk. Never trim while reading history.
-        if (Follow && Log.Text.Length > 300000) Log.Text = Log.Text[^200000..];
-        if (Follow && !followPending) {
-            followPending = true;
-            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { followPending = false; if (Follow) Log.ScrollToEnd(); }));
-        } else if (!Follow) Log.ScrollToVerticalOffset(offset);
+        if (IsFollowing && Log.Text.Length > 300000) Log.Text = Log.Text[^200000..];
+        if(IsFollowing)QueueFollow();else Log.ScrollToVerticalOffset(offset);
     }
     public void RestoreHistory(OperationPanel previous){
         Log.Text=previous.Log.Text;retained.Clear();foreach(string line in previous.retained)retained.Enqueue(line);
         retainedCharacters=previous.retainedCharacters;earlierLinesDropped=previous.earlierLinesDropped;
+        FollowToggle.IsChecked=previous.Follow;ResumeFollowing();
     }
     public void AddDiagnostic(ChatDiagnostic diagnostic) {
         if (DebugToggle.IsChecked != true) return;

@@ -73,24 +73,24 @@
   <Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="BorderThickness" Value="0"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabControl">
    <Grid KeyboardNavigation.TabNavigation="Local"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <TabPanel IsItemsHost="True" Background="Transparent" Panel.ZIndex="1" KeyboardNavigation.TabIndex="1"/>
+    <WrapPanel IsItemsHost="True" Background="Transparent" Panel.ZIndex="1" KeyboardNavigation.TabIndex="1" KeyboardNavigation.DirectionalNavigation="Contained"/>
     <Border Grid.Row="1" Background="{TemplateBinding Background}" BorderThickness="0"><ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" SnapsToDevicePixels="True"/></Border>
    </Grid>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style TargetType="TabItem">
   <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-  <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Padding" Value="11,7"/><Setter Property="Margin" Value="0,0,3,0"/>
-  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Border x:Name="head" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="3,3,0,0"><ContentPresenter ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers>
-   <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="head" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
+  <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Padding" Value="11,7"/><Setter Property="Margin" Value="0,0,6,0"/>
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Border x:Name="head" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="3"><ContentPresenter ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers>
+   <Trigger SourceName="head" Property="IsMouseOver" Value="True"><Setter TargetName="head" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
    <Trigger Property="IsSelected" Value="True"><Setter TargetName="head" Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=TabControl}}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
    <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></Trigger>
   </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style x:Key="SectionTab" TargetType="TabItem" BasedOn="{StaticResource {x:Type TabItem}}">
-  <Setter Property="Padding" Value="10,7"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
-  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Grid><Border x:Name="head" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="3"><ContentPresenter ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><Border x:Name="selected" Height="2" Margin="10,0" Background="{DynamicResource AccentText}" CornerRadius="1" VerticalAlignment="Bottom" Visibility="Collapsed"/></Grid><ControlTemplate.Triggers>
-   <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="head" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
+  <Setter Property="Padding" Value="11,7"/><Setter Property="Margin" Value="0,0,6,0"/><Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Grid><Border x:Name="head" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="3"><ContentPresenter ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><Border x:Name="selected" Height="2" Margin="11,0" Background="{DynamicResource AccentText}" CornerRadius="1" VerticalAlignment="Bottom" Visibility="Collapsed"/></Grid><ControlTemplate.Triggers>
+   <Trigger SourceName="head" Property="IsMouseOver" Value="True"><Setter TargetName="head" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
    <Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="selected" Property="Visibility" Value="Visible"/></Trigger>
    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".45"/></Trigger>
   </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>

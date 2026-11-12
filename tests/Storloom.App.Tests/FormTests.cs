@@ -85,19 +85,21 @@ public sealed class FormTests {
     [Theory]
     [InlineData(AppTheme.Light)]
     [InlineData(AppTheme.OneDark)]
-    public void LogStopsFollowingOnManualInputAndPreservesSelection(AppTheme theme) => OnUi(() => {
+    public void LogPausesTemporarilyAndResumesOnFocusLossUnlessExplicitlyDisabled(AppTheme theme) => OnUi(() => {
         Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
-        var panel=new OperationPanel();panel.ToggleExpanded();var window=new ThemeWindow("Isolated log fixture",1000,500){ShowInTaskbar=false};window.Body.Children.Add(panel);
+        var panel=new OperationPanel();panel.ToggleExpanded();var window=new ThemeWindow("Isolated log fixture",1000,500){ShowInTaskbar=false};var layout=new DockPanel();var outside=new Button{Content="Outside log"};DockPanel.SetDock(outside,Dock.Top);layout.Children.Add(outside);layout.Children.Add(panel);window.Body.Children.Add(layout);
         try {
             window.Show();Pump();panel.Start();
             for(int i=0;i<150;i++)panel.AddLog("fixture log "+i);
-            Pump();Assert.True(panel.Follow);Assert.True(panel.Log.VerticalOffset>0);
-            panel.Log.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice,Environment.TickCount,120){RoutedEvent=UIElement.PreviewMouseWheelEvent});
-            Assert.False(panel.Follow);panel.Log.ScrollToVerticalOffset(0);panel.Log.Select(15,12);Pump();
+            Pump();Assert.True(panel.Follow);Assert.True(panel.Log.VerticalOffset>0,"Expected log tail; offset="+panel.Log.VerticalOffset);
+            panel.Log.Focus();Pump();panel.Log.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice,Environment.TickCount,120){RoutedEvent=UIElement.PreviewMouseWheelEvent});
+            Assert.True(panel.Follow);Assert.False(panel.IsFollowing);panel.Log.ScrollToVerticalOffset(0);panel.Log.Select(15,12);Pump();
             string selected=panel.Log.SelectedText;
             panel.AddLog("appended while selecting");Pump();
             Assert.Equal(selected,panel.Log.SelectedText);Assert.InRange(panel.Log.VerticalOffset,0,1);
-            panel.ToggleFollowing();Pump();Assert.True(panel.Follow);Assert.True(panel.Log.VerticalOffset>0);
+            outside.Focus();Pump();Pump();Assert.True(panel.Follow);Assert.True(panel.IsFollowing,"Following did not resume; focus="+panel.Log.IsKeyboardFocusWithin);Assert.True(panel.Log.VerticalOffset>0,"Expected log tail; offset="+panel.Log.VerticalOffset);
+            panel.ToggleFollowing();Assert.False(panel.Follow);panel.Log.Focus();panel.PauseFollowing();panel.Log.ScrollToVerticalOffset(0);Pump();panel.AddLog("manual preference stays off");outside.Focus();Pump();Pump();Assert.False(panel.Follow);Assert.False(panel.IsFollowing);Assert.InRange(panel.Log.VerticalOffset,0,1);
+            panel.ToggleFollowing();Pump();Assert.True(panel.Follow);Assert.True(panel.IsFollowing,"Following did not resume; focus="+panel.Log.IsKeyboardFocusWithin);Assert.True(panel.Log.VerticalOffset>0,"Expected log tail; offset="+panel.Log.VerticalOffset);
             panel.ToggleExpanded();Assert.False(panel.Expanded);panel.ToggleExpanded();Assert.True(panel.Expanded);
             Capture(window,"log-"+theme);
         } finally {window.Close();}
@@ -162,7 +164,7 @@ public sealed class FormTests {
             }
             Assert.True(scroll.ScrollableWidth>0);Wheel(table,120);Assert.True(scroll.HorizontalOffset>0);double right=scroll.HorizontalOffset;
             Wheel(table,-60);Assert.InRange(scroll.HorizontalOffset,0,right-0.1);Assert.Equal(0,scroll.VerticalOffset);double retained=scroll.HorizontalOffset;
-            Assert.True(operation.Follow);Wheel(operation.Log,120);Assert.True(operation.Log.HorizontalOffset>0);Assert.False(operation.Follow);Assert.Equal(retained,scroll.HorizontalOffset);
+            Assert.True(operation.Follow);Wheel(operation.Log,120);Assert.True(operation.Log.HorizontalOffset>0);Assert.True(operation.Follow);Assert.False(operation.IsFollowing);Assert.Equal(retained,scroll.HorizontalOffset);
             Wheel(table,-1200);Assert.InRange(scroll.HorizontalOffset,0,0.1);Capture(window,"horizontal-wheel-"+theme);
         } finally {window.Close();}
     });
@@ -1532,6 +1534,24 @@ public sealed class FormTests {
             Assert.Equal(((SolidColorBrush)Theme.Brush("ScrollGripDragging")).Color,((SolidColorBrush)grip.Background).Color);
             thumb.Dragging(false);thumb.RaiseEvent(new System.Windows.Controls.Primitives.DragCompletedEventArgs(0,0,false){RoutedEvent=System.Windows.Controls.Primitives.Thumb.DragCompletedEvent});Assert.Equal(((SolidColorBrush)Theme.Brush("ScrollGrip")).Color,((SolidColorBrush)grip.Background).Color);
         }finally{window.Close();}
+    });
+
+    [Theory][InlineData(AppTheme.Light)][InlineData(AppTheme.Dark)][InlineData(AppTheme.OneDark)]
+    public void TabHeadersKeepSymmetricPaddingAndRoundedEdgesAcrossSelectionAndWrapping(AppTheme theme)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});var tabs=new TabControl();
+        foreach(string text in new[]{"归档列表","添加账号","任务与日志","规则集"})tabs.Items.Add(new TabItem{Header=text,Content=new Border{Background=Theme.Brush("Surface"),MinHeight=120}});
+        var window=new ThemeWindow("Tab header fixture",650,360){ShowInTaskbar=false};window.Body.Children.Add(tabs);
+        try{window.Show();Pump();foreach(bool section in new[]{false,true}){
+                foreach(TabItem item in tabs.Items)item.Style=(Style)Application.Current.FindResource(section?"SectionTab":typeof(TabItem));
+                foreach(double width in new[]{650d,310d}){window.Width=width;Pump();foreach(TabItem item in tabs.Items){tabs.SelectedItem=item;Pump();
+                        var head=(Border)item.Template.FindName("head",item);var label=Descendants(head).OfType<ContentPresenter>().Single();var box=label.TransformToAncestor(head).TransformBounds(new Rect(0,0,label.ActualWidth,label.ActualHeight));
+                        Assert.InRange(Math.Abs(box.Left-(head.ActualWidth-box.Right)),0,.1);Assert.True(box.Left>=10);Assert.InRange(Math.Abs(head.ActualWidth-item.DesiredSize.Width+item.Margin.Left+item.Margin.Right),0,1);
+                        Assert.Equal(head.CornerRadius.TopLeft,head.CornerRadius.TopRight);Assert.Equal(head.CornerRadius.TopLeft,head.CornerRadius.BottomLeft);Assert.Equal(head.CornerRadius.TopLeft,head.CornerRadius.BottomRight);
+                        var headBox=head.TransformToAncestor(tabs).TransformBounds(new Rect(0,0,head.ActualWidth,head.ActualHeight));Assert.True(headBox.Right<=tabs.ActualWidth+.1);
+                        foreach(TabItem other in tabs.Items){if(ReferenceEquals(item,other))continue;var otherHead=(Border)other.Template.FindName("head",other);var otherBox=otherHead.TransformToAncestor(tabs).TransformBounds(new Rect(0,0,otherHead.ActualWidth,otherHead.ActualHeight));Assert.False(headBox.IntersectsWith(otherBox));}
+                    }}
+                window.Width=650;Pump();Capture(window,"tab-header-edges-"+section+"-"+theme);
+            }}finally{window.Close();}
     });
 
 }
