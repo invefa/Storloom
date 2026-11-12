@@ -27,7 +27,7 @@ public sealed partial class ShellWindow {
             TransferService.Child(source, Path.GetRelativePath(directory, database)), new FileInfo(database).Length);
         return (account, archive: ReadChatArchive(dialog.FileName, account, manifest));
         }, token);
-        activeChat = selected.account; activeManifest = dialog.FileName; preparedArchive = selected.archive; SetCapturedKey(null);
+        directChatSource=false; activeChat = selected.account; activeManifest = dialog.FileName; preparedArchive = selected.archive; SetCapturedKey(null);
         readingDirectory = exportReport = null;RegisterCurrentArchive();chatStep = -1; RenderChatStage(); Navigate("chats");
         });
     }
@@ -57,16 +57,20 @@ public sealed partial class ShellWindow {
             preparedArchive = ReadChatArchive(activeManifest, Account());
         return preparedArchive;
     }
-    private string ArchiveDirectory() => ChatArchive().Directory;
-    private ChatLocation ArchiveAccount() => ChatArchive().Location;
-    private bool NeedsKey() => ChatArchive().Encrypted;
+    private string ArchiveDirectory() => directChatSource ? Account().Directory : ChatArchive().Directory;
+    private ChatLocation ArchiveAccount() => directChatSource ? Account() : ChatArchive().Location;
+    private bool NeedsKey() {
+        if(!directChatSource)return ChatArchive().Encrypted;
+        using var input=File.OpenRead(Account().Database);byte[] prefix=new byte[Math.Min(1040,input.Length)];input.ReadExactly(prefix);
+        return !prefix.AsSpan().StartsWith("SQLite format 3\0"u8)&&!(Account().Platform==ChatPlatform.QQ&&prefix.Length>=1040&&prefix.AsSpan(1024).StartsWith("SQLite format 3\0"u8));
+    }
     private async Task UseChatBackup(string manifest) => await Run(async token => {
-        var account = Account(); var archive = await Task.Run(() => ReadChatArchive(manifest, account), token);
+        directChatSource=false; var account = Account(); var archive = await Task.Run(() => ReadChatArchive(manifest, account), token);
         activeManifest = manifest; preparedArchive = archive; chatStep = 2; RenderChatStage();
     });
 
     private async Task BackupChat() {
-        var location = Account(); string root = backupInput?.Text.Trim() ?? "";
+        directChatSource=false; var location = Account(); string root = backupInput?.Text.Trim() ?? "";
         if (root == "") throw new InvalidOperationException(L.T("NoRoot"));
         _ = PathPolicy.Normalize(root);
         string[] clients = location.Platform == ChatPlatform.QQ ? ["QQ"] : ["WeChat", "Weixin"];
@@ -100,10 +104,14 @@ public sealed partial class ShellWindow {
     private async Task CaptureActive() {
         var location = ArchiveAccount(); bool qq = location.Platform == ChatPlatform.QQ;
         if (!Confirm(L.T(qq ? "QQActiveKeyConfirm" : "ActiveKeyConfirm"))) return;
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = qq ? "QQ.exe|QQ.exe" : "Weixin.exe|Weixin.exe" };
-        if (PickerHistory.Show(dialog,this,"client-executable-"+(qq?"qq":"wechat")) != true) return;
+        string? executable=ChatPaths.Executable(location.Platform,qq?preferences.QQExecutable:preferences.WeChatExecutable);
+        if(executable==null){
+            var dialog = new Microsoft.Win32.OpenFileDialog { Filter = qq ? "QQ.exe|QQ.exe" : "Chat client|Weixin.exe;WeChat.exe" };
+            if (PickerHistory.Show(dialog,this,"client-executable-"+(qq?"qq":"wechat")) != true) return;
+            executable=dialog.FileName;
+        }
         await Run(async token => {
-            byte[] key = await CaptureWorker.Capture(location, dialog.FileName, token, ChatDiagnostics());
+            byte[] key = await CaptureWorker.Capture(location, executable, token, ChatDiagnostics());
             SetCapturedKey(key); RenderChatStage(); status.Text = L.T("KeyReady");
         });
     }
@@ -113,7 +121,7 @@ public sealed partial class ShellWindow {
     }
 
     private async Task IncrementalBackupChat() {
-        var location = Account(); string root = backupInput?.Text.Trim() ?? "";
+        directChatSource=false; var location = Account(); string root = backupInput?.Text.Trim() ?? "";
         if (string.IsNullOrEmpty(root)) throw new InvalidOperationException(L.T("NoRoot"));
         string? previous = verifiedBackups.GetValueOrDefault(location.Directory);
         if (previous == null || !File.Exists(previous)) {
@@ -138,14 +146,18 @@ public sealed partial class ShellWindow {
         string directory = View.Folder(this);
         if (directory != "" && Confirm(L.T("UpdateReadingConfirm", directory))) await ExportChatTo(directory, update: true);
     }
-    private Task ExportChat() => CreateArchiveFromSetup();
+    private async Task ExportChat() {
+        if(!directChatSource){await CreateArchiveFromSetup();return;}
+        string parent=View.Folder(this,purpose:"direct-reader-export");if(parent=="")return;
+        await ExportChatTo(null,directTarget:Path.Combine(parent,Account().Platform+"-"+Account().Account+"-reading-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+    }
     private async Task ResumeChat() {
         string directory = View.Folder(this);
         if (directory != "") await ExportChatTo(directory);
     }
-    private async Task ExportChatTo(string? resumeDirectory, bool update = false) {
+    private async Task ExportChatTo(string? resumeDirectory, bool update = false, string? directTarget=null) {
         var account = Account(); string raw = ArchiveDirectory();
-        string target = resumeDirectory ?? raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
+        string target = directTarget ?? resumeDirectory ?? raw + "-reading-" + Guid.NewGuid().ToString("N")[..6];
         VaultPasswordWindow? protection=null;
         if(encryptAfterExport){
             protection=new VaultPasswordWindow(true,true,target){Owner=this};
@@ -164,6 +176,7 @@ public sealed partial class ShellWindow {
             await RunPausable(async token => {
                 var progress = Progress(); ChatReadingUpdateResult? updateResult = null;
                 var result = await Task.Run(() => {
+                    if(directChatSource)return new ChatExporter(ChatWorkers("export",target),useLocalImageConfiguration:true,downloadQQGroupAvatars:preferences.DownloadQQGroupAvatars,defaultReaderDark:Theme.IsDark).Export(raw,target,account.Platform,key,progress,token);
                     if (!update) return new ChatExporter(ChatWorkers("export",target), useLocalImageConfiguration: true, downloadQQGroupAvatars: preferences.DownloadQQGroupAvatars, defaultReaderDark: Theme.IsDark).ExportVerifiedBackup(
                         activeManifest!, target, account.Platform, key, progress, token, verifyBackup: verifyChatBackup, resume: resumeDirectory != null);
                     updateResult = ChatReadingUpdate.Update(activeManifest!, target, account.Platform, key, ChatWorkers("export",target),

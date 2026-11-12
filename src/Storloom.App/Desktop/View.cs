@@ -14,7 +14,7 @@ internal static class View {
         text.SetResourceReference(TextBlock.ForegroundProperty, color); return text;
     }
     public static TextBox Input(string value = "", bool readOnly = false) => new() { Text = value, IsReadOnly = readOnly, Height = 32, VerticalAlignment = VerticalAlignment.Center };
-    public static PasswordBox SecretInput() => new() { MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
+    public static PasswordBox SecretInput() => new() { Height = 32, MinHeight = 32, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch };
     public static Grid Field(string key, FrameworkElement control, double labelWidth = 112) {
         var row = new Grid { Margin = new Thickness(0, 4, 0, 8) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(labelWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition());

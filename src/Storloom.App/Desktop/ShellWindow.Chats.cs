@@ -7,6 +7,7 @@ namespace Storloom.App;
 
 public sealed partial class ShellWindow {
     private List<ChatLocation> locations = [];
+    private bool directChatSource, discoveryStarted;
     private ChatLocation? activeChat;
     private int chatStep=-1;
     private Grid chatContent = null!;
@@ -33,7 +34,7 @@ public sealed partial class ShellWindow {
         entries.Children.Add(Button("ArchiveCreate",()=>{chatStep=0;activeChat=null;SetCapturedKey(null);RenderChatStage();},true));
         var more=new ContextMenu();var moreButton=Button("ArchiveMore",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
         void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
-        Entry("OpenChatBackup",OpenChatBackup);Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
+        Entry("ChatSettings",ConfigureChats);Entry("KeyLibrary",OpenKeyLibrary);Entry("RestoreChatBackup",RestoreChatBackup);Entry("OpenChatBackup",OpenChatBackup);Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
         ((StackPanel)layout.Children[0]).Children.Add(entries);
         var steps = new Grid { Margin = new Thickness(0, 0, 0, 10) }; chatSteps = new TextBlock[3]; chatStepFrames = new Border[3];
         string[] keys = ["ChatStepAccount", "ChatStepBackup", "ChatStepExport"];
@@ -57,22 +58,23 @@ public sealed partial class ShellWindow {
     }
     private void BuildChatAccounts() {
         var grid = View.Grid(View.Auto, View.Auto, View.Auto, View.Fill); chatContent.Children.Add(grid);
+        grid.Loaded+=async(_,_)=>{if(automaticDiscovery&&!discoveryStarted&&preferences.ChatAutoDiscover&&operation==null){discoveryStarted=true;await DiscoverChats(null);}};
         View.Add(grid, View.Text(L.T("AccountHelp"), color: "Muted"), 0);
         var actions = View.Row(AsyncButton("FindAccounts", () => DiscoverChats(null), true), AsyncButton("SelectAccountFolder", async () => {
-            string path = View.Folder(this); if (path != "") await DiscoverChats(path);
-        })); actions.Margin = new Thickness(0, 6, 0, 14); View.Add(grid, actions, 1);
+            string path = View.Folder(this,purpose:"chat-account-select"); if (path != "") await DiscoverChats(path);
+        }), Button("ChatSettings",ConfigureChats)); actions.Margin = new Thickness(0, 6, 0, 14); View.Add(grid, actions, 1);
         chatList = View.Table(("Account", "Account", 0), ("Platform", "Platform", 120), ("AccountSize", "Size", 150), ("Path", "Path", 0));
         accountNotice = View.Text(L.T("DiscoveryHelp"), color: "Muted"); accountNotice.Name = "account_discovery_notice"; View.Add(grid, accountNotice, 2);
         chatList.Name = "chat_accounts"; chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray(); View.Add(grid, chatList, 3);
         chatNext = Button("Next", () => {
             if (chatList.SelectedItem is not AccountRow row) throw new InvalidOperationException(L.T("NoAccountSelected"));
             if (activeChat?.Directory != row.Location.Directory || activeChat?.Platform != row.Location.Platform) SetCapturedKey(null);
-            activeChat = row.Location; activeManifest = null; readingDirectory = exportReport = null; chatStep = 1; RenderChatStage();
+            activeChat = row.Location; directChatSource=false; activeManifest = null; readingDirectory = exportReport = null; chatStep = 1; RenderChatStage();
         }, true); chatNext.Name = "chat_next"; chatNext.IsEnabled = false;
         chatList.SelectionChanged += (_, _) => chatNext.IsEnabled = chatList.SelectedItem is AccountRow; chatFooter.Children.Add(chatNext);
     }
     private async Task DiscoverChats(string? root) => await Run(async token => {
-        var progress = Progress(); locations = await Task.Run(() => ChatDiscovery.Discover(root == null ? null : [root], progress, token));
+        var progress = Progress(); locations = await Task.Run(() => ChatDiscovery.Discover(root == null ? ChatPaths.DataRoots().Concat(preferences.ChatSearchRoots) : [root], progress, token, measureSize:false));
         chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray();
         if (locations.Count == 1) chatList.SelectedIndex = 0; status.Text = L.T(locations.Count == 0 ? "NoAccounts" : "SelectAccount");
         accountNotice.Text = L.T(locations.Count == 0 ? "DiscoveryEmpty" : "DiscoveryFound", locations.Count);
@@ -92,8 +94,9 @@ public sealed partial class ShellWindow {
         browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
         chatContent.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = View.Stack(View.Text(L.T("BackupStepTitle"), 23), View.Text(L.T("BackupStepLead"), color: "Muted"),
-                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination),View.Field("ChatWorkers",ChatWorkerSelector("backup",()=>backupInput.Text))) });
-        chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat, true));
+                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination),View.Field("ChatWorkers",ChatWorkerSelector("backup",()=>backupInput.Text)),new Expander{Header=L.T("IndependentOutputsTitle"),Content=View.Text(L.T("IndependentOutputsHelp"),color:"Muted"),Margin=new Thickness(0,12,0,0)}) });
+        chatFooter.Children.Add(Button("ExportDirect",()=>{directChatSource=true;preparedArchive=null;activeManifest=null;chatStep=2;RenderChatStage();},true));
+        chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat));
         chatFooter.Children.Add(AsyncButton("IncrementalBackup", IncrementalBackupChat));
         if (verifiedBackups.TryGetValue(account.Directory, out string? previous) && File.Exists(previous))
             chatFooter.Children.Add(AsyncButton("UsePreviousBackup", () => UseChatBackup(previous)));
@@ -101,7 +104,7 @@ public sealed partial class ShellWindow {
     }
     private void BuildChatExport() {
         bool encrypted = NeedsKey();
-        var stack = View.Stack(View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)));
+        var stack = View.Stack(View.Field(directChatSource?"AccountFolderLabel":"RawBackupLabel", View.Input(ArchiveDirectory(), true)));
         // The scrollbar owns a separate layout column; content is measured against the viewport.
         stack.Margin = new Thickness(0,0,12,0);
         chatContent.Children.Add(new ScrollViewer { Content=stack, VerticalScrollBarVisibility=ScrollBarVisibility.Auto,
@@ -114,6 +117,7 @@ public sealed partial class ShellWindow {
             methods.Children.Add(AsyncButton(Account().Platform == ChatPlatform.QQ ? "ReadQQLogin" : "ReadWeChatLogin", CaptureActive, true));
             methods.Children.Add(AsyncButton("ReadPassive", CapturePassive));
             methods.Children.Add(AsyncButton("KeyImport",ImportChatKey));
+            methods.Children.Add(Button("KeyLibrary",OpenKeyLibrary));
             if(capturedKey!=null)methods.Children.Add(Button("KeyManage",ManageChatKey));
             stack.Children.Add(methods);
             var manual = new CheckBox { Content = L.T("ManualKey"), Margin = new Thickness(0, 16, 0, 8) };
@@ -132,7 +136,7 @@ public sealed partial class ShellWindow {
             var avatars=new CheckBox{Content=L.T("DownloadQQGroupAvatars"),IsChecked=preferences.DownloadQQGroupAvatars,Margin=new Thickness(0,10,0,4),ToolTip=L.T("DownloadQQGroupAvatarsHelp")};
             avatars.Checked+=(_,_)=>preferences=preferences with{DownloadQQGroupAvatars=true};avatars.Unchecked+=(_,_)=>preferences=preferences with{DownloadQQGroupAvatars=false};stack.Children.Add(avatars);
         }
-        var verify = new CheckBox { Content = L.T("VerifyBackupBeforeExport"), IsChecked = verifyChatBackup, Margin = new Thickness(0, 12, 0, 4) };
+        var verify = new CheckBox { Visibility=directChatSource?Visibility.Collapsed:Visibility.Visible, Content = L.T("VerifyBackupBeforeExport"), IsChecked = verifyChatBackup, Margin = new Thickness(0, 12, 0, 4) };
         verify.Checked += (_, _) => verifyChatBackup = true;
         verify.Unchecked += (_, _) => verifyChatBackup = false;
         stack.Children.Add(View.Field("ChatWorkers",ChatWorkerSelector("export",()=>readingDirectory??preferences.BackupRoot)));
@@ -140,11 +144,11 @@ public sealed partial class ShellWindow {
         var help=new Expander{Header=L.T("ExportHelpTitle"),Margin=new Thickness(0,10,0,0),HorizontalContentAlignment=HorizontalAlignment.Stretch,
             Content=View.Stack(View.Text(L.T("VerifyBackupHelp"),color:"Muted"),View.Text(L.T("UpdateReadingHelp"),color:"Muted"),View.Text(L.T("ResumeReadingHelp"),color:"Muted"))};
         stack.Children.Add(help);
-        chatNext = AsyncButton("ArchiveCreate", ExportChat, true); chatNext.Name = "chat_export"; chatNext.IsEnabled = !encrypted || capturedKey != null;
+        chatNext = AsyncButton(directChatSource?"ExportDirect":"ArchiveCreate", ExportChat, true); chatNext.Name = "chat_export"; chatNext.IsEnabled = !encrypted || capturedKey != null;
         chatResume = AsyncButton("ResumeReading", ResumeChat); chatResume.IsEnabled = chatNext.IsEnabled;
         chatUpdate = AsyncButton("UpdateReading", UpdateChatReading); chatUpdate.IsEnabled = chatNext.IsEnabled;
 
-        chatFooter.Children.Add(chatNext); chatFooter.Children.Add(chatResume); chatFooter.Children.Add(chatUpdate); chatFooter.Children.Add(Button("FinishRawOnly", () => {
+        chatFooter.Children.Add(chatNext); if(!directChatSource){chatFooter.Children.Add(chatResume); chatFooter.Children.Add(chatUpdate);} if(!directChatSource)chatFooter.Children.Add(Button("FinishRawOnly", () => {
             chatStep = 3; readingDirectory = exportReport = null; SetCapturedKey(null); RenderChatStage();
         })); chatFooter.Children.Add(Button("GoBack", () => { chatStep = 1; RenderChatStage(); }));
     }
@@ -160,7 +164,7 @@ public sealed partial class ShellWindow {
         var report = exportReport != null && File.Exists(exportReport) ? JsonFiles.Read<ChatExportResult>(exportReport) : readingDirectory != null ? latestExportResult : null;
         bool failed = report is { Databases: 0 };
         var stack = View.Stack(View.Text(L.T(failed ? "ReadingFailedTitle" : report is { Complete: false } ? "ReadingPartialTitle" : "ArchiveFinished"), 23),
-            View.Text(L.T(failed ? "ReadingFailed" : readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), View.Field("RawBackupLabel", View.Input(ArchiveDirectory(), true)));
+            View.Text(L.T(failed ? "ReadingFailed" : readingDirectory == null ? "RawReady" : readingComplete ? "ReadingReady" : "ReadingPartial")), View.Field(directChatSource?"AccountFolderLabel":"RawBackupLabel", View.Input(ArchiveDirectory(), true)));
         if (readingDirectory != null) stack.Children.Add(View.Field("ReadingCopyLabel", View.Input(readingDirectory, true)));
         if (report != null) {
             var coverage = View.Text(L.T("ReadingCoverage", report.Contacts, report.MediaFiles, report.UnresolvedMedia, report.UnsupportedMessages), color: "Muted");

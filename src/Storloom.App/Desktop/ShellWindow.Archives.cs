@@ -29,6 +29,11 @@ public sealed partial class ShellWindow {
     }
     private void SaveArchive(ChatArchiveProject project){archiveProjects[project.Id]=project;JsonFiles.Write(ArchiveCatalogPath,archiveProjects.Values.ToArray());selectedArchiveId=project.Id;}
     private void RegisterCurrentArchive(){
+        if(directChatSource&&activeChat!=null&&readingDirectory!=null){
+            string directId=ChatArchiveProject.Identity(activeChat.Platform,activeChat.Directory);
+            var directProject=archiveProjects.GetValueOrDefault(directId)??new ChatArchiveProject(directId,activeChat.Account,activeChat.Platform,activeChat.Directory,preferences.BackupRoot);
+            SaveArchive(directProject with{Reading=readingDirectory,ReadableAt=DateTimeOffset.UtcNow,Protection=ChatVault.Exists(readingDirectory)?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None});return;
+        }
         if(activeChat==null||activeManifest==null||!File.Exists(activeManifest))return;
         var journal=JsonFiles.Read<TransferJournal>(activeManifest);string id=ChatArchiveProject.Identity(activeChat.Platform,journal.Plan.Source);
         var project=archiveProjects.GetValueOrDefault(id)??new ChatArchiveProject(id,Path.GetFileName(journal.Plan.Source),activeChat.Platform,journal.Plan.Source,ProjectBackupRoot(journal,activeChat.Platform));
@@ -79,9 +84,15 @@ public sealed partial class ShellWindow {
     private Task PrepareArchiveUpdate(ChatArchiveProject project,ChatArchiveUpdateRequest? request=null){
         if(PendingState(project)!=null&&request!=null)throw new InvalidOperationException(L.T("ArchiveFinishTaskFirst"));
         if(archivePreparing||operation!=null)return Task.CompletedTask;
-        pendingArchive=project;pendingArchiveRequest=request??new();
+        directChatSource=false; pendingArchive=project;pendingArchiveRequest=request??new();
         activeManifest=project.Manifest;readingDirectory=project.Reading;
-        if(project.Manifest==null)throw new InvalidOperationException(L.T("ArchiveFirstBackup"));
+        if(project.Manifest==null){
+            if(request?.UseExistingBackup==true)throw new InvalidOperationException(L.T("ArchiveFirstBackup"));
+            string? liveDatabase=ChatExporter.FindDatabases(project.Source,project.Platform).FirstOrDefault();
+            if(liveDatabase==null)throw new InvalidOperationException(L.T("NoAccounts"));
+            activeChat=new(project.Platform,project.Source,project.Account,liveDatabase,new FileInfo(liveDatabase).Length);SetCapturedKey(null);
+            directChatSource=request?.BackupOnly!=true;chatStep=directChatSource?2:1;RenderChatStage();return Task.CompletedTask;
+        }
         var journal=JsonFiles.Read<TransferJournal>(project.Manifest);string? database=ChatExporter.FindDatabases(journal.Plan.Destination,project.Platform).FirstOrDefault();if(database==null)throw new InvalidDataException(L.T("NoAccounts"));
         if(activeChat?.Directory!=project.Source||activeChat?.Platform!=project.Platform)SetCapturedKey(null);
         activeChat=new(project.Platform,project.Source,project.Account,TransferService.Child(project.Source,Path.GetRelativePath(journal.Plan.Destination,database)),new FileInfo(database).Length);preparedArchive=ReadChatArchive(project.Manifest,activeChat,journal);
@@ -91,7 +102,7 @@ public sealed partial class ShellWindow {
         var project=pendingArchive??throw new InvalidOperationException();var request=pendingArchiveRequest??new();
         var stack=View.Stack(View.Text(L.T("ArchiveAccessTitle"),19),View.Text(L.T("ArchiveAccessHelp"),color:"Muted"));chatContent.Children.Add(new ScrollViewer{Content=stack,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});
         if(ArchiveNeedsDatabase(project,request)){
-            stack.Children.Add(View.Text(L.T("ExportAccessSection"),15));var methods=View.Row(AsyncButton("ReadPassive",CapturePassive),AsyncButton("KeyImport",ImportChatKey),AsyncButton(Account().Platform==ChatPlatform.QQ?"ReadQQLogin":"ReadWeChatLogin",CaptureActive));if(capturedKey!=null)methods.Children.Add(Button("KeyManage",ManageChatKey));stack.Children.Add(methods);
+            stack.Children.Add(View.Text(L.T("ExportAccessSection"),15));var methods=View.Row(AsyncButton("ReadPassive",CapturePassive),AsyncButton("KeyImport",ImportChatKey),AsyncButton(Account().Platform==ChatPlatform.QQ?"ReadQQLogin":"ReadWeChatLogin",CaptureActive));methods.Children.Add(Button("KeyLibrary",OpenKeyLibrary));if(capturedKey!=null)methods.Children.Add(Button("KeyManage",ManageChatKey));stack.Children.Add(methods);
             keyInput=View.SecretInput();keyInput.Name="archive_database_key";stack.Children.Add(View.Field("DatabaseKeyLabel",keyInput));stack.Children.Add(View.Text(L.T(capturedKey==null?"DatabaseKeyEntryHelp":"KeyReady"),color:"Muted"));
         }
         if(ArchiveNeedsPassword(project,request)){archivePassword=View.SecretInput();archivePassword.Name="archive_unlock";stack.Children.Add(View.Field("VaultPassword",archivePassword));stack.Children.Add(View.Text(L.T("ArchiveSecureWorkspaceHelp"),color:"Muted"));}

@@ -34,7 +34,9 @@ public sealed partial class ShellWindow : ThemeWindow {
     private bool sidebarAnimating;
     private int sidebarTransition;
     private string currentPage = "cleanup";
-    public ShellWindow(string? dataDirectory = null) : base("Storloom", 1180, 760) {
+    private readonly bool automaticDiscovery;
+    public ShellWindow(string? dataDirectory = null, bool automaticDiscovery = true) : base("Storloom", 1180, 760) {
+        this.automaticDiscovery=automaticDiscovery;
         MinWidth = 640; MinHeight = 480; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         dataRoot = Path.GetFullPath(dataDirectory ?? Path.Combine(AppContext.BaseDirectory, "data"));
         PickerHistory.Attach(this,dataRoot);

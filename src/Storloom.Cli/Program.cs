@@ -61,7 +61,7 @@ try {
         return result.Cancelled ? 130 : result.Issues.Count > 0 ? 2 : 0;
     }
     if (args[0] == "chat-discover") {
-        Print(ChatDiscovery.Discover(Option("--root") is string root ? [root] : null)); return 0;
+        Print(ChatDiscovery.Discover(Option("--root") is string root ? [root] : null, measureSize:false)); return 0;
     }
     if (args[0] == "chat-export") {
         if (!Enum.TryParse<ChatPlatform>(Required("--platform"), true, out var platform) || !Enum.IsDefined(platform))
@@ -69,8 +69,17 @@ try {
         byte[]? key = null;
         try {
             if (Option("--key-file") is string keyFile) {
-                string value = File.ReadAllText(keyFile).Trim();
-                key = platform == ChatPlatform.QQ ? Encoding.ASCII.GetBytes(value) : Convert.FromHexString(value);
+                PathPolicy.AssertNoLinks(keyFile);
+                if(new FileInfo(keyFile).Length>4096)throw new InvalidDataException("Invalid key file.");
+                string value = File.ReadAllText(keyFile);
+                if(value.TrimStart().StartsWith("{",StringComparison.Ordinal)) {
+                    if(Console.IsInputRedirected)throw new InvalidOperationException("Protected key files require an interactive terminal or the desktop key library.");
+                    Console.Error.Write("Key file password: ");char[] password=new char[1024];int length=0;
+                    try {
+                        while(true){var pressed=Console.ReadKey(true);if(pressed.Key==ConsoleKey.Enter)break;if(pressed.Key==ConsoleKey.Escape)throw new OperationCanceledException();if(pressed.Key==ConsoleKey.Backspace){if(length>0)password[--length]='\0';}else if(!char.IsControl(pressed.KeyChar)&&length<password.Length)password[length++]=pressed.KeyChar;}
+                        Console.Error.WriteLine();key=ChatKeyFile.Open(keyFile,platform,password.AsSpan(0,length));
+                    }finally{Array.Clear(password);}
+                } else key=ChatDatabaseKey.Parse(value,platform);
             }
             var exporter = new ChatExporter(int.Parse(Option("--workers") ?? "2"), options.ContainsKey("--local-image-keys") || options.ContainsKey("--local-resources"));
             if (options.ContainsKey("--resume") && Option("--backup") == null) throw new ArgumentException("--resume requires --backup.");

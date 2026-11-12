@@ -8,17 +8,27 @@ public sealed partial class ShellWindow {
     private async Task ImportChatKey() {
         var picker=new Microsoft.Win32.OpenFileDialog{Title=L.T("KeyImport"),Filter="All files|*.*"};
         if(PickerHistory.Show(picker,this,"database-key-import")!=true)return;
+        await ImportChatKeyFrom(picker.FileName);
+    }
+    private async Task ImportChatKeyFrom(string path) {
         byte[]? candidate=null;
         try {
-            if(new FileInfo(picker.FileName).Length>1024)throw new InvalidOperationException(L.T("KeyFormatInvalid"));
-            candidate=ChatDatabaseKey.Parse(await File.ReadAllTextAsync(picker.FileName),Account().Platform);
-            var owned=candidate;
-            await Run(async token=>{
-                if(!await Task.Run(()=>ChatDatabaseKey.Verify(ArchiveAccount().Database,owned,Account().Platform),token))
-                    throw new InvalidOperationException(L.T("KeyDoesNotMatch"));
-                SetCapturedKey(owned);candidate=null;RenderChatStage();status.Text=L.T("KeyReady");
-            });
+            if(new FileInfo(path).Length>4096)throw new InvalidOperationException(L.T("KeyFormatInvalid"));
+            bool protectedFile=(await File.ReadAllTextAsync(path)).TrimStart().StartsWith("{",StringComparison.Ordinal);
+            string? password=null;KeyPasswordWindow? dialog=null;
+            try {
+                if(protectedFile){dialog=new KeyPasswordWindow(false){Owner=this};if(dialog.ShowDialog()!=true)return;password=dialog.Password;dialog.ClearSecret();}
+                await Run(async token=>{
+                    candidate=await Task.Run(()=>{
+                        try{return protectedFile?ChatKeyFile.Open(path,Account().Platform,password.AsSpan()):ChatDatabaseKey.Parse(File.ReadAllText(path),Account().Platform);}
+                        catch(CryptographicException){throw new InvalidOperationException(L.T("ProtectedKeyInvalid"));}
+                    },token);
+                    if(!await Task.Run(()=>ChatDatabaseKey.Verify(ArchiveAccount().Database,candidate,Account().Platform),token))throw new InvalidOperationException(L.T("KeyDoesNotMatch"));
+                    SetCapturedKey(candidate);candidate=null;if(protectedFile)RegisterKeyFile(path);RenderChatStage();status.Text=L.T("KeyReady");
+                });
+            }finally{password=null;dialog?.ClearSecret();}
         } catch(FormatException){throw new InvalidOperationException(L.T("KeyFormatInvalid"));}
+        catch(CryptographicException){throw new InvalidOperationException(L.T("ProtectedKeyInvalid"));}
         finally{if(candidate!=null)CryptographicOperations.ZeroMemory(candidate);}
     }
     private void ManageChatKey() {
@@ -32,13 +42,15 @@ public sealed partial class ShellWindow {
         var reveal=new CheckBox{Content=L.T("KeyReveal")};
         reveal.Checked+=(_,_)=>{visible.Text=text;masked.Visibility=Visibility.Collapsed;visible.Visibility=Visibility.Visible;};
         reveal.Unchecked+=(_,_)=>{visible.Clear();visible.Visibility=Visibility.Collapsed;masked.Visibility=Visibility.Visible;};
-        var actions=View.Row(View.Button("KeyCopy",()=>Clipboard.SetText(text)),View.Button("KeySave",()=>{
-            var save=new Microsoft.Win32.SaveFileDialog{Title=L.T("KeySave"),Filter="All files|*.*",AddExtension=false,FileName=""};
+        var actions=View.Row(View.Button("KeyCopy",()=>Clipboard.SetText(text)),View.Button("ProtectedKeySave",async()=>{
+            var save=new Microsoft.Win32.SaveFileDialog{Title=L.T("ProtectedKeySave"),Filter="All files|*.*",AddExtension=false,FileName=""};
             if(PickerHistory.Show(save,window,"database-key-export")!=true)return;
-            if(!Notice.Show(window,L.T("KeySave"),L.T("KeySaveConfirm"),true))return;
-            // Only an explicit user action writes a key. Never include its value in task logs.
-            try{File.WriteAllText(save.FileName,text,new UTF8Encoding(false));}
-            catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){Notice.Show(window,L.T("Error"),L.T("KeySaveFailed"));}
+            if(File.Exists(save.FileName)){Notice.Show(window,L.T("Error"),L.T("KeyNewFileRequired"));return;}
+            var password=new KeyPasswordWindow(true){Owner=window};if(password.ShowDialog()!=true)return;
+            byte[] owned=capturedKey!.ToArray();string? secret=password.Password;password.ClearSecret();
+            try{await Task.Run(()=>ChatKeyFile.Save(save.FileName,owned,Account().Platform,secret.AsSpan()));RegisterKeyFile(save.FileName);Notice.Show(window,L.T("ProtectedKeySave"),L.T("ProtectedKeySaved"));}
+            catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException){Notice.Show(window,L.T("Error"),L.T("KeySaveFailed"));}
+            finally{CryptographicOperations.ZeroMemory(owned);secret=null;}
         }),View.Button("Close",()=>window.Close()));
         masked.Margin=new Thickness(0,8,0,10);reveal.Margin=new Thickness(0,0,0,14);actions.HorizontalAlignment=HorizontalAlignment.Right;
         var stack=View.Stack(View.Text(L.T("KeyCustodyHelp"),color:"Muted"),masked,visible,reveal,actions);stack.Margin=new Thickness(20);

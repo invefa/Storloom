@@ -9,6 +9,10 @@ public sealed record AppPreferences {
     public bool ChatWorkersAutomatic {get;init;}=true;
     public string BackupRoot { get; init; } = "";
     public string ArchiveRoot { get; init; } = "";
+    public string[] ChatSearchRoots { get; init; } = [];
+    public bool ChatAutoDiscover { get; init; } = true;
+    public string? QQExecutable { get; init; }
+    public string? WeChatExecutable { get; init; }
     public string[]? EnabledRuleSets { get; init; }
     public bool ReduceMotion { get; init; }
     public string? CustomThemeFile { get; init; }

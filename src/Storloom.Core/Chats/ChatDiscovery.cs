@@ -11,11 +11,12 @@ public sealed record ChatLocation(ChatPlatform Platform, string Directory, strin
 
 public static class ChatDiscovery {
     public static List<ChatLocation> Discover(IEnumerable<string>? additionalRoots = null,
-        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default) {
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool measureSize = true) {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (additionalRoots == null) {
         string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (string root in ChatPaths.DataRoots()) roots.Add(root);
         foreach (string root in new[] { Path.Combine(documents, "Tencent Files"),
             Path.Combine(documents, "WeChat Files"), Path.Combine(documents, "xwechat_files"),
             Path.Combine(profile, "xwechat_files"), Path.Combine(profile, "Documents", "xwechat_files") }) roots.Add(root);
@@ -43,8 +44,7 @@ public static class ChatDiscovery {
                 string root = ResolveRoot(requestedRoot);
                 if (!visited.Add(root)) continue;
                 progress?.Report(new("chat-discovery", 0, 0, Detail: root));
-                foreach (var platform in new[] { ChatPlatform.QQ, ChatPlatform.WeChat })
-                    foreach (string database in ChatExporter.FindDatabases(root, platform)) {
+                foreach (var (platform, database) in FindFast(root, cancellation)) {
                         cancellation.ThrowIfCancellationRequested();
                         if (results.Any(r => r.Database.Equals(database, StringComparison.OrdinalIgnoreCase))) continue;
                         var info = new FileInfo(database);
@@ -72,11 +72,39 @@ public static class ChatDiscovery {
         return results.GroupBy(r => (r.Platform, r.Directory)).Select(group => {
             cancellation.ThrowIfCancellationRequested();
             var first = group.First();
+            if (!measureSize) return first with { DatabaseBytes = group.Sum(r => r.DatabaseBytes) };
             var size = new StorageScanner().Scan(first.Directory, progress, cancellation);
             cancellation.ThrowIfCancellationRequested();
             return first with { DatabaseBytes = group.Sum(r => r.DatabaseBytes), AccountBytes = size.Bytes,
                 AccountFiles = size.Files, SizeComplete = size.Issues.Count == 0 };
         }).ToList();
+    }
+    private static IEnumerable<(ChatPlatform Platform, string Path)> FindFast(string root, CancellationToken cancellation) {
+        var queue = new Queue<(string Path, int Depth)>(); queue.Enqueue((root, 0));
+        while (queue.TryDequeue(out var entry)) {
+            cancellation.ThrowIfCancellationRequested();
+            string[] files, folders;
+            try {
+                PathPolicy.AssertNoLinks(entry.Path);
+                files = Directory.GetFiles(entry.Path, "*.db");
+                folders = entry.Depth < 6 ? Directory.GetDirectories(entry.Path) : [];
+            } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            foreach (string file in files) {
+                string name = Path.GetFileName(file);
+                bool linked;
+                try { linked=(File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0; }
+                catch(Exception ex) when(ex is IOException or UnauthorizedAccessException){continue;}
+                if(linked)continue;
+                if (name.Equals("nt_msg.db", StringComparison.OrdinalIgnoreCase) && !file.Split('\\', '/').Contains("QQGuild", StringComparer.OrdinalIgnoreCase)) yield return (ChatPlatform.QQ, file);
+                else if (System.Text.RegularExpressions.Regex.IsMatch(name, "^(message_\\d+|MSG\\d*)\\.db$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) yield return (ChatPlatform.WeChat, file);
+            }
+            foreach (string folder in folders) {
+                string name = Path.GetFileName(folder);
+                if (new[] { "attach", "FileStorage", "image", "video", "pic", "cache", "temp", "node_modules", "MsgAttach", "FileRecv", "nt_data", "head_image", "avatar", "avatars", "emoji", "emotion", "sticker", "thumb", "thumbs" }.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
+                try { if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) == 0) queue.Enqueue((folder, entry.Depth + 1)); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
     }
     private static string ResolveRoot(string root) {
         string normalized = PathPolicy.Normalize(root), resolved = Path.GetPathRoot(normalized)!;

@@ -61,7 +61,7 @@ public sealed class FormTests {
     [InlineData("zh-CN",AppTheme.Dark)]
     public void NativePagesResizeAndShareTheTitleBarPalette(string locale,AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language=locale,Theme=theme,ReduceMotion=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();
             Assert.Equal(3,Descendants(window).OfType<ListBox>().Single(l=>l.Name=="navigation").Items.Count);
@@ -127,7 +127,7 @@ public sealed class FormTests {
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
         long size=new FileInfo(Path.Combine(source,"nt_msg.db")).Length;if(removeSource)Directory.Delete(source,true);
         JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=locale,ReduceMotion=true});
-        var window=new ShellWindow(data){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};
         try {
             window.Show();Pump();
             var type=typeof(ShellWindow);
@@ -173,7 +173,7 @@ public sealed class FormTests {
     [InlineData(AppTheme.OneDark)]
     public void BusyNavigationKeepsItsPaletteAndStatusHasOneVisibleOwner(AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,ReduceMotion=true,Language="en"});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;
         try {
             window.Show();Pump();var type=typeof(ShellWindow);var action=Descendants(window).OfType<Button>().Single(b=>b.Name=="scan_cleanup");
             type.GetField("operationButton",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,action);
@@ -193,7 +193,7 @@ public sealed class FormTests {
     [Fact]
     public void SidebarTransitionCanReverseAndTransparentFeedbackDoesNotFlashWhite() => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=false});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();var toggle=Descendants(window).OfType<Button>().Single(b=>b.Name=="toggle_sidebar");
             var frame=(Border)toggle.Template.FindName("frame",toggle);var background=((SolidColorBrush)Theme.Brush("Sidebar")).Color;
@@ -220,7 +220,7 @@ public sealed class FormTests {
     [InlineData(AppTheme.OneDark)]
     public void HeaderSizingDoubleClickTooltipsAndMenuSeparatorsWorkTogether(AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true,SidebarCollapsed=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();
             var table=Descendants(window).OfType<DataGrid>().Single(d=>d.Name=="cleanup_rules");var row=(DataGridRow)table.ItemContainerGenerator.ContainerFromIndex(0)!;
@@ -251,7 +251,7 @@ public sealed class FormTests {
     [InlineData("zh-CN")]
     public void PublicReadmeScreenshotsUseOnlySyntheticDisplayData(string locale) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language=locale,Theme=AppTheme.Light,ReduceMotion=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();var type=typeof(ShellWindow);
             var entries=new[]{new StorageEntry(@"C:\Example\Applications",12884901888,12400,1),new StorageEntry(@"C:\Example\Projects",7516192768,8200,1),new StorageEntry(@"C:\Example\Media",5368709120,320,1),new StorageEntry(@"C:\Example\Archives",3221225472,120,1),new StorageEntry(@"C:\Example\Cache",1073741824,4200,1)};
@@ -319,7 +319,7 @@ public sealed class FormTests {
         string fixture=Fixture();string source=Path.Combine(fixture,"scan");Directory.CreateDirectory(source);
         for(int i=0;i<1000;i++)File.WriteAllText(Path.Combine(source,i+".txt"),"isolated scan fixture");
         JsonFiles.Write(Path.Combine(fixture,"data/preferences.json"),new AppPreferences{Language="en",ReduceMotion=false});
-        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:Path.Combine(fixture,"data")){ShowInTaskbar=false};
         try {
             window.Show();window.Navigate("overview");Pump();
             var input=(TextBox)typeof(ShellWindow).GetField("rootInput",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!;input.Text=source;
@@ -339,7 +339,7 @@ public sealed class FormTests {
     [InlineData(AppTheme.OneDark)]
     public void ExplorerTablesSortNumbersWithoutSelectionOverflowAndSidebarCanCollapse(AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();window.Navigate("overview");Pump();
             var entries=Enumerable.Range(0,80).Select(i=>new StorageEntry(Path.Combine(fixture,"folder-"+i),i==0?1048576:i==1?950:2048+i,1,1)).ToList();
@@ -372,8 +372,8 @@ public sealed class FormTests {
     });
     [Fact]
     public void DiscoveryReportsNoResultsInThePageAndNormalLogsUseTheSelectedLanguage() => OnUi(() => {
-        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true,ChatAutoDiscover=false});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();window.Navigate("chats");Pump();Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveCreate"))).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Pump();
             var task=(Task)typeof(ShellWindow).GetMethod("DiscoverChats",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[fixture])!;
@@ -389,7 +389,7 @@ public sealed class FormTests {
     [InlineData(AppTheme.OneDark)]
     public void CompactChromePopupsAndResizeTargetsRemainConsistent(AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=false});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();window.UpdateLayout();
             var nodes=Descendants(window).ToArray();var caption=nodes.OfType<Wpf.Ui.Controls.TitleBar>().Single();
@@ -436,7 +436,7 @@ public sealed class FormTests {
         string keep=Path.Combine(cache,"keep.tmp"),remove=Path.Combine(cache,"remove.tmp");File.WriteAllText(keep,"keep");File.WriteAllText(remove,"remove");
         JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language="en",Theme=theme,EnabledRuleSets=[],ReduceMotion=true});
         JsonFiles.Write(Path.Combine(data,"rules.json"),new RuleCatalog{Rules=[new CleanupRule{Id="fixture",Name="Fixture cleanup",Roots=[cache],MinimumAgeHours=0}]});
-        var window=new ShellWindow(data){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};
         try {
             window.Show();Pump();var type=typeof(ShellWindow);
             Task Invoke(string method)=>(Task)type.GetMethod(method,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null)!;
@@ -515,7 +515,7 @@ public sealed class FormTests {
     [InlineData(AppTheme.OneDark)]
     public void LongLogsKeepBothScrollbarsInsideTheViewportAndSplittersStayBounded(AppTheme theme) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,ReduceMotion=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;
         try {
             window.Show();Pump();task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,new object[]{new Func<CancellationToken,Task>(_=>completion.Task)})!;
             var panel=Descendants(window).OfType<OperationPanel>().Single();for(int i=0;i<150;i++)panel.AddLog(new string('x',1200)+i);Pump();window.UpdateLayout();
@@ -546,7 +546,7 @@ public sealed class FormTests {
     [Fact]
     public void SidebarIconsRetainTheirVerticalPositionsThroughBothTransitions() => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();var navigation=Descendants(window).OfType<ListBox>().Single(l=>l.Name=="navigation");
             var icons=Descendants(navigation).OfType<System.Windows.Shapes.Path>().ToArray();var y=icons.Select(i=>i.TranslatePoint(new Point(),window).Y).ToArray();
@@ -562,7 +562,7 @@ public sealed class FormTests {
     [InlineData(true)]
     public void ClosingBusyWindowRequiresConsentAndTrayKeepsTheTaskAlive(bool background) => OnUi(() => {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{CloseToTray=background,ReduceMotion=true});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;CancellationToken token=default;
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};var completion=new TaskCompletionSource();Task? task=null;CancellationToken token=default;
         try {
             window.Show();Pump();task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,new object[]{new Func<CancellationToken,Task>(ct=>{token=ct;ct.Register(()=>completion.TrySetCanceled(ct));return completion.Task;})})!;
             void Answer(bool yes) { _=Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,new Action(()=>{
@@ -774,7 +774,7 @@ public sealed class FormTests {
         var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"Fixture account",ChatPlatform.WeChat,source,Path.Combine(fixture,"backups"));
         project=ChatArchiveWorkflow.Update(project,Path.Combine(data,"task.json"),null,null,2,_=>{},checkRunningClients:false);
         project=project with{BackedUpAt=DateTimeOffset.FromUnixTimeSeconds(1700000000),ReadableAt=DateTimeOffset.FromUnixTimeSeconds(1700000000)};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true});
-        var window=new ShellWindow(data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
             var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Single(table.Items.Cast<object>());
             foreach(string name in new[]{"archive_open","archive_update","archive_protection","archive_verify_now"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
             Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
@@ -801,7 +801,7 @@ public sealed class FormTests {
         Database(Path.Combine(source,"nt_msg.db"),"CREATE TABLE c2c_msg_table(\"40030\",\"40033\",\"40050\",\"40800\");INSERT INTO c2c_msg_table VALUES(1,2,1700000000,'catalog import fixture');");
         var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));string reading=Path.Combine(fixture,"raw-reading-legacy");new ChatExporter().ExportVerifiedBackup(backup.Manifest,reading,ChatPlatform.QQ);
         var stamp=NativeFile.ReadStamp(Path.Combine(reading,"messages.jsonl"));JsonFiles.Write(Path.Combine(data,"chat-backups.json"),new Dictionary<string,string>{{source,backup.Manifest}});
-        var window=new ShellWindow(data){ShowInTaskbar=false};try{window.Show();Pump();var project=Assert.Single(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")));Assert.Equal(ChatPlatform.QQ,project.Platform);Assert.Equal(reading,project.Reading);Assert.True(PathPolicy.Under(project.BackupRoot,fixture));Assert.Equal(stamp,NativeFile.ReadStamp(Path.Combine(reading,"messages.jsonl")));}
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};try{window.Show();Pump();var project=Assert.Single(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")));Assert.Equal(ChatPlatform.QQ,project.Platform);Assert.Equal(reading,project.Reading);Assert.True(PathPolicy.Under(project.BackupRoot,fixture));Assert.Equal(stamp,NativeFile.ReadStamp(Path.Combine(reading,"messages.jsonl")));}
         finally{window.Close();Directory.Delete(fixture,true);}
     });
     [Fact]
@@ -1000,7 +1000,7 @@ public sealed class FormTests {
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
         var export=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(fixture,"reading"),ChatPlatform.QQ);
         JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=locale,Theme=theme,ReduceMotion=true,BackupRoot=Path.Combine(fixture,"backup-destination")});
-        var window=new ShellWindow(data){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};
         try {
             window.Show();Pump();var type=typeof(ShellWindow);void Set(string key,object value)=>type.GetField(key,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,value);
             Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),new FileInfo(Path.Combine(source,"nt_msg.db")).Length));
@@ -1028,7 +1028,7 @@ public sealed class FormTests {
         File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
         JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language="zh-CN",Theme=theme,ReduceMotion=true});
-        var window=new ShellWindow(data){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};
         try {
             window.Show();Pump();var type=typeof(ShellWindow);void Set(string key,object value)=>type.GetField(key,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,value);
             Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));Set("activeManifest",backup.Manifest);Set("chatStep",2);
@@ -1066,7 +1066,7 @@ public sealed class FormTests {
         string fixture=Fixture(),source=Path.Combine(fixture,"account"),raw=Path.Combine(fixture,"raw");Directory.CreateDirectory(source);
         File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
         var service=new TransferService();var backup=service.Execute(service.Plan(source,raw),Path.Combine(fixture,"journals"));
-        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:Path.Combine(fixture,"data")){ShowInTaskbar=false};
         try {
             window.Show();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             type.GetField("activeChat",flags)!.SetValue(window,new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120));
@@ -1102,7 +1102,7 @@ public sealed class FormTests {
     [Fact]
     public void LogHeightIsSavedOnDragAndRestoredAcrossReopenAndTaskStart()=>OnUi(()=>{
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{ReduceMotion=true,LogHeight=160});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try{
             window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();panel.ToggleExpanded();Pump();
             var row=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(window)!;
@@ -1114,7 +1114,7 @@ public sealed class FormTests {
             Func<CancellationToken,Task> work=_=>Task.CompletedTask;
             var task=(Task)typeof(ShellWindow).GetMethod("Run",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(window,new object[]{work})!;Wait(AsResult(task));Pump();Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 2: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
             window.Height+=100;Pump();Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 3: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
-            window.Close();window=new ShellWindow(fixture){ShowInTaskbar=false};window.Show();Pump();
+            window.Close();window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};window.Show();Pump();
             row=(RowDefinition)typeof(ShellWindow).GetField("logRow",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(window)!;Assert.True(row.ActualHeight>=204&&row.ActualHeight<=206,"Log check 4: "+row.ActualHeight+" / remembered: "+JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
@@ -1127,7 +1127,7 @@ public sealed class FormTests {
         string reading=Path.Combine(fixture,"reading");Directory.CreateDirectory(reading);
         string report=Path.Combine(reading,"export-report.json");
         JsonFiles.Write(report,new ChatExportResult(reading,0,0,[new("chat-export","nt_msg.db","Fixture page authentication failed")],false));
-        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:Path.Combine(fixture,"data")){ShowInTaskbar=false};
         try {
             window.Show();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             void Set(string name,object value)=>type.GetField(name,flags)!.SetValue(window,value);
@@ -1151,7 +1151,7 @@ public sealed class FormTests {
         Directory.CreateDirectory(Path.GetDirectoryName(guild)!);Directory.CreateDirectory(Path.GetDirectoryName(main)!);
         File.WriteAllBytes(guild,new byte[5120]);File.WriteAllBytes(main,new byte[5120]);
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));
-        var window=new ShellWindow(Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:Path.Combine(fixture,"data")){ShowInTaskbar=false};
         try {
             var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             type.GetField("activeChat",flags)!.SetValue(window,new ChatLocation(ChatPlatform.QQ,source,"Fixture account",guild,5120));
@@ -1164,7 +1164,7 @@ public sealed class FormTests {
 
     [Fact]
     public void OperationButtonRemainsCancellableAfterItsInputWasCleared() => OnUi(() => {
-        string fixture=Fixture();var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        string fixture=Fixture();var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
             Button? button=null;
@@ -1205,10 +1205,10 @@ public sealed class FormTests {
 
     [Fact]
     public void DebugLoggingChoicePersistsAcrossShellRestarts() => OnUi(() => {
-        string fixture=Fixture();var first=new ShellWindow(fixture){ShowInTaskbar=false};
+        string fixture=Fixture();var first=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         first.Show();Pump();Descendants(first).OfType<OperationPanel>().Single().DebugToggle.IsChecked=true;first.Close();
         Assert.True(JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).DebugLogging);
-        var second=new ShellWindow(fixture){ShowInTaskbar=false};
+        var second=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {second.Show();Pump();Assert.True(Descendants(second).OfType<OperationPanel>().Single().DebugToggle.IsChecked);}
         finally {second.Close();Directory.Delete(fixture,true);}
     });
@@ -1268,7 +1268,7 @@ public sealed class FormTests {
     [Fact]
     public void PersistentLogBarRespectsAutoOpenAndWrapAndKeepsIconsCentered() => OnUi(()=>{
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true,LogAutoShow=false});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};var finish=new TaskCompletionSource();Task? task=null;
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};var finish=new TaskCompletionSource();Task? task=null;
         try{window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();
             Assert.True(panel.IsVisible);Assert.False(panel.Expanded);Assert.True(panel.Follow);Assert.InRange(panel.ActualHeight,31,34);
             task=(Task)typeof(ShellWindow).GetMethod("RunPausable",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[new Func<CancellationToken,Task>(_=>finish.Task)])!;Pump();Assert.False(panel.Expanded);
@@ -1284,7 +1284,7 @@ public sealed class FormTests {
     [Fact]
     public void SuccessfulTasksAutoCollapseWithoutLosingLogsHeightOrSavedChoice()=>OnUi(()=>{
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{ReduceMotion=true,LogHeight=205});
-        var window=new ShellWindow(fixture){ShowInTaskbar=false};
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try{
             window.Show();Pump();var panel=Descendants(window).OfType<OperationPanel>().Single();Assert.False(panel.AutoCollapseToggle.IsChecked);
             panel.AutoCollapseToggle.IsChecked=true;Assert.True(JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogAutoCollapse);
@@ -1293,7 +1293,7 @@ public sealed class FormTests {
             Assert.False(panel.Expanded);Assert.Contains("fixture retained task details",panel.Log.Text);Assert.Equal(205,JsonFiles.Read<AppPreferences>(Path.Combine(fixture,"preferences.json")).LogHeight);
             panel.ToggleExpanded();Pump();Assert.InRange(panel.ActualHeight,204,206);panel.Start();panel.Finish("Fixture failure or cancellation",false);Assert.True(panel.Expanded);
             panel.AutoCollapseToggle.IsChecked=false;panel.Start();panel.Finish("Fixture success with auto collapse off",true);Assert.True(panel.Expanded);
-            panel.AutoCollapseToggle.IsChecked=true;window.Close();window=new ShellWindow(fixture){ShowInTaskbar=false};window.Show();Pump();
+            panel.AutoCollapseToggle.IsChecked=true;window.Close();window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};window.Show();Pump();
             Assert.True(Descendants(window).OfType<OperationPanel>().Single().AutoCollapseToggle.IsChecked);
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
@@ -1312,18 +1312,18 @@ public sealed class FormTests {
 
     [Fact]
     public void KeyCustodyDialogIsFixedAndUsesASeparatedActionRow() => OnUi(()=>{
-        string fixture=Fixture();var owner=new ShellWindow(fixture){ShowInTaskbar=false};
+        string fixture=Fixture();var owner=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try{owner.Show();typeof(ShellWindow).GetField("activeChat",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(owner,new ChatLocation(ChatPlatform.QQ,fixture,"fixture",Path.Combine(fixture,"db"),0));typeof(ShellWindow).GetMethod("SetCapturedKey",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(owner,[System.Text.Encoding.ASCII.GetBytes("synthetic-key-123")]);
-            owner.Dispatcher.BeginInvoke(new Action(()=>{var dialog=Application.Current.Windows.Cast<Window>().Single(w=>w.Owner==owner);Assert.Equal(ResizeMode.NoResize,dialog.ResizeMode);Assert.Equal(0,GetWindowLongW(new System.Windows.Interop.WindowInteropHelper(dialog).Handle,-16)&0x40000);Assert.Equal(new Thickness(0),System.Windows.Shell.WindowChrome.GetWindowChrome(dialog)!.ResizeBorderThickness);var actions=Descendants(dialog).OfType<Button>().Where(b=>Equals(b.Content,L.T("KeyCopy"))||Equals(b.Content,L.T("KeySave"))||Equals(b.Content,L.T("Close"))).ToArray();Assert.Equal(3,actions.Length);Capture(dialog,"key-custody-compact");dialog.Close();}));
+            owner.Dispatcher.BeginInvoke(new Action(()=>{var dialog=Application.Current.Windows.Cast<Window>().Single(w=>w.Owner==owner);Assert.Equal(ResizeMode.NoResize,dialog.ResizeMode);Assert.Equal(0,GetWindowLongW(new System.Windows.Interop.WindowInteropHelper(dialog).Handle,-16)&0x40000);Assert.Equal(new Thickness(0),System.Windows.Shell.WindowChrome.GetWindowChrome(dialog)!.ResizeBorderThickness);var actions=Descendants(dialog).OfType<Button>().Where(b=>Equals(b.Content,L.T("KeyCopy"))||Equals(b.Content,L.T("ProtectedKeySave"))||Equals(b.Content,L.T("Close"))).ToArray();Assert.Equal(3,actions.Length);Capture(dialog,"key-custody-compact");dialog.Close();}));
             typeof(ShellWindow).GetMethod("ManageChatKey",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(owner,null);
         }finally{owner.Close();Directory.Delete(fixture,true);}
     });
 
     [Fact]
     public void MainWindowRemembersNarrowSizeWithoutChangingExistingSettings() => OnUi(()=>{
-        string fixture=Fixture();var first=new ShellWindow(fixture){ShowInTaskbar=false};
+        string fixture=Fixture();var first=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         first.Show();first.Width=740;first.Height=560;Pump();first.Close();
-        var second=new ShellWindow(fixture){ShowInTaskbar=false};
+        var second=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try{second.Show();Pump();Assert.Equal(740,second.Width);Assert.Equal(560,second.Height);Assert.True(second.MinWidth<=640);}
         finally{second.Close();Directory.Delete(fixture,true);}
     });
@@ -1393,7 +1393,7 @@ public sealed class FormTests {
     });
     [Theory][InlineData("en")][InlineData("zh-CN")]
     public void ArchiveLibraryAndExportOptionsFitCompactWindows(string language)=>OnUi(()=>{
-        string fixture=Fixture(),data=Path.Combine(fixture,"data");JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=language,Theme=AppTheme.OneDark,ReduceMotion=true});var window=new ShellWindow(data){ShowInTaskbar=false,Width=850,Height=650};
+        string fixture=Fixture(),data=Path.Combine(fixture,"data");JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=language,Theme=AppTheme.OneDark,ReduceMotion=true});var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=850,Height=650};
         try{
             window.Show();window.Navigate("chats");Pump();var nav=Descendants(window).OfType<Button>().Single(b=>b.Name=="store_home_nav");nav.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();window.UpdateLayout();Assert.Single(Descendants(window).OfType<DataGrid>().Where(g=>g.Name=="storage_archives"));Assert.All(Descendants(window).OfType<Button>().Where(b=>b.Name is "store_open" or "store_backup" or "store_update"),b=>Assert.False(b.IsEnabled));Capture(window,"archive-library-"+language);
             foreach(string name in new[]{"StoreMigrationWindow","StoreExportWindow"}){
@@ -1412,4 +1412,40 @@ public sealed class FormTests {
     [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)]string path,out nint db,int flags,nint vfs);
     [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_exec(nint db,[MarshalAs(UnmanagedType.LPUTF8Str)]string sql,nint callback,nint state,nint error);
     [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_close_v2(nint db);
+    [Theory][InlineData(AppTheme.Light)][InlineData(AppTheme.Dark)][InlineData(AppTheme.OneDark)]
+    public void ChatLocationAndProtectedKeyDialogsKeepActionsVisibleAndEditorsAligned(AppTheme theme) => OnUi(()=>{
+        string fixture=Fixture();L.SetLanguage("zh-CN");Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        string qq=Path.Combine(fixture,"QQ.exe"),wechat=Path.Combine(fixture,"Weixin.exe");File.WriteAllText(qq,"fixture");File.WriteAllText(wechat,"fixture");
+        foreach(string name in new[]{"ChatSettingsWindow","KeyPasswordWindow"}){
+            var type=typeof(ShellWindow).Assembly.GetType("Storloom.App."+name)!;
+            object[] args=name=="ChatSettingsWindow"?[new AppPreferences{QQExecutable=qq,WeChatExecutable=wechat}]:[true];
+            var dialog=(Window)Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public,null,args,null)!;
+            try{
+                dialog.ShowInTaskbar=false;dialog.Show();Pump();dialog.UpdateLayout();
+                foreach(var editor in Descendants(dialog).OfType<Control>().Where(c=>c is PasswordBox || c is TextBox input&&!input.AcceptsReturn))Assert.Equal(32,editor.ActualHeight);
+                foreach(var button in Descendants(dialog).OfType<Button>().Where(b=>b.IsVisible&&Equals(b.Content,L.T(name=="ChatSettingsWindow"?"Apply":"ProtectedKeySave")))){
+                    var point=button.TranslatePoint(new Point(),dialog);Assert.InRange(point.Y+button.ActualHeight,0,dialog.ActualHeight);Assert.InRange(point.X+button.ActualWidth,0,dialog.ActualWidth);
+                }
+                if(name=="ChatSettingsWindow"){dialog.Width=480;dialog.Height=380;Pump();dialog.UpdateLayout();Assert.All(Descendants(dialog).OfType<Button>().Where(b=>Equals(b.Content,L.T("Apply"))),b=>Assert.True(b.TranslatePoint(new Point(),dialog).Y+b.ActualHeight<=dialog.ActualHeight));}
+                else{var inputs=Descendants(dialog).OfType<PasswordBox>().ToArray();Assert.Equal(2,inputs.Length);Assert.True(dialog.ActualHeight<350);}
+                if(dialog.IsVisible)Capture(dialog,name+"-"+theme);
+            }finally{dialog.Close();}
+        }
+        Directory.Delete(fixture,true);
+    });
+    [Fact]
+    public void DirectReadingSetupHasNoManifestDependencyOrBackupVerificationControl() => OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:Path.Combine(fixture,"data")){ShowInTaskbar=false};
+        try{
+            window.Show();var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            type.GetField("activeChat",flags)!.SetValue(window,new ChatLocation(ChatPlatform.QQ,source,"fixture",Path.Combine(source,"nt_msg.db"),5120));
+            type.GetField("directChatSource",flags)!.SetValue(window,true);type.GetField("chatStep",flags)!.SetValue(window,2);window.Navigate("chats");type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();
+            Assert.Contains(Descendants(window).OfType<Button>(),b=>b.IsVisible&&Equals(b.Content,L.T("ExportDirect")));
+            Assert.DoesNotContain(Descendants(window).OfType<CheckBox>(),c=>c.IsVisible&&Equals(c.Content,L.T("VerifyBackupBeforeExport")));
+            Assert.Contains(Descendants(window).OfType<Button>(),b=>b.IsVisible&&Equals(b.Content,L.T("KeyLibrary")));
+            Capture(window,"direct-reading-setup");
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
 }

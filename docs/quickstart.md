@@ -1,5 +1,7 @@
 # Getting started
 
+After selecting an account, create a reading copy or raw backup independently. Automatic account search and client locations are configurable from the picker or Preferences. The chat More actions menu provides the database key library and raw backup restore. See [chat backup and export](chat-exporters.md).
+
 ## Account archives
 
 ![Account archives](figures/archives.en.png)
