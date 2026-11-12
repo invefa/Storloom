@@ -1554,4 +1554,22 @@ public sealed class FormTests {
             }}finally{window.Close();}
     });
 
+    [Theory][InlineData(AppTheme.Light)][InlineData(AppTheme.Dark)][InlineData(AppTheme.OneDark)]
+    public void LogPointerExitResumesAfterSelectionEvenWhileKeyboardFocusStaysInLog(AppTheme theme)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});var panel=new OperationPanel();panel.ToggleExpanded();var window=new ThemeWindow("Log pointer exit fixture",850,450){ShowInTaskbar=false};window.Body.Children.Add(panel);
+        void Leave(){panel.Log.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice,Environment.TickCount){RoutedEvent=UIElement.MouseLeaveEvent});Pump();Pump();}
+        try{window.Show();Pump();for(int i=0;i<200;i++)panel.AddLog("pointer-exit fixture "+i);Pump();
+            foreach(bool selected in new[]{true,false}){
+                panel.Log.Focus();Pump();Assert.True(panel.Log.IsKeyboardFocusWithin);
+                panel.Log.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent});
+                panel.Log.Select(10,selected?15:0);panel.Log.ScrollToVerticalOffset(0);Pump();string selection=panel.Log.SelectedText;
+                Assert.True(panel.Follow);Assert.False(panel.IsFollowing);panel.AddLog("paused while interacting");Pump();Assert.InRange(panel.Log.VerticalOffset,0,1);
+                Leave();Assert.True(panel.Log.IsKeyboardFocusWithin);Assert.True(panel.IsFollowing);Assert.True(panel.Log.VerticalOffset>0);Assert.Equal(selection,panel.Log.SelectedText);
+                panel.AddLog("follow new output after pointer exit");Pump();Assert.True(panel.IsFollowing);Assert.True(panel.Log.VerticalOffset>0);
+            }
+            panel.Log.Focus();panel.PauseFollowing();Assert.True(Mouse.Capture(panel.Log,CaptureMode.SubTree));Leave();Assert.False(panel.IsFollowing);panel.Log.ReleaseMouseCapture();Leave();Assert.True(panel.IsFollowing);
+            panel.ToggleFollowing();panel.Log.Focus();panel.PauseFollowing();panel.Log.Select(10,15);panel.Log.ScrollToVerticalOffset(0);Pump();Leave();panel.AddLog("explicitly disabled still stays put");Pump();Assert.False(panel.Follow);Assert.False(panel.IsFollowing);Assert.InRange(panel.Log.VerticalOffset,0,1);
+        }finally{panel.Log.ReleaseMouseCapture();window.Close();}
+    });
+
 }

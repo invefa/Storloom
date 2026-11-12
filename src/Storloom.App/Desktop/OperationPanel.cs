@@ -68,8 +68,8 @@ public sealed class OperationPanel : Grid {
         progress.SetResourceReference(FrameworkElement.StyleProperty, "OperationProgress");
         FollowToggle.Checked += (_, _) => ResumeFollowing();
         Log.LostKeyboardFocus+=(_,_)=>Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>{if(!Log.IsKeyboardFocusWithin&&!Log.IsMouseCaptureWithin)ResumeFollowing();}));
-        Log.MouseLeave+=(_,_)=>{if(!Log.IsKeyboardFocusWithin&&!Log.IsMouseCaptureWithin)ResumeFollowing();};
-        Log.LostMouseCapture+=(_,_)=>{if(!Log.IsKeyboardFocusWithin&&!Log.IsMouseOver)ResumeFollowing();};
+        Log.MouseLeave+=(_,_)=>{if(!Log.IsMouseCaptureWithin)ResumeFollowing();};
+        Log.LostMouseCapture+=(_,_)=>Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>{if(!Log.IsMouseCaptureWithin&&!Log.IsMouseOver)ResumeFollowing();}));
         Log.PreviewMouseWheel += (_, _) => PauseFollowing();
         Log.PreviewMouseLeftButtonDown += (_, _) => PauseFollowing();
         Log.PreviewKeyDown += (_, e) => { if (e.Key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End) PauseFollowing(); };
@@ -119,10 +119,10 @@ public sealed class OperationPanel : Grid {
         if(diagnostic.Bytes>0)fields.Add("bytes: "+diagnostic.Bytes.ToString("N0",CultureInfo.InvariantCulture));
         if(diagnostic.Candidates>0)fields.Add("candidates: "+diagnostic.Candidates.ToString(CultureInfo.InvariantCulture));
         if(diagnostic.ElapsedSeconds>0)fields.Add("elapsed: "+diagnostic.ElapsedSeconds.ToString("F2",CultureInfo.InvariantCulture)+"s");
-        AddEntry("DEBUG",diagnostic.Stage.PadRight(30)+string.Join(" | ",fields));
+        AddEntry("DEBUG",diagnostic.Stage.PadRight(22)+"  "+string.Join(" | ",fields));
     }
     private static string Ascii(string value){var result=new StringBuilder();foreach(char c in value){if(c is >= ' ' and <= '~')result.Append(c);else if(c=='\t')result.Append("    ");else result.Append("\\u"+((int)c).ToString("x4",CultureInfo.InvariantCulture));}return result.ToString();}
-    public void AddDebugDetail(string stage,string value){if(DebugToggle.IsChecked==true)AddEntry("DEBUG",Ascii(stage).PadRight(30)+Ascii(value));}
+    public void AddDebugDetail(string stage,string value){if(DebugToggle.IsChecked==true)AddEntry("DEBUG",Ascii(stage).PadRight(22)+"  "+Ascii(value));}
     public void AddException(Exception error) {
         if(DebugToggle.IsChecked!=true)return;
         if(error is AggregateException aggregate){foreach(var inner in aggregate.Flatten().InnerExceptions.Take(8))AddException(inner);return;}
