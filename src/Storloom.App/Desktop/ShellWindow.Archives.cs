@@ -68,9 +68,12 @@ public sealed partial class ShellWindow {
     private Task PrepareArchiveUpdate(ChatArchiveProject project,ChatArchiveUpdateRequest? request=null){
         if(PendingState(project)!=null&&request!=null)throw new InvalidOperationException(L.T("ArchiveFinishTaskFirst"));
         if(archivePreparing||operation!=null)return Task.CompletedTask;
+        request??=new(BackupOnly:PendingState(project)?.BackupOnly==true,DirectReading:PendingState(project)?.DirectReading==true);
+        if(request.BackupOnly){pendingArchive=project;pendingArchiveRequest=request;activeChat=new(project.Platform,project.Source,project.Account,Path.Combine(project.Source,"source.db"),0);activeManifest=project.Manifest;directChatSource=false;chatStep=4;RenderChatStage();return Task.CompletedTask;}
         directChatSource=request?.DirectReading==true||PendingState(project)?.DirectReading==true; pendingArchive=project;pendingArchiveRequest=request??new(BackupOnly:PendingState(project)?.BackupOnly==true,DirectReading:PendingState(project)?.DirectReading==true);
         activeManifest=project.Manifest;readingDirectory=project.Reading;
         if(directChatSource){
+            if(project.TaskFile==null&&string.IsNullOrWhiteSpace(project.ReadingRoot)){project=project with{ReadingRoot=!string.IsNullOrWhiteSpace(preferences.ArchiveRoot)?preferences.ArchiveRoot:project.BackupRoot};pendingArchive=project;}
             string? sourceDb=ChatExporter.FindDatabases(project.Source,project.Platform).FirstOrDefault();if(sourceDb==null&&PendingState(project)?.Phase is not ("protection" or "publish" or "published"))throw new InvalidOperationException(L.T("NoAccounts"));sourceDb??=Path.Combine(project.Source,"unavailable.db");
             activeChat=new(project.Platform,project.Source,project.Account,sourceDb,File.Exists(sourceDb)?new FileInfo(sourceDb).Length:0);SetCapturedKey(null);chatStep=4;RenderChatStage();return Task.CompletedTask;
         }
@@ -88,7 +91,7 @@ public sealed partial class ShellWindow {
     }
     private void BuildArchiveAccess(){
         var project=pendingArchive??throw new InvalidOperationException();var request=pendingArchiveRequest??new();bool direct=request.DirectReading||PendingState(project)?.DirectReading==true;
-        var stack=View.Stack(View.Field(direct?"AccountFolderLabel":"RawBackupLabel",View.Input(direct?project.Source:ArchiveDirectory(),true)));
+        var stack=View.Stack(View.Field(direct||request.BackupOnly?"AccountFolderLabel":"RawBackupLabel",View.Input(direct||request.BackupOnly?project.Source:ArchiveDirectory(),true)));
         chatContent.Children.Add(View.FormScroll(stack));
         if(!request.BackupOnly&&project.TaskFile==null){readingRootInput=View.Input(project.ReadingRoot);var path=new DockPanel();var browse=Button("Browse",()=>{string folder=View.Folder(this,readingRootInput.Text,"reading-output-root");if(folder!="")readingRootInput.Text=folder;});browse.Margin=new Thickness(8,0,0,0);DockPanel.SetDock(browse,Dock.Right);path.Children.Add(browse);path.Children.Add(readingRootInput);stack.Children.Add(View.Field("ReadingOutputRoot",path));}
         if(ArchiveNeedsDatabase(project,request)){
@@ -149,9 +152,21 @@ public sealed partial class ShellWindow {
             var settings=new ArchiveProtectionWindow(project,index,current){Owner=this};if(settings.ShowDialog()!=true)return;
             if(settings.Mode!=ChatArchiveProtectionMode.None&&password==null){var create=new VaultPasswordWindow(true,false){Owner=this};if(create.ShowDialog()!=true)return;password=create.Password;create.ClearSecret();}
             if(string.IsNullOrWhiteSpace(project.ReadingRoot))project=project with{ReadingRoot=Path.GetDirectoryName(project.Reading)!};
-            pendingArchive=project;pendingArchiveRequest=new(Protection:settings.Settings,Mode:settings.Mode,UseExistingBackup:true,ProtectionOnly:true,DirectReading:project.Manifest==null);
+            pendingArchive=project;pendingArchiveRequest=new(Protection:settings.Settings,Mode:settings.Mode,UseExistingBackup:true,ProtectionOnly:true,DirectReading:true);
             if(!Confirm(L.T(settings.Mode==ChatArchiveProtectionMode.None?"ArchiveRemoveProtectionConfirm":"ArchiveProtectConfirm")))return;
             await StartArchiveUpdate(password);
         }finally{password=null;archivePreparing=false;}
     }
+    private async Task RemoveArchiveProtection(ChatArchiveProject project){
+        if(PendingState(project)!=null)throw new InvalidOperationException(L.T("HubFinishPending"));
+        if(project.Reading==null||!ChatVault.Exists(project.Reading))return;
+        var dialog=new VaultPasswordWindow(false,false){Owner=this};if(dialog.ShowDialog()!=true)return;string? password=dialog.Password;dialog.ClearSecret();
+        try{
+            using(var vault=await Task.Run(()=>ChatVault.Open(project.Reading,password.AsSpan()))){ }
+            if(!Confirm(L.T("ArchiveRemoveProtectionConfirm")))return;
+            if(string.IsNullOrWhiteSpace(project.ReadingRoot))project=project with{ReadingRoot=Path.GetDirectoryName(project.Reading)!};
+            pendingArchive=project;pendingArchiveRequest=new(Protection:new(project.IncludeMedia),Mode:ChatArchiveProtectionMode.None,ProtectionOnly:true,DirectReading:true);await StartArchiveUpdate(password);
+        }finally{password=null;dialog.ClearSecret();}
+    }
+
 }

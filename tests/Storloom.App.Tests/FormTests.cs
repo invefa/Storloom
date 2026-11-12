@@ -377,7 +377,7 @@ public sealed class FormTests {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language="zh-CN",ReduceMotion=true,ChatAutoDiscover=false});
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
-            window.Show();window.Navigate("chats");Pump();Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections").SelectedIndex=1;Pump();
+            window.Show();window.Navigate("chats");Pump();Descendants(window).OfType<Button>().Single(b=>b.Name=="account_add").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();
             var task=(Task)typeof(ShellWindow).GetMethod("DiscoverChats",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,[fixture])!;
             Wait(AsResult(task));Pump();
             var notice=Descendants(window).OfType<TextBlock>().Single(t=>t.Name=="account_discovery_notice");Assert.Equal(L.T("DiscoveryEmpty"),notice.Text);
@@ -779,8 +779,7 @@ public sealed class FormTests {
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
             var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Single(table.Items.Cast<object>());
             foreach(string name in new[]{"archive_open","archive_update","archive_backup"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
-            var materials=Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("AccountMaterials"))).ContextMenu!;
-            foreach(string name in new[]{"archive_protection","archive_verify_now"})Assert.True(materials.Items.OfType<MenuItem>().Single(i=>i.Name==name).IsEnabled);
+            foreach(string name in new[]{"archive_protection","archive_verify_now"})Assert.True(Descendants(window).OfType<Button>().Single(i=>i.Name==name).IsEnabled);
             Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
             Capture(window,"archive-home-"+theme);
             if(theme==AppTheme.OneDark){var detail=Descendants(window).OfType<TextBlock>().First(t=>t.Text.Contains(project.Source,StringComparison.Ordinal));detail.Text=L.T("ArchiveDetail",@"D:\Example\Account",@"E:\Example\Archives\Reading")+"\n"+L.T("ArchiveRawProtectionNotice");Capture(window,"public-"+locale+"-archives");}
@@ -796,7 +795,8 @@ public sealed class FormTests {
             verification.IsChecked=true;verification.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.True(JsonFiles.Read<ChatArchiveTask>(pendingFile).VerifyBackupBeforeReading);
             typeof(ShellWindow).GetMethod("SaveArchive",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(window,new object[]{selected});
             Capture(window,"archive-update-options-"+theme);
-            Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections").SelectedIndex=1;Pump();Assert.True(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts").IsVisible);
+            Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("GoBack"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();
+            Descendants(window).OfType<Button>().Single(b=>b.Name=="account_add").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.True(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts").IsVisible);
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
     [Fact]
@@ -1485,7 +1485,7 @@ public sealed class FormTests {
             var project=new ChatArchiveProject(ChatArchiveProject.Identity(account.Platform,account.Directory),account.Account,account.Platform,account.Directory,Path.Combine(fixture,"account-backups")){ReadingRoot=Path.Combine(fixture,"account-readers")};type.GetMethod("SaveArchive",flags)!.Invoke(window,[project]);
             foreach(var size in new[]{(950d,760d),(760d,640d)}){
                 window.Width=size.Item1;window.Height=size.Item2;
-                foreach(int step in new[]{1,6,4}){
+                foreach(int step in new[]{6,4}){
                     if(step==4)Wait(AsResult((Task)type.GetMethod("PrepareIndependentReading",flags)!.Invoke(window,[account])!));
                     else{type.GetField("chatStep",flags)!.SetValue(window,step);type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);}Pump();window.UpdateLayout();
                     if(step==6)Assert.Equal(project.BackupRoot,((TextBox)type.GetField("backupInput",flags)!.GetValue(window)!).Text);
@@ -1508,10 +1508,11 @@ public sealed class FormTests {
         string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Theme=theme,Language="zh-CN",ReduceMotion=true,ChatAutoDiscover=false});
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false,Width=850,Height=650};
         try{
-            window.Show();window.Navigate("chats");Pump();var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections");Assert.Equal(2,tabs.Items.Count);
+            window.Show();window.Navigate("chats");Pump();var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections");Assert.Equal(3,tabs.Items.Count);
             for(int cycle=0;cycle<2;cycle++){
-                tabs.SelectedIndex=1;Pump();Assert.True(((TabItem)tabs.Items[1]).IsSelected);Assert.False(((TabItem)tabs.Items[0]).IsSelected);Assert.True(Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="chat_accounts").IsVisible);
-                tabs.SelectedIndex=0;Pump();Assert.True(((TabItem)tabs.Items[0]).IsSelected);Assert.False(((TabItem)tabs.Items[1]).IsSelected);Assert.True(Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="managed_archives").IsVisible);
+                tabs.SelectedIndex=1;Pump();Assert.True(((TabItem)tabs.Items[1]).IsSelected);Assert.False(((TabItem)tabs.Items[0]).IsSelected);Assert.True(Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="database_key_files").IsVisible);
+                tabs.SelectedIndex=2;Pump();Assert.True(Descendants(window).OfType<TextBox>().Single(g=>g.Name=="account_search_roots").IsVisible);
+                tabs.SelectedIndex=0;Pump();Assert.True(((TabItem)tabs.Items[0]).IsSelected);Assert.False(((TabItem)tabs.Items[1]).IsSelected);Assert.True(Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="managed_archives").IsVisible||Descendants(window).OfType<ComboBox>().Single(g=>g.Name=="compact_account_selector").IsVisible);
             }
             Capture(window,"archive-tabs-"+theme);
             var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ChatSettingsWindow")!;var dialog=(Window)Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public,null,[new AppPreferences{ChatSearchRoots=[Path.Combine(fixture,"one"),Path.Combine(fixture,"two")]}],null)!;
@@ -1570,6 +1571,33 @@ public sealed class FormTests {
             panel.Log.Focus();panel.PauseFollowing();Assert.True(Mouse.Capture(panel.Log,CaptureMode.SubTree));Leave();Assert.False(panel.IsFollowing);panel.Log.ReleaseMouseCapture();Leave();Assert.True(panel.IsFollowing);
             panel.ToggleFollowing();panel.Log.Focus();panel.PauseFollowing();panel.Log.Select(10,15);panel.Log.ScrollToVerticalOffset(0);Pump();Leave();panel.AddLog("explicitly disabled still stays put");Pump();Assert.False(panel.Follow);Assert.False(panel.IsFollowing);Assert.InRange(panel.Log.VerticalOffset,0,1);
         }finally{panel.Log.ReleaseMouseCapture();window.Close();}
+    });
+
+    [Theory][InlineData(AppTheme.Light,"en")][InlineData(AppTheme.Dark,"zh-CN")][InlineData(AppTheme.OneDark,"zh-CN")]
+    public void AccountHubRoutesTasksDirectlyAndKeepsContextWithVisibleProtectionActions(AppTheme theme,string locale)=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data"),reading=Path.Combine(fixture,"reading");Directory.CreateDirectory(source);Directory.CreateDirectory(reading);File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);File.WriteAllText(Path.Combine(reading,"messages.html"),"fixture");
+        var p=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.QQ,source),"Fixture account",ChatPlatform.QQ,source,Path.Combine(fixture,"raw")){Reading=reading,ReadingRoot=Path.Combine(fixture,"readers"),ReadableAt=DateTimeOffset.UtcNow};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{p});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true,LogAutoShow=false});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=1000,Height=760};const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;var type=typeof(ShellWindow);
+        Button Find(string name)=>Descendants(window).OfType<Button>().Single(b=>b.Name==name);
+        void Click(string name){Find(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Pump();}
+        void Back(){Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("GoBack"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.Equal(-1,type.GetField("chatStep",flags)!.GetValue(window));Assert.Equal(p.Id,type.GetField("selectedArchiveId",flags)!.GetValue(window));}
+        try{window.Show();window.Navigate("chats");Pump();Assert.Equal(3,Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections").Items.Count);Assert.True(Find("archive_protection").IsVisible);Assert.True(Find("archive_decrypt").IsVisible);Assert.False(Find("archive_decrypt").IsEnabled);
+            Click("archive_update");Assert.Equal(4,type.GetField("chatStep",flags)!.GetValue(window));Assert.True(((ChatArchiveUpdateRequest)type.GetField("pendingArchiveRequest",flags)!.GetValue(window)!).DirectReading);Back();
+            Click("archive_backup");Assert.Equal(6,type.GetField("chatStep",flags)!.GetValue(window));Back();
+            foreach(var size in new[]{(1000d,760d),(760d,640d)}){window.Width=size.Item1;window.Height=size.Item2;Pump();window.UpdateLayout();var scroll=Descendants(window).OfType<ScrollViewer>().Single(v=>v.Name=="account_details_scroll");Assert.InRange(scroll.ScrollableHeight,0,1);var accountPicker=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="compact_account_selector");if(accountPicker.IsVisible)Assert.Contains(Descendants(accountPicker).OfType<TextBlock>(),t=>t.Text==p.Account);foreach(var b in new[]{Find("archive_update"),Find("archive_backup"),Find("archive_protection"),Find("archive_decrypt")})Assert.True(b.TranslatePoint(new Point(b.ActualWidth,b.ActualHeight),window).X<=window.ActualWidth);Capture(window,"account-hub-"+theme+"-"+(int)size.Item1);}
+            string pending=Path.Combine(data,"archive-tasks",p.Id+".json");Directory.CreateDirectory(Path.GetDirectoryName(pending)!);JsonFiles.Write(pending,new ChatArchiveTask(1,p.Id,"fixture-work","fixture-generation",reading,null,"reading",false){DirectReading=true});type.GetMethod("SaveArchive",flags)!.Invoke(window,[p with{TaskFile=pending}]);type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();Assert.True(Find("account_continue").IsVisible);Assert.False(Find("archive_update").IsEnabled);Assert.False(Find("archive_backup").IsEnabled);Assert.True(Find("archive_open").IsEnabled);
+            type.GetMethod("SaveArchive",flags)!.Invoke(window,[p]);type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();Click("account_add");var table=Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="chat_accounts");type.GetField("locations",flags)!.SetValue(window,new List<ChatLocation>{new(ChatPlatform.QQ,source,p.Account,Path.Combine(source,"nt_msg.db"),5120)});type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();table=Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="chat_accounts");table.SelectedIndex=0;Find("chat_next").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.Equal(-1,type.GetField("chatStep",flags)!.GetValue(window));Assert.Equal(reading,JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")).Single().Reading);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Fact]public void GlobalAccountSettingsSaveInPlaceAndKeyLibraryKeepsFilesWhenForgotten()=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data"),file=Path.Combine(fixture,"custody.data");Directory.CreateDirectory(source);File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);File.WriteAllText(file,"fixture file reference");
+        var p=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.QQ,source),"Fixture account",ChatPlatform.QQ,source,Path.Combine(fixture,"raw"));JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{p});JsonFiles.Write(Path.Combine(data,"database-key-library.json"),new[]{new{Path=file,Account=p.Account,Platform=p.Platform}});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,Language="en",ReduceMotion=true,LogAutoShow=false});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=850,Height=700};const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        try{window.Show();window.Navigate("chats");Pump();var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections");tabs.SelectedIndex=2;Pump();var input=Descendants(window).OfType<TextBox>().Single(t=>t.Name=="account_search_roots");input.Text=Path.Combine(fixture,"new-search-root");Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("Apply"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.Equal(2,tabs.SelectedIndex);Assert.Equal(input.Text,Assert.Single(JsonFiles.Read<AppPreferences>(Path.Combine(data,"preferences.json")).ChatSearchRoots));Capture(window,"account-client-settings-inline");
+            tabs.SelectedIndex=1;Pump();var selector=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="key_account_selector");Assert.Contains(Descendants(selector).OfType<TextBlock>(),t=>t.Text.Contains(p.Account));var prepare=(Task<bool>)typeof(ShellWindow).GetMethod("PrepareKeyAccount",flags)!.Invoke(window,[p])!;Assert.True(Wait(prepare));Assert.Equal(source,((ChatLocation)typeof(ShellWindow).GetField("activeChat",flags)!.GetValue(window)!).Directory);Assert.Equal(1,tabs.SelectedIndex);
+            var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="database_key_files");table.SelectedIndex=0;Pump();Capture(window,"database-key-library-inline");Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("KeyLibraryForget"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.Empty(table.Items);Assert.True(File.Exists(file));
+        }finally{window.Close();Directory.Delete(fixture,true);}
     });
 
 }

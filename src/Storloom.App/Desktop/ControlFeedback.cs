@@ -51,7 +51,7 @@ public static class ControlFeedback {
         if (passiveEditor) animate = false;
         if (control is not Thumb && !passiveEditor && control.IsEnabled && (control.IsMouseOver || (bool)control.GetValue(PressedProperty))) {
             if (color.A == 0) color = ParentColor(control);
-            double amount = (bool)control.GetValue(PressedProperty) ? .18 : .08;
+            double amount = control is TextBox or PasswordBox ? .025 : (bool)control.GetValue(PressedProperty) ? .18 : .08;
             var ink = Color("Ink");
             // Filled buttons need a visible state change while preserving foreground contrast.
             if (color == Color("Accent")) {

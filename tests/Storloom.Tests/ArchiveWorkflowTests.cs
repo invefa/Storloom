@@ -24,6 +24,11 @@ public sealed class ArchiveWorkflowTests:IDisposable {
         var second=Update(first,password,request:new(DirectReading:true));Assert.Null(second.Manifest);Assert.NotEqual(old,second.Reading);Assert.Equal(before,File.ReadAllBytes(Path.Combine(old,"vault.storloom.json")));
         using var vault=ChatVault.Open(second.Reading!,password);using var text=new StreamReader(vault.OpenRead("messages.jsonl"));Assert.Contains("independent protected message",text.ReadToEnd());Assert.False(File.Exists(Path.Combine(second.Reading!,"messages.jsonl")));
     }
+    [Fact]public void ExplicitDecryptionCreatesAPlainGenerationWithoutRequiringTheOriginalAccount(){
+        var encrypted=Update(Project(),Password,new(DirectReading:true,Mode:ChatArchiveProtectionMode.All));string original=encrypted.Reading!;byte[] marker=File.ReadAllBytes(Path.Combine(original,"vault.storloom.json"));Directory.Delete(encrypted.Source,true);
+        var plain=Update(encrypted,Password,new(Protection:new(true),Mode:ChatArchiveProtectionMode.None,ProtectionOnly:true,DirectReading:true));
+        Assert.Equal(ChatArchiveProtectionMode.None,plain.Protection);Assert.False(ChatVault.Exists(plain.Reading!));Assert.Contains("first message",File.ReadAllText(Path.Combine(plain.Reading!,"messages.jsonl")));Assert.Equal(marker,File.ReadAllBytes(Path.Combine(original,"vault.storloom.json")));Assert.Null(plain.Manifest);
+    }
     [Fact]public void RawAndReadingLocationsRemainIndependentAcrossUpdates(){
         var project=Project() with{ReadingRoot=Path.Combine(root,"reading-location")};
         var first=Update(project,request:new(DirectReading:true));Assert.True(PathPolicy.Under(first.Reading!,project.ReadingRoot));Assert.Null(first.Manifest);

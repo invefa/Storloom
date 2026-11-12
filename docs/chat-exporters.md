@@ -48,8 +48,16 @@ Explicitly saved database key files use independent passwords, AES-256-GCM, rand
 
 ## Restore client data
 
-Tools > Restore client data accepts a completed raw backup manifest and a new destination. It materializes inherited incremental resources, verifies SHA-256, and publishes a self-contained account directory only after completion. Existing directories are never merged or overwritten. In-session pause is supported. A failed or cancelled restore leaves a clearly marked partial directory, not a completed destination.
+Account archives > Raw backup > Restore client data accepts a completed raw backup manifest and a new destination. It materializes inherited incremental resources, verifies SHA-256, and publishes a self-contained account directory only after completion. Existing directories are never merged or overwritten. In-session pause is supported. A failed or cancelled restore leaves a clearly marked partial directory, not a completed destination.
 
 Restoring to a separate directory does not modify a running client. Close the client before adopting restored data, select the restored data location in a compatible client version, and sign in normally. The tool does not replace active client directories, transfer login credentials, or guarantee cross-version database compatibility.
 
 In the account picker, **Scan all account sizes** compares accounts; **Scan selected size** refreshes only the selected account. Measurement reads file metadata and includes media and attachments. It supports pause and cancellation, sorts by descending size, and preserves selection. Hover a size for file count and measurement time. Unmeasured and partial results are distinguished; partial values are lower bounds. These are logical file sizes, not allocated or deduplicated disk usage. Quick discovery does not automatically start a size scan.
+
+## Account center in 2.4
+
+Global pages are Account archives, Database key library, and Accounts and clients. Add account only registers the selected source and returns to its details. Reading, update, protection, decryption, raw backup, verification and restore have separate visible actions. An unfinished task has its own Continue entry; it never hijacks another task button. Back returns to the selected account.
+
+The account list moves to a compact selector on narrow windows. Password-protected key files can be selected in task setup or managed on their own page. Editable fields use a subdued hover response. Reading protection and database-key passwords remain separate.
+
+Decrypting a managed reader creates a new unprotected generation and retains the encrypted version. Decrypting a connected standalone reader creates a separate plain copy. Packed stores retain their format-specific backup and password actions; exporting a reader offers independent password protection. Native account changes still reach packed stores through an explicit completed-reader synchronization.
