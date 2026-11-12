@@ -94,7 +94,7 @@ public static class ChatIncrementalBackup {
             var published = new TransferJournal { Plan = plan, State = "Completed", Receipts = receipts };
             JsonFiles.Write(staging + ".manifest.json", published);
             OperationPause.Check(cancellation); PathPolicy.AssertNoLinks(Path.GetDirectoryName(plan.Destination)!);
-            Directory.Move(staging, plan.Destination);
+            DirectoryPublication.Move(staging, plan.Destination,cancellation);
             File.Move(staging + ".manifest.json", manifest);
             Save("Completed");
             return new(new(plan.Destination, receipts.Count, 0, copyBytes, manifest, false, []), inherited.Count, inherited.Values.Sum(r => r.Bytes));

@@ -2,9 +2,9 @@
 
 Storloom creates local backups and a separate reading copy. A reading copy preserves available original message payloads, but cannot recover content or attachments that are absent from the source. See the export report for unsupported messages and unresolved resources. Keep the verified raw backup and its manifest.
 
-## Backup and export
+## Accounts and independent tasks
 
-1. Select the complete account directory, including databases and media.
+1. Open **Add account** and select an automatically discovered account, or browse to its complete directory, including databases and media. The account is registered before starting a task.
 2. Choose a direct reading export or a verified raw backup independently. Close the source client before reading its account data. No database key is required for raw copying.
 3. For a direct account export or an export from an existing backup, in **Database access**, obtain a matching key, type a retained key, or load a key file. Captured and imported keys must authenticate the selected database. Key acquisition is explicit and version-dependent; signature checks and timeouts remain enforced.
 4. In **Reading copy options**, choose verification and optional password protection. The reading password is separate from the database key. Protection starts only after export finalization; an unfinished export is still plaintext.
@@ -14,11 +14,11 @@ Database keys are not automatically saved or logged. **View / retain verified ke
 
 ## Continue without starting over
 
-**Resume reading export** continues an interrupted export of the same immutable backup. Keep its progress file and work directory together. Finished databases and committed pages are reused; an unfinished database may restart. Re-enter or obtain its matching key.
+Continue an interrupted task from its account entry. Keep its progress file and work directory together. Finished databases and committed pages are reused; an unfinished database may restart. Re-enter or obtain its matching key. Direct account tasks retain a database fingerprint and accept continuation only while the source databases still match. Changed sources are rejected without replacing the previous reading copy.
 
 **Incremental backup** creates a new generation, copying changed files while reusing verified unchanged resources. Databases and their transaction files are copied together. Keep all referenced raw generations and manifests; a newer generation may depend on earlier files.
 
-**Update reading copy** merges a newer verified backup into a completed ordinary reading copy of the same account. It preserves existing history, reuses resources and rebuilds affected pages. The first update may need a one-time history scan. Updates still parse changed databases and need working space. Close the reading window before updating. Managed protected reading copies are updated through an encrypted workspace and published as a new protected generation.
+**Update reading copy** merges changes from the closed local account, or a newer verified raw backup, into the completed reading copy of the same account. It preserves existing history, reuses resources and rebuilds affected pages. The first update may need a one-time history scan. Updates still parse changed databases and need working space. Close the reading window before updating. Managed protected reading copies are updated through an encrypted workspace and published as a new protected generation.
 
 ## Progress and performance
 
@@ -36,7 +36,11 @@ Original binary/XML/JSON payloads remain data, never executable viewer content. 
 
 The account picker searches common locations and redirected Documents folders automatically. Searches skip media trees, use a bounded depth, and omit full media size scans. Account and client locations can be configured from the picker or Tools > Preferences. Add search roots, disable automatic discovery, or override a client executable. Process paths and installation registry entries provide automatic executable hints; manual browsing remains available.
 
-After selecting an account, Export reading copy reads the closed client's account directly without requiring a raw backup. Raw backup remains a separate action; exports from existing backups and managed updates remain available. Direct exports support in-session pause. Cross-restart export resume still requires an immutable backup source. A reading copy is not a restorable client backup.
+After selecting an account, choose **Reading copy** or **Raw backup** as separate tasks. Reading tasks can read the closed local account directly or use an existing raw backup. Raw backup automatically uses a known verified generation for an incremental run; its options also allow a full backup or a different base. Backup and reading output locations are stored separately. A reading copy is not a restorable client backup.
+
+Direct account tasks read-lock the source databases and transaction files, capture their fingerprints, and retain checkpoints for continuation. Reopening the client or changing source databases before continuation can invalidate that task. Media can still be missing or change independently; inspect the report. Direct reading updates do not create a full raw-backup generation.
+
+The account list groups reading, update, raw backup and materials/history actions by account. **Connect existing data** registers backups, reading copies or packed stores. **Tools > Storage maintenance** contains advanced packed-format actions. Packed stores still import completed reading copies; a newer ordinary reading generation must be explicitly synchronized before its packed copy is current.
 
 ## Password-protected database key library
 
@@ -44,6 +48,8 @@ Explicitly saved database key files use independent passwords, AES-256-GCM, rand
 
 ## Restore client data
 
-More actions > Restore client data accepts a completed raw backup manifest and a new destination. It materializes inherited incremental resources, verifies SHA-256, and publishes a self-contained account directory only after completion. Existing directories are never merged or overwritten. In-session pause is supported. A failed or cancelled restore leaves a clearly marked partial directory, not a completed destination.
+Tools > Restore client data accepts a completed raw backup manifest and a new destination. It materializes inherited incremental resources, verifies SHA-256, and publishes a self-contained account directory only after completion. Existing directories are never merged or overwritten. In-session pause is supported. A failed or cancelled restore leaves a clearly marked partial directory, not a completed destination.
 
 Restoring to a separate directory does not modify a running client. Close the client before adopting restored data, select the restored data location in a compatible client version, and sign in normally. The tool does not replace active client directories, transfer login credentials, or guarantee cross-version database compatibility.
+
+In the account picker, **Scan all account sizes** compares accounts; **Scan selected size** refreshes only the selected account. Measurement reads file metadata and includes media and attachments. It supports pause and cancellation, sorts by descending size, and preserves selection. Hover a size for file count and measurement time. Unmeasured and partial results are distinguished; partial values are lower bounds. These are logical file sizes, not allocated or deduplicated disk usage. Quick discovery does not automatically start a size scan.

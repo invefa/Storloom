@@ -13,11 +13,11 @@ public sealed partial class ShellWindow {
     private Grid chatContent = null!;
     private WrapPanel chatFooter = null!;
     private DataGrid chatList = null!;
-    private TextBlock[] chatSteps = [];
-    private Border[] chatStepFrames = [];
+    private TextBlock chatTaskTitle=null!;
     private TextBlock accountNotice = null!;
     private Button chatNext = null!;
     private Button? chatResume, chatUpdate;
+    private Button? measureAllAccounts;
     private TextBox? backupInput;
     private PasswordBox? keyInput;
     private bool verifyChatBackup = true, encryptAfterExport;
@@ -29,31 +29,27 @@ public sealed partial class ShellWindow {
         LoadArchiveProjects();
         var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,8,0,0)};
         var home=Button("ArchiveHome",()=>{chatStep=-1;RenderChatStage();});home.Name="archive_home_nav";entries.Children.Add(home);
-        var stored=Button("StoreHome",()=>{chatStep=5;RenderChatStage();});stored.Name="store_home_nav";entries.Children.Add(stored);
-        entries.Children.Add(Button("ArchiveImport",OpenChatBackup));
-        entries.Children.Add(Button("ArchiveCreate",()=>{chatStep=0;activeChat=null;SetCapturedKey(null);RenderChatStage();},true));
-        var more=new ContextMenu();var moreButton=Button("ArchiveMore",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
+        var add=Button("ArchiveCreate",()=>{chatStep=0;activeChat=null;pendingArchive=null;directChatSource=false;SetCapturedKey(null);RenderChatStage();},true);add.Name="account_add_nav";entries.Children.Add(add);
+        var importMenu=new ContextMenu();var import=Button("ConnectExisting",()=>importMenu.IsOpen=true);importMenu.PlacementTarget=import;import.ContextMenu=importMenu;
+        void ImportEntry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);importMenu.Items.Add(entry);}
+        ImportEntry("OpenChatBackup",OpenChatBackup);ImportEntry("ConnectReader",ConnectReader);ImportEntry("StoreLoad",ConnectStore);entries.Children.Add(import);
+        var more=new ContextMenu();var moreButton=Button("ArchiveTools",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
         void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
-        Entry("ChatSettings",ConfigureChats);Entry("KeyLibrary",OpenKeyLibrary);Entry("RestoreChatBackup",RestoreChatBackup);Entry("OpenChatBackup",OpenChatBackup);Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
+        Entry("ChatSettings",ConfigureChats);Entry("KeyLibrary",OpenKeyLibrary);Entry("RestoreChatBackup",RestoreChatBackup);Entry("StoreMaintenance",()=>{chatStep=5;RenderChatStage();});Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
         ((StackPanel)layout.Children[0]).Children.Add(entries);
-        var steps = new Grid { Margin = new Thickness(0, 0, 0, 10) }; chatSteps = new TextBlock[3]; chatStepFrames = new Border[3];
-        string[] keys = ["ChatStepAccount", "ChatStepBackup", "ChatStepExport"];
-        for (int i = 0; i < 3; i++) {
-            steps.ColumnDefinitions.Add(new ColumnDefinition { Width = View.Fill });
-            chatSteps[i] = View.Text(L.T(keys[i])); chatSteps[i].Margin = new Thickness(0);
-            chatStepFrames[i] = new Border { Child = chatSteps[i], CornerRadius = new CornerRadius(3), Padding = new Thickness(10, 7, 10, 7), Margin = new Thickness(0, 0, 6, 0) };
-            View.Add(steps, chatStepFrames[i], 0, i);
-        }
-        View.Add(layout, steps, 1); chatContent = new Grid(); View.Add(layout, View.Card(chatContent, 22), 2);
+        chatTaskTitle=View.Text("",14);chatTaskTitle.Margin=new Thickness(0,6,0,12);View.Add(layout,chatTaskTitle,1);
+        chatContent = new Grid(); View.Add(layout, View.Card(chatContent, 20), 2);
         chatFooter = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
         View.Add(layout, chatFooter, 3); RenderChatStage();
     }
     private void RenderChatStage() {
+        if(readingRootInput!=null&&pendingArchive!=null)pendingArchive=pendingArchive with{ReadingRoot=readingRootInput.Text};readingRootInput=null;
         chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null; chatUpdate = null;
-        var home=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="archive_home_nav");if(home!=null)home.Visibility=chatStep<0?Visibility.Collapsed:Visibility.Visible;
-        foreach(var frame in chatStepFrames)frame.Visibility=chatStep is >=0 and <=3?Visibility.Visible:Visibility.Collapsed;
-        for (int i = 0; i < chatSteps.Length; i++) { chatStepFrames[i].SetResourceReference(Border.BackgroundProperty, i == Math.Min(chatStep, 2) ? "Selection" : "Canvas"); }
-        if(chatStep<0)BuildArchiveHome();else if(chatStep==5)BuildStores();else if(chatStep==4)BuildArchiveAccess();else if (chatStep == 0) BuildChatAccounts(); else if (chatStep == 1) BuildChatBackup(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
+        var home=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="archive_home_nav");if(home!=null)home.Visibility=Visibility.Visible;
+        var add=Controls(pageHost).OfType<Button>().FirstOrDefault(b=>b.Name=="account_add_nav");if(add!=null)add.SetResourceReference(FrameworkElement.StyleProperty,chatStep<0?"PrimaryButton":typeof(Button));
+        chatTaskTitle.Text=chatStep switch{0=>L.T("SelectAccount"),1=>L.T("AccountTasksTitle",activeChat?.Account??""),6=>L.T("RawTaskTitle",activeChat?.Account??""),2 or 4=>L.T("ReadingTaskTitle",activeChat?.Account??""),3=>L.T("ArchiveFinished"),5=>L.T("StoreMaintenance"),_=>""};
+        chatTaskTitle.Visibility=chatStep<0?Visibility.Collapsed:Visibility.Visible;
+        if(chatStep<0)BuildArchiveHome();else if(chatStep==5)BuildStores();else if(chatStep==4)BuildArchiveAccess();else if (chatStep == 0) BuildChatAccounts(); else if(chatStep==6)BuildRawBackup();else if (chatStep == 1) BuildChatTasks(); else if (chatStep == 2) BuildChatExport(); else BuildChatFinished();
         chatFooter.Children.Add(Button("QuickStart", () => ShowHelp(2))); Theme.Enter(chatContent);
     }
     private void BuildChatAccounts() {
@@ -63,44 +59,55 @@ public sealed partial class ShellWindow {
         var actions = View.Row(AsyncButton("FindAccounts", () => DiscoverChats(null), true), AsyncButton("SelectAccountFolder", async () => {
             string path = View.Folder(this,purpose:"chat-account-select"); if (path != "") await DiscoverChats(path);
         }), Button("ChatSettings",ConfigureChats)); actions.Margin = new Thickness(0, 6, 0, 14); View.Add(grid, actions, 1);
+        var measureAll=AsyncButton("ScanAccountSizes",()=>MeasureAccountSizes(false));measureAllAccounts=measureAll;measureAll.Name="measure_all_accounts";measureAll.IsEnabled=locations.Count>0;
+        var measureSelected=AsyncButton("ScanSelectedAccountSize",()=>MeasureAccountSizes(true));measureSelected.Name="measure_selected_account";measureSelected.IsEnabled=false;
+        actions.Children.Add(measureAll);actions.Children.Add(measureSelected);
+        foreach(var button in actions.Children.OfType<Button>())button.Margin=new Thickness(0,0,8,6);
         chatList = View.Table(("Account", "Account", 0), ("Platform", "Platform", 120), ("AccountSize", "Size", 150), ("Path", "Path", 0));
         accountNotice = View.Text(L.T("DiscoveryHelp"), color: "Muted"); accountNotice.Name = "account_discovery_notice"; View.Add(grid, accountNotice, 2);
         chatList.Name = "chat_accounts"; chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray(); View.Add(grid, chatList, 3);
+        var sizeColumn=(DataGridTextColumn)chatList.Columns.Single(c=>c.SortMemberPath=="Bytes");
+        var sizeStyle=new Style(typeof(TextBlock),sizeColumn.ElementStyle);sizeStyle.Setters.Add(new Setter(ToolTipProperty,new System.Windows.Data.Binding("SizeDetails")));sizeColumn.ElementStyle=sizeStyle;
         chatNext = Button("Next", () => {
             if (chatList.SelectedItem is not AccountRow row) throw new InvalidOperationException(L.T("NoAccountSelected"));
             if (activeChat?.Directory != row.Location.Directory || activeChat?.Platform != row.Location.Platform) SetCapturedKey(null);
-            activeChat = row.Location; directChatSource=false; activeManifest = null; readingDirectory = exportReport = null; chatStep = 1; RenderChatStage();
+            activeChat = row.Location;directChatSource=false;
+            string id=ChatArchiveProject.Identity(row.Location.Platform,row.Location.Directory);var project=archiveProjects.GetValueOrDefault(id)??new ChatArchiveProject(id,row.Location.Account,row.Location.Platform,row.Location.Directory,preferences.BackupRoot){ReadingRoot=preferences.ArchiveRoot};SaveArchive(project);pendingArchive=project;
+            activeManifest=project.Manifest;readingDirectory=project.Reading;exportReport=null;chatStep=1;RenderChatStage();
         }, true); chatNext.Name = "chat_next"; chatNext.IsEnabled = false;
         chatList.SelectionChanged += (_, _) => chatNext.IsEnabled = chatList.SelectedItem is AccountRow; chatFooter.Children.Add(chatNext);
+        chatList.SelectionChanged+=(_,_)=>measureSelected.IsEnabled=operation==null&&chatList.SelectedItem is AccountRow;
     }
     private async Task DiscoverChats(string? root) => await Run(async token => {
         var progress = Progress(); locations = await Task.Run(() => ChatDiscovery.Discover(root == null ? ChatPaths.DataRoots().Concat(preferences.ChatSearchRoots) : [root], progress, token, measureSize:false));
         chatList.ItemsSource = locations.Select(l => new AccountRow(l)).ToArray();
+        if(measureAllAccounts!=null)measureAllAccounts.IsEnabled=locations.Count>0;
         if (locations.Count == 1) chatList.SelectedIndex = 0; status.Text = L.T(locations.Count == 0 ? "NoAccounts" : "SelectAccount");
         accountNotice.Text = L.T(locations.Count == 0 ? "DiscoveryEmpty" : "DiscoveryFound", locations.Count);
         operationView.AddLog(L.T("LogAccountsDone",locations.Count));
         if (locations.Count > 0) View.Sort(chatList, "Bytes");
     });
-    private sealed record AccountRow(ChatLocation Location) {
+    private sealed record AccountRow(ChatLocation Location, bool Scanning=false) {
         public string Account => Location.Account; public string Platform => Location.Platform.ToString(); public string Path => Location.Directory;
         public long? Bytes => Location.AccountBytes;
-        public string Size => Location.AccountBytes is long bytes ? Location.SizeComplete ? View.Size(bytes) : L.T("AtLeastSize", View.Size(bytes)) : L.T("SizeNotScanned");
+        public string Size => Scanning?L.T("AccountSizeScanning",View.Size(Location.AccountBytes??0)):Location.AccountBytes is long bytes ? Location.SizeComplete ? View.Size(bytes) : L.T("AtLeastSize", View.Size(bytes)) : L.T("SizeNotScanned");
+        public string SizeDetails=>L.T("AccountSizeDetails",View.Size(Location.DatabaseBytes),Location.AccountFiles)+"\n"+(Location.SizeScannedAt is {} time?L.T("AccountSizeMeasuredAt",time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")):L.T("AccountSizeNotMeasuredHelp"));
     }
-    private void BuildChatBackup() {
+    private void BuildRawBackup() {
         var account = Account();
-        backupInput = View.Input(preferences.BackupRoot);
+        string id=ChatArchiveProject.Identity(account.Platform,account.Directory);
+        backupInput = View.Input(archiveProjects.GetValueOrDefault(id)?.BackupRoot??preferences.BackupRoot);
         var destination = new DockPanel();
         var browse = Button("Browse", () => { string path = View.Folder(this, backupInput.Text); if (path != "") backupInput.Text = path; });
         browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
-        chatContent.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = View.Stack(View.Text(L.T("BackupStepTitle"), 23), View.Text(L.T("BackupStepLead"), color: "Muted"),
-                View.Field("AccountFolderLabel", View.Input(account.Directory, true)), View.Field("BackupTo", destination),View.Field("ChatWorkers",ChatWorkerSelector("backup",()=>backupInput.Text)),new Expander{Header=L.T("IndependentOutputsTitle"),Content=View.Text(L.T("IndependentOutputsHelp"),color:"Muted"),Margin=new Thickness(0,12,0,0)}) });
-        chatFooter.Children.Add(Button("ExportDirect",()=>{directChatSource=true;preparedArchive=null;activeManifest=null;chatStep=2;RenderChatStage();},true));
-        chatFooter.Children.Add(AsyncButton("BackupNow", BackupChat));
-        chatFooter.Children.Add(AsyncButton("IncrementalBackup", IncrementalBackupChat));
-        if (verifiedBackups.TryGetValue(account.Directory, out string? previous) && File.Exists(previous))
-            chatFooter.Children.Add(AsyncButton("UsePreviousBackup", () => UseChatBackup(previous)));
-        chatFooter.Children.Add(Button("GoBack", () => { chatStep = 0; RenderChatStage(); }));
+        var fields=View.Stack(View.Text(L.T("RawBackupHeading"),18),View.Text(L.T("RawBackupTaskHelp"),color:"Muted"),View.Field("AccountFolderLabel",View.Input(account.Directory,true)),View.Field("BackupTo",destination),View.Field("ChatWorkers",ChatWorkerSelector("backup",()=>backupInput.Text)));
+        chatContent.Children.Add(View.FormScroll(fields));
+        fields.Children.Add(new Expander{Header=L.T("RawBackupStrategy"),Content=View.Text(L.T("RawBackupStrategyHelp"),color:"Muted"),Margin=new Thickness(0,8,0,0)});
+        chatFooter.Children.Add(AsyncButton("StartRawBackup",()=>verifiedBackups.TryGetValue(account.Directory,out var previous)&&File.Exists(previous)?IncrementalBackupChat():BackupChat(),true));
+        var choices=new ContextMenu();var options=Button("RawBackupOptions",()=>choices.IsOpen=true);options.ContextMenu=choices;choices.PlacementTarget=options;
+        var full=new MenuItem{Header=L.T("FullBackupOnce")};full.Click+=async(_,_)=>{try{await BackupChat();}catch(Exception ex){Error(ex);}};choices.Items.Add(full);
+        var choose=new MenuItem{Header=L.T("ChooseIncrementalBase")};choose.Click+=async(_,_)=>{try{await IncrementalBackupChat(true);}catch(Exception ex){Error(ex);}};choices.Items.Add(choose);chatFooter.Children.Add(options);
+        chatFooter.Children.Add(Button("GoBack", () => { chatStep = 1; RenderChatStage(); }));
     }
     private void BuildChatExport() {
         bool encrypted = NeedsKey();
@@ -175,8 +182,8 @@ public sealed partial class ShellWindow {
                 chatFooter.Children.Add(Button("ResumeReading", () => { chatStep = 2; RenderChatStage(); }));
             }
         }
-        chatContent.Children.Add(new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        chatFooter.Children.Add(Button("NewChatArchive", () => { chatStep = 0; activeChat = null; activeManifest = null; SetCapturedKey(null); RenderChatStage(); }, true));
+        chatContent.Children.Add(View.FormScroll(stack));
+        chatFooter.Children.Add(Button("NewChatArchive", () => { chatStep = -1; SetCapturedKey(null); RenderChatStage(); }, true));
         chatFooter.Children.Add(Button("OpenBackup", () => OpenFolder(ArchiveDirectory())));
         if (readingDirectory != null && !failed) chatFooter.Children.Add(Button("OpenReading", () => new ChatReaderWindow(readingDirectory, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog()));
         if (exportReport != null && File.Exists(exportReport)) chatFooter.Children.Add(Button("OpenReport", () => OpenFile(exportReport)));

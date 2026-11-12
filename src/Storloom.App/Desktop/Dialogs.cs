@@ -7,15 +7,16 @@ namespace Storloom.App;
 internal sealed class PreferencesWindow : ThemeWindow {
     public AppPreferences Result { get; private set; }
     public PreferencesWindow(AppPreferences preferences, string rulesDirectory, string dataRoot, CleanerSettings settings, bool rulesPage = false)
-        : base(L.T("Preferences"), 830, 690) {
+        : base(L.T("Preferences"), 830, 560) {
         Result = preferences; var chatPreferences=preferences; ShowInTaskbar = false;
         var layout = View.Grid(View.Fill, View.Auto); layout.Margin = new Thickness(24); Body.Children.Add(layout);
         var tabs = new TabControl(); View.Add(layout, tabs, 0);
         var fields = new Grid { Margin = new Thickness(18) };
-        int row = 0;
+        var tasks=new Grid{Margin=new Thickness(18)};bool taskGroup=false;
         void Field(string key, FrameworkElement element) {
-            fields.RowDefinitions.Add(new RowDefinition { Height = View.Auto });
-            View.Add(fields, View.Field(key, element, 160), row++);
+            var target=taskGroup?tasks:fields;int row=target.RowDefinitions.Count;
+            target.RowDefinitions.Add(new RowDefinition { Height = View.Auto });
+            View.Add(target, View.Field(key, element, 142), row);
         }
         ComboBox Options(string[] values, int index) { var combo = new ComboBox(); foreach (string value in values) combo.Items.Add(value); combo.SelectedIndex = index; return combo; }
         var language = Options(["English", "简体中文"], preferences.Language == "en" ? 0 : 1); Field("LanguageLabel", language);
@@ -25,21 +26,26 @@ internal sealed class PreferencesWindow : ThemeWindow {
             var input = View.Input(initial); var panel = new DockPanel(); var browse = View.Button("Browse", () => { string path = View.Folder(this, input.Text,"preference-"+key); if (path != "") input.Text = path; });
             browse.Margin=new Thickness(8,0,0,0);DockPanel.SetDock(browse, Dock.Right); panel.Children.Add(browse); panel.Children.Add(input); Field(key, panel); return input;
         }
+        taskGroup=true;
         var backup = FolderField("BackupTo", preferences.BackupRoot); var archive = FolderField("ArchiveRoot", preferences.ArchiveRoot);
         Field("Chats", View.Button("ChatSettings",()=>{var dialog=new ChatSettingsWindow(chatPreferences){Owner=this};if(dialog.ShowDialog()==true)chatPreferences=dialog.Result;}));
         var workers = WorkerRecommendation.Selector(preferences.ChatParallelism,preferences.ChatWorkersAutomatic,"backup",()=>backup.Text); Field("ChatWorkers", workers);
         Field("", View.Text(L.T("ChatWorkersHelp"), color: "Muted"));
+        taskGroup=false;
         var motion = new CheckBox { Content = L.T("ReduceMotion"), IsChecked = preferences.ReduceMotion }; Field("MotionLabel", motion);
         var closeToTray = new CheckBox { Content = L.T("CloseToTray"), IsChecked = preferences.CloseToTray }; Field("CloseBehavior", closeToTray);
+        taskGroup=true;
         var debugLogging = new CheckBox { Content = L.T("DebugLog"), IsChecked = preferences.DebugLogging, ToolTip = L.T("DebugLogHelp") }; Field("LoggingLabel", debugLogging);
         var logAutoShow=new CheckBox{Content=L.T("AutoShowLog"),IsChecked=preferences.LogAutoShow};Field("",logAutoShow);
+        taskGroup=false;
         var custom = View.Input(preferences.CustomThemeFile ?? "");
         var customRow = new DockPanel(); var choose = View.Button("Browse", () => {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Theme JSON|*.json" };
             if (PickerHistory.Show(picker,this,"theme-import") == true) custom.Text = picker.FileName;
         }); choose.Margin=new Thickness(8,0,0,0);DockPanel.SetDock(choose, Dock.Right); customRow.Children.Add(choose); customRow.Children.Add(custom); Field("CustomTheme", customRow);
         Field("", View.Text(L.T("CustomThemeHelp"), color: "Muted"));
-        tabs.Items.Add(new TabItem { Header = L.T("General"), Content = new ScrollViewer { Content = fields, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
+        tabs.Items.Add(new TabItem { Header = L.T("General"), Content = View.FormScroll(fields) });
+        tabs.Items.Add(new TabItem{Header=L.T("TaskPreferences"),Content=View.FormScroll(tasks)});
         var rules = View.Grid(View.Auto, View.Auto, View.Fill, View.Auto); rules.Margin = new Thickness(14);
         View.Add(rules, View.Text(L.T("SettingsHelp"), color: "Muted"), 0);
         string customSets = Path.Combine(dataRoot, "rule-sets");
@@ -68,7 +74,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
             Process.Start(new ProcessStartInfo("notepad.exe") { UseShellExecute = true, ArgumentList = { path } });
         }));
         local.Margin = new Thickness(0, 10, 0, 0); View.Add(rules, local, 3); tabs.Items.Add(new TabItem { Header = L.T("RuleSets"), Content = rules });
-        tabs.SelectedIndex = rulesPage ? 1 : 0;
+        tabs.SelectedIndex = rulesPage ? 2 : 0;
         var actions = View.Row(View.Button("Cancel", () => DialogResult = false), View.Button("Apply", () => {
             try {
                 foreach (string path in new[] { backup.Text, archive.Text }) if (!string.IsNullOrWhiteSpace(path)) _ = PathPolicy.Normalize(path);

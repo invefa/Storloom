@@ -7,16 +7,16 @@ public sealed record ChatArchiveProject(string Id,string Account,ChatPlatform Pl
     public DateTimeOffset? BackedUpAt{get;init;}public DateTimeOffset? ReadableAt{get;init;}
     public ChatArchiveProtectionMode Protection{get;init;}public bool IncludeMedia{get;init;}=true;public bool ProtectionKnown{get;init;}=true;
     public bool VerifyBackupBeforeReading{get;init;}=true;
-    public string? TaskFile{get;init;}
+    public string? TaskFile{get;init;}public string ReadingRoot{get;init;}="";
     public static string Identity(ChatPlatform platform,string source)=>JsonFiles.Hash(new{platform,source=PathPolicy.Normalize(source).ToUpperInvariant()});
 }
-public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false){public bool VerifyBackupBeforeReading{get;init;}=true;}
-public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false);
+public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false){public bool VerifyBackupBeforeReading{get;init;}=true;public bool DirectReading{get;init;}}
+public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false,bool DirectReading=false);
 /// <summary>Write immutable generations. Only the caller's verified catalog checkpoint switches the visible reader.</summary>
 public static class ChatArchiveWorkflow {
     public static ChatArchiveProject Update(ChatArchiveProject project,string taskFile,byte[]? databaseKey,string? password,int workers,
         Action<ChatArchiveProject> checkpoint,ChatArchiveUpdateRequest? request=null,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default,bool? defaultDark=null,Func<string,int>? selectWorkers=null,bool checkRunningClients=true,bool downloadGroupAvatars=false){
-        request??=new();if(!System.Text.RegularExpressions.Regex.IsMatch(project.Id,"^[a-f0-9]{64}$",System.Text.RegularExpressions.RegexOptions.IgnoreCase)||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source)||string.IsNullOrEmpty(project.Account)||Path.GetFileName(project.Account)!=project.Account)throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,8);int backupWorkers=Math.Clamp(selectWorkers?.Invoke("backup")??workers,1,8),encryptionWorkers=Math.Clamp(selectWorkers?.Invoke("encryption")??workers,1,8);string accountRoot=Path.Combine(PathPolicy.Normalize(project.BackupRoot),project.Platform.ToString(),project.Account);
+        request??=new();if(!System.Text.RegularExpressions.Regex.IsMatch(project.Id,"^[a-f0-9]{64}$",System.Text.RegularExpressions.RegexOptions.IgnoreCase)||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source)||string.IsNullOrEmpty(project.Account)||Path.GetFileName(project.Account)!=project.Account)throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,8);int backupWorkers=Math.Clamp(selectWorkers?.Invoke("backup")??workers,1,8),encryptionWorkers=Math.Clamp(selectWorkers?.Invoke("encryption")??workers,1,8);bool backupTask=request.BackupOnly;if(File.Exists(taskFile)){PathPolicy.AssertNoLinks(taskFile);backupTask=JsonFiles.Read<ChatArchiveTask>(taskFile).BackupOnly;}string outputRoot=!backupTask&&!string.IsNullOrWhiteSpace(project.ReadingRoot)?project.ReadingRoot:project.BackupRoot;string accountRoot=Path.Combine(PathPolicy.Normalize(outputRoot),project.Platform.ToString(),project.Account);
         if(PathPolicy.Under(accountRoot,project.Source)||PathPolicy.Under(project.Source,accountRoot)||accountRoot.Equals(project.Source,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Archive backup and source must be separate directories.");CreateDirectorySafe(accountRoot);PathPolicy.AssertNoLinks(Path.GetDirectoryName(Path.GetFullPath(taskFile))!);
         string lockPath=Path.Combine(accountRoot,".archive-project-"+project.Id+".lock");PathPolicy.AssertNoLinks(accountRoot);
         if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);
@@ -30,24 +30,31 @@ public static class ChatArchiveWorkflow {
         }else{
             bool secure=!request.BackupOnly&&(project.Protection!=ChatArchiveProtectionMode.None||project.Reading!=null&&ChatVault.Exists(project.Reading)||request.Mode is ChatArchiveProtectionMode.All or ChatArchiveProtectionMode.Selected);
             string id=Guid.NewGuid().ToString("N"),work=Path.Combine(accountRoot,".archive-work-"+id),generation=Path.Combine(accountRoot,"reading-"+id);
-            state=new(1,project.Id,work,generation,project.Reading,project.Manifest,request.UseExistingBackup&&project.Manifest!=null?"workspace":"backup",secure,request.BackupOnly,request.ProtectionOnly){VerifyBackupBeforeReading=project.VerifyBackupBeforeReading};
+            state=new(1,project.Id,work,generation,project.Reading,project.Manifest,request.DirectReading?(request.ProtectionOnly?"workspace":"source"):request.UseExistingBackup&&project.Manifest!=null?"workspace":"backup",secure,request.BackupOnly,request.ProtectionOnly){VerifyBackupBeforeReading=project.VerifyBackupBeforeReading,DirectReading=request.DirectReading};
             JsonFiles.Write(taskFile,state);project=project with{TaskFile=taskFile};checkpoint(project);
         }
         void Save(string phase){state=state with{Phase=phase};JsonFiles.Write(taskFile,state);}
-        ChatVault? previous=null;
+        ChatVault? previous=null;ChatSourceLease? sourceLease=null;
         try{
             if(state.Secure&&!state.BackupOnly){
                 if(string.IsNullOrEmpty(password))throw new InvalidOperationException("Unlock the archive before continuing this task.");
                 if(state.PreviousReading!=null&&ChatVault.Exists(state.PreviousReading))previous=ChatVault.Open(state.PreviousReading,password.AsSpan());
             }
             if(!state.BackupOnly&&!Directory.Exists(state.Work)){
-                if(state.Phase is not ("backup" or "workspace"))throw new IOException("The retained update workspace is missing. The previous reading generation is unchanged.");
+                if(state.Phase is not ("backup" or "source" or "workspace"))throw new IOException("The retained update workspace is missing. The previous reading generation is unchanged.");
                 ChatArchiveProtection? initialSettings=request.Protection??(previous!=null?previous.ReadProtection():null);
                 ChatArchiveWorkspace.Create(state.Work,state.Secure);JsonFiles.Write(Path.Combine(state.Work,"owner.json"),new{project.Id,state.Generation,state.PreviousReading});
                 JsonFiles.Write(Path.Combine(state.Work,"policy.json"),new SavedPolicy(request.Mode??project.Protection,initialSettings??new(project.IncludeMedia),request.Rebuild,request.ProtectionOnly));
             }
             if(!state.BackupOnly)PathPolicy.AssertNoLinks(state.Work);
             if(state.Secure&&!state.BackupOnly){ChatArchiveWorkspace.AssertEncrypted(state.Work);VerifyWorkspacePassword(state.Work,password!);}
+            if(state.DirectReading&&!state.ProtectionOnly&&state.Phase is "source" or "workspace" or "reading"){
+                sourceLease=ChatSourceLease.Open(project.Source,project.Platform,cancellation,checkRunningClients,progress);
+                string proof=JsonFiles.Hash(new{Source=project.Source,Databases=sourceLease.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}),proofPath=Path.Combine(state.Work,"source-proof.json");
+                if(File.Exists(proofPath)){if(JsonFiles.Read<string>(proofPath)!=proof)throw new IOException("Source databases changed after interruption. Keep the previous reader and start a new reading task.");}
+                else{if(state.Phase!="source")throw new IOException("The retained source fingerprint is missing. Start a new reading task.");JsonFiles.Write(proofPath,proof);}
+                if(state.Phase=="source")Save("workspace");
+            }
             if(state.Phase=="backup"){
                 progress?.Report(new("archive-backup",0,0));OperationPause.Check(cancellation);
                 string destination=Path.Combine(accountRoot,DateTime.Now.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N")[..6]+"-raw");
@@ -60,7 +67,7 @@ public static class ChatArchiveWorkflow {
                 state=state with{Manifest=backup.Manifest};project=project with{Manifest=backup.Manifest,BackedUpAt=DateTimeOffset.UtcNow,TaskFile=taskFile};checkpoint(project);Save(state.BackupOnly?"backup-only-complete":"workspace");
             }
             if(state.Phase=="backup-only-complete"){project=project with{TaskFile=null};checkpoint(project);File.Delete(taskFile);return project;}
-            if(state.Manifest==null)throw new InvalidDataException("Archive task has no verified backup.");
+            if(state.Manifest==null&&!state.DirectReading)throw new InvalidDataException("Archive task has no verified backup.");
             if(state.Secure&&state.Phase is not ("publish" or "published"))ChatArchiveWorkspace.AssertEncrypted(state.Work);
             PathPolicy.AssertNoLinks(Path.Combine(state.Work,"policy.json"));
             var policy=JsonFiles.Read<SavedPolicy>(Path.Combine(state.Work,"policy.json"));string stage=Path.Combine(state.Work,"reader");
@@ -76,10 +83,18 @@ public static class ChatArchiveWorkflow {
             if(state.Phase=="reading"){
                 progress?.Report(new("archive-reading",0,0));
                 if(policy.ProtectionOnly){ }
-                else if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.Update(state.Manifest,stage,project.Platform,databaseKey,workers,state.VerifyBackupBeforeReading,true,progress,cancellation,downloadQQGroupAvatars:downloadGroupAvatars,originalReadingDirectory:state.PreviousReading);
+                else if(state.DirectReading){
+                    if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.UpdateReadLockedSource(sourceLease!,stage,project.Platform,databaseKey,workers,true,progress,cancellation,downloadGroupAvatars,state.PreviousReading);
+                    else{
+                        bool resume=Directory.Exists(stage)&&File.Exists(Path.Combine(stage,"export-progress.json"));
+                        var result=new ChatExporter(workers,true,downloadGroupAvatars,defaultDark).ExportReadLockedSource(sourceLease!,stage,project.Platform,databaseKey,progress,cancellation,resume:resume);
+                        if(result.CanResume){OperationPause.Check(cancellation);throw new IOException("Reading export is incomplete; continue the reading task.");}
+                    }
+                }
+                else if(state.PreviousReading!=null&&!policy.Rebuild)ChatReadingUpdate.Update(state.Manifest!,stage,project.Platform,databaseKey,workers,state.VerifyBackupBeforeReading,true,progress,cancellation,downloadQQGroupAvatars:downloadGroupAvatars,originalReadingDirectory:state.PreviousReading);
                 else{
                     bool resume=Directory.Exists(stage)&&File.Exists(Path.Combine(stage,"export-report.json"));
-                    var result=new ChatExporter(workers,true,downloadGroupAvatars,defaultReaderDark:defaultDark).ExportVerifiedBackup(state.Manifest,stage,project.Platform,databaseKey,progress,cancellation,verifyBackup:state.VerifyBackupBeforeReading,resume:resume);
+                    var result=new ChatExporter(workers,true,downloadGroupAvatars,defaultReaderDark:defaultDark).ExportVerifiedBackup(state.Manifest!,stage,project.Platform,databaseKey,progress,cancellation,verifyBackup:state.VerifyBackupBeforeReading,resume:resume);
                     if(result.CanResume){if(cancellation.IsCancellationRequested)throw new OperationCanceledException(cancellation);throw new IOException("Reading export is incomplete; continue the archive task.");}
                 }
                 Save("protection");
@@ -97,15 +112,15 @@ public static class ChatArchiveWorkflow {
             }
             if(state.Phase=="publish"){
                 progress?.Report(new("archive-publish",0,0));OperationPause.Check(cancellation);
-                if(!Directory.Exists(state.Generation)){VerifyGeneration(stage,policy.Mode,password);ChatArchiveWorkspace.PreparePublication(stage,state.Secure,cancellation);Directory.Move(stage,state.Generation);}
+                if(!Directory.Exists(state.Generation)){VerifyGeneration(stage,policy.Mode,password);ChatArchiveWorkspace.PreparePublication(stage,state.Secure,cancellation);DirectoryPublication.Move(stage,state.Generation,cancellation);}
                 // A crash after the directory move is recovered by committing this same generation.
                 Save("published");
             }
             if(state.Phase!="published")throw new InvalidDataException("Unknown archive task phase.");
             VerifyGeneration(state.Generation,policy.Mode,password);
-            project=project with{Manifest=state.Manifest,Reading=state.Generation,ReadableAt=DateTimeOffset.UtcNow,TaskFile=null,Protection=policy.Settings.Selection!=null&&policy.Mode!=ChatArchiveProtectionMode.None?ChatArchiveProtectionMode.Selected:policy.Mode,IncludeMedia=policy.Settings.IncludeMedia,ProtectionKnown=true};checkpoint(project);
+            project=project with{Manifest=state.DirectReading?project.Manifest:state.Manifest,Reading=state.Generation,ReadableAt=DateTimeOffset.UtcNow,TaskFile=null,Protection=policy.Settings.Selection!=null&&policy.Mode!=ChatArchiveProtectionMode.None?ChatArchiveProtectionMode.Selected:policy.Mode,IncludeMedia=policy.Settings.IncludeMedia,ProtectionKnown=true};checkpoint(project);
             File.Delete(taskFile);return project;
-        }finally{previous?.Dispose();}
+        }finally{sourceLease?.Dispose();previous?.Dispose();}
     }
     private static void CreateDirectorySafe(string path){string? existing=path;while(existing!=null&&!Directory.Exists(existing)&&!File.Exists(existing))existing=Path.GetDirectoryName(existing);if(existing==null)throw new IOException("Missing archive volume.");PathPolicy.AssertNoLinks(existing);Directory.CreateDirectory(path);PathPolicy.AssertNoLinks(path);}
     private sealed record WorkspaceAuthentication(string Salt,string Proof);

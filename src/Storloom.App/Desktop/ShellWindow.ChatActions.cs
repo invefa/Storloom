@@ -61,12 +61,16 @@ public sealed partial class ShellWindow {
     private ChatLocation ArchiveAccount() => directChatSource ? Account() : ChatArchive().Location;
     private bool NeedsKey() {
         if(!directChatSource)return ChatArchive().Encrypted;
-        using var input=File.OpenRead(Account().Database);byte[] prefix=new byte[Math.Min(1040,input.Length)];input.ReadExactly(prefix);
+        using var input=new FileStream(Account().Database,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);byte[] prefix=new byte[Math.Min(1040,input.Length)];input.ReadExactly(prefix);
         return !prefix.AsSpan().StartsWith("SQLite format 3\0"u8)&&!(Account().Platform==ChatPlatform.QQ&&prefix.Length>=1040&&prefix.AsSpan(1024).StartsWith("SQLite format 3\0"u8));
     }
     private async Task UseChatBackup(string manifest) => await Run(async token => {
         directChatSource=false; var account = Account(); var archive = await Task.Run(() => ReadChatArchive(manifest, account), token);
-        activeManifest = manifest; preparedArchive = archive; chatStep = 2; RenderChatStage();
+        activeManifest = manifest; preparedArchive = archive;
+        var journal=JsonFiles.Read<TransferJournal>(manifest);string id=ChatArchiveProject.Identity(account.Platform,account.Directory);
+        var project=archiveProjects.GetValueOrDefault(id)??new ChatArchiveProject(id,account.Account,account.Platform,account.Directory,ProjectBackupRoot(journal,account.Platform));
+        project=project with{Manifest=manifest,ReadingRoot=string.IsNullOrWhiteSpace(project.ReadingRoot)?(!string.IsNullOrWhiteSpace(preferences.ArchiveRoot)?preferences.ArchiveRoot:project.BackupRoot):project.ReadingRoot};SaveArchive(project);
+        pendingArchive=project;pendingArchiveRequest=new(UseExistingBackup:true);chatStep=4;RenderChatStage();
     });
 
     private async Task BackupChat() {
@@ -91,7 +95,7 @@ public sealed partial class ShellWindow {
             activeManifest = result.Manifest; verifiedBackups[location.Directory] = result.Manifest;
             preparedArchive = await Task.Run(() => ReadChatArchive(result.Manifest, location), token);
             JsonFiles.Write(Path.Combine(dataRoot, "chat-backups.json"), verifiedBackups);
-            chatStep = 2; RenderChatStage(); status.Text = L.T("BackupVerified");
+            readingDirectory=exportReport=null;chatStep = 3; RenderChatStage(); status.Text = L.T("BackupVerified");
         });
     }
 
@@ -120,11 +124,11 @@ public sealed partial class ShellWindow {
         public bool Enabled=>enabled();public void Report(ChatDiagnostic value){if(Enabled)target.Report(value);}
     }
 
-    private async Task IncrementalBackupChat() {
+    private async Task IncrementalBackupChat(bool chooseBase=false) {
         directChatSource=false; var location = Account(); string root = backupInput?.Text.Trim() ?? "";
         if (string.IsNullOrEmpty(root)) throw new InvalidOperationException(L.T("NoRoot"));
         string? previous = verifiedBackups.GetValueOrDefault(location.Directory);
-        if (previous == null || !File.Exists(previous)) {
+        if (chooseBase || previous == null || !File.Exists(previous)) {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("ChooseIncrementalBase") };
             if (PickerHistory.Show(picker,this,"incremental-base") != true) return; previous = picker.FileName;
         }
@@ -139,7 +143,7 @@ public sealed partial class ShellWindow {
             preparedArchive = await Task.Run(() => ReadChatArchive(activeManifest, location), token);
             preferences = preferences with { BackupRoot = root }; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
             JsonFiles.Write(Path.Combine(dataRoot, "chat-backups.json"), verifiedBackups);
-            chatStep = 2; RenderChatStage(); status.Text = L.T("IncrementalBackupDone", result.ReusedFiles, View.Size(result.ReusedBytes), View.Size(result.Backup.Bytes));
+            readingDirectory=exportReport=null;chatStep = 3; RenderChatStage(); status.Text = L.T("IncrementalBackupDone", result.ReusedFiles, View.Size(result.ReusedBytes), View.Size(result.Backup.Bytes));
         });
     }
     private async Task UpdateChatReading() {

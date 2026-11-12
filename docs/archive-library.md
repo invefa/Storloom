@@ -1,6 +1,6 @@
 # Archive library
 
-Open **Chat archives > Archive library** to manage the packed storage format. Existing backups and reading copies remain available through their original entries. Nothing is migrated automatically.
+Open **Chat archives > Tools > Storage maintenance** to manage the packed storage format. Existing backups and reading copies remain available through their original entries. Nothing is migrated automatically.
 
 ## Import and update
 
@@ -26,7 +26,7 @@ New stores currently support whole-archive encryption. Granular protection remai
 
 **Export reading copy** creates current pages, reference maps and JSONL from the current query state, while reusing stored media. Choose a new directory, or the same interrupted export directory before changing the source archive. Completed files are authenticated against the export checkpoint on resume. An unrelated or modified destination is rejected.
 
-The export dialog also offers password protection. Encryption starts after export completes, so interrupted export or encryption can leave plaintext in the destination. Resume unfinished encryption through **More actions > Protect reading copy**, using the chosen export password. The archive library and original sources are unchanged. Plaintext reading copies can be read by anyone with disk access.
+The export dialog also offers password protection. Encryption starts after export completes, so interrupted export or encryption can leave plaintext in the destination. Resume unfinished encryption through **Tools > Protect reading copy**, using the chosen export password. The archive library and original sources are unchanged. Plaintext reading copies can be read by anyone with disk access.
 
 Import, backup, export, encryption and verification use the existing pause/cancel controls. Completed checkpoints survive cancellation. Closing a reader releases its update lock; close destination readers before importing new content or changing the password.
 

@@ -776,7 +776,9 @@ public sealed class FormTests {
         project=project with{BackedUpAt=DateTimeOffset.FromUnixTimeSeconds(1700000000),ReadableAt=DateTimeOffset.FromUnixTimeSeconds(1700000000)};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true});
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};try{window.Show();window.Navigate("chats");Pump();
             var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Single(table.Items.Cast<object>());
-            foreach(string name in new[]{"archive_open","archive_update","archive_protection","archive_verify_now"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
+            foreach(string name in new[]{"archive_open","archive_update","archive_backup"})Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name==name).IsEnabled);
+            var materials=Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("AccountMaterials"))).ContextMenu!;
+            foreach(string name in new[]{"archive_protection","archive_verify_now"})Assert.True(materials.Items.OfType<MenuItem>().Single(i=>i.Name==name).IsEnabled);
             Assert.DoesNotContain(Descendants(window).OfType<DataGrid>(),t=>t.Name=="chat_accounts"&&t.IsVisible);
             Capture(window,"archive-home-"+theme);
             if(theme==AppTheme.OneDark){var detail=Descendants(window).OfType<TextBlock>().First(t=>t.Text.Contains(project.Source,StringComparison.Ordinal));detail.Text=L.T("ArchiveDetail",@"D:\Example\Account",@"E:\Example\Archives\Reading")+"\n"+L.T("ArchiveRawProtectionNotice");Capture(window,"public-"+locale+"-archives");}
@@ -1006,10 +1008,10 @@ public sealed class FormTests {
             Set("activeChat",new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),new FileInfo(Path.Combine(source,"nt_msg.db")).Length));
             Set("activeManifest",backup.Manifest);Set("readingDirectory",export.Directory);Set("exportReport",Path.Combine(export.Directory,"export-report.json"));
             window.Navigate("chats");
-            foreach(int step in new[]{1,3}) {
+            foreach(int step in new[]{6,3}) {
                 Set("chatStep",step);type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();window.UpdateLayout();
                 var labels=Descendants(window).OfType<Label>().Where(l=>l.IsVisible&&!Equals(l.Content,L.T("ChatWorkers"))).ToArray();Assert.Equal(2,labels.Length);
-                Assert.Equal(step==1?new[]{L.T("AccountFolderLabel"),L.T("BackupTo")}:new[]{L.T("RawBackupLabel"),L.T("ReadingCopyLabel")},labels.Select(l=>l.Content));
+                Assert.Equal(step==6?new[]{L.T("AccountFolderLabel"),L.T("BackupTo")}:new[]{L.T("RawBackupLabel"),L.T("ReadingCopyLabel")},labels.Select(l=>l.Content));
                 foreach(var label in labels) {
                     var target=(FrameworkElement)label.Target;var lp=label.TranslatePoint(new Point(),window);var cp=target.TranslatePoint(new Point(),window);
                     Assert.True(lp.X+label.ActualWidth<=cp.X);Assert.InRange(Math.Abs(lp.Y+label.ActualHeight/2-cp.Y-target.ActualHeight/2),0,1);
@@ -1075,7 +1077,7 @@ public sealed class FormTests {
             File.Move(backup.Manifest,backup.Manifest+".unavailable");
             using var held=new FileStream(Path.Combine(raw,"nt_msg.db"),FileMode.Open,FileAccess.Read,FileShare.None);
             type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();
-            Assert.Contains(Descendants(window).OfType<Button>(),b=>Equals(b.Content,L.T("ResumeReading")));
+            Assert.Contains(Descendants(window).OfType<Button>(),b=>Equals(b.Content,L.T("ArchiveStart")));
         } finally {window.Close();Directory.Delete(fixture,true);}
     });
 
@@ -1395,7 +1397,7 @@ public sealed class FormTests {
     public void ArchiveLibraryAndExportOptionsFitCompactWindows(string language)=>OnUi(()=>{
         string fixture=Fixture(),data=Path.Combine(fixture,"data");JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language=language,Theme=AppTheme.OneDark,ReduceMotion=true});var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=850,Height=650};
         try{
-            window.Show();window.Navigate("chats");Pump();var nav=Descendants(window).OfType<Button>().Single(b=>b.Name=="store_home_nav");nav.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();window.UpdateLayout();Assert.Single(Descendants(window).OfType<DataGrid>().Where(g=>g.Name=="storage_archives"));Assert.All(Descendants(window).OfType<Button>().Where(b=>b.Name is "store_open" or "store_backup" or "store_update"),b=>Assert.False(b.IsEnabled));Capture(window,"archive-library-"+language);
+            window.Show();window.Navigate("chats");Pump();var nav=Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("ArchiveTools"))).ContextMenu!.Items.OfType<MenuItem>().Single(i=>Equals(i.Header,L.T("StoreMaintenance")));nav.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));Pump();window.UpdateLayout();Assert.Single(Descendants(window).OfType<DataGrid>().Where(g=>g.Name=="storage_archives"));Assert.All(Descendants(window).OfType<Button>().Where(b=>b.Name is "store_open" or "store_backup" or "store_update"),b=>Assert.False(b.IsEnabled));Capture(window,"archive-library-"+language);
             foreach(string name in new[]{"StoreMigrationWindow","StoreExportWindow"}){
                 var type=typeof(ShellWindow).Assembly.GetType("Storloom.App."+name)!;var dialog=(Window)Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public,null,name=="StoreMigrationWindow"?[data,null,null]:[data,"Fixture archive"],null)!;
                 try{dialog.ShowInTaskbar=false;dialog.Show();Pump();dialog.UpdateLayout();Assert.Equal(ResizeMode.NoResize,dialog.ResizeMode);foreach(var button in Descendants(dialog).OfType<Button>().Where(b=>b.Name is "store_migrate_start" or "store_export_start")){var point=button.TranslatePoint(new Point(),dialog);Assert.InRange(point.Y+button.ActualHeight,0,dialog.ActualHeight);Assert.InRange(point.X+button.ActualWidth,0,dialog.ActualWidth);}Assert.DoesNotContain(Descendants(dialog).OfType<TextBlock>(),t=>t.Text.StartsWith("Store",StringComparison.Ordinal));Capture(dialog,name+"-"+language);}finally{dialog.Close();Pump();}
@@ -1445,6 +1447,57 @@ public sealed class FormTests {
             Assert.DoesNotContain(Descendants(window).OfType<CheckBox>(),c=>c.IsVisible&&Equals(c.Content,L.T("VerifyBackupBeforeExport")));
             Assert.Contains(Descendants(window).OfType<Button>(),b=>b.IsVisible&&Equals(b.Content,L.T("KeyLibrary")));
             Capture(window,"direct-reading-setup");
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory][InlineData("en")][InlineData("zh-CN")]
+    public void AccountSizeMeasurementSortsBySizeKeepsSelectionAndCanRefreshOnlyOneAccount(string locale) => OnUi(()=>{
+        string fixture=Fixture(),small=Path.Combine(fixture,"small"),large=Path.Combine(fixture,"large");Directory.CreateDirectory(small);Directory.CreateDirectory(large);
+        File.WriteAllText(Path.Combine(small,"nt_msg.db"),"123");File.WriteAllText(Path.Combine(large,"nt_msg.db"),"123456789");File.WriteAllText(Path.Combine(large,"attachment.bin"),"abcdef");
+        JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language=locale,Theme=AppTheme.OneDark,ReduceMotion=true});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
+        try{
+            window.Show();const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;var type=typeof(ShellWindow);
+            var locations=new List<ChatLocation>{new(ChatPlatform.QQ,small,"small",Path.Combine(small,"nt_msg.db"),3),new(ChatPlatform.QQ,large,"large",Path.Combine(large,"nt_msg.db"),9)};
+            type.GetField("locations",flags)!.SetValue(window,locations);type.GetField("chatStep",flags)!.SetValue(window,0);window.Navigate("chats");type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);Pump();
+            var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="chat_accounts");table.SelectedIndex=0;
+            var measure=type.GetMethod("MeasureAccountSizes",flags)!;Wait(AsResult((Task)measure.Invoke(window,[false])!));Pump();
+            string Account(object row)=>row.GetType().GetProperty("Account")!.GetValue(row)!.ToString()!;
+            Assert.Equal("large",Account(table.Items[0]));Assert.Equal("small",Account(table.SelectedItem));
+            Assert.Equal(3,locations[0].AccountBytes);Assert.Equal(15,locations[1].AccountBytes);Assert.Equal(2,locations[1].AccountFiles);Assert.All(locations,l=>Assert.True(l.SizeComplete));Assert.All(locations,l=>Assert.NotNull(l.SizeScannedAt));
+            var previous=locations[1].SizeScannedAt;File.WriteAllText(Path.Combine(small,"nt_msg.db"),"1234567");
+            Wait(AsResult((Task)measure.Invoke(window,[true])!));Pump();Assert.Equal(7,locations[0].AccountBytes);Assert.Equal(previous,locations[1].SizeScannedAt);
+            Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name=="chat_next").IsEnabled);Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name=="measure_selected_account").IsEnabled);
+            window.Width=760;Pump();Capture(window,"account-size-measurement-"+locale);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory][InlineData(AppTheme.Light,"en")][InlineData(AppTheme.Dark,"zh-CN")][InlineData(AppTheme.OneDark,"zh-CN")]
+    public void AccountTaskPagesFitWithoutFormScrollingAndPreferencesAreGrouped(AppTheme theme,string locale)=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account");Directory.CreateDirectory(source);File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
+        var prefs=new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true,LogAutoShow=false,BackupRoot=Path.Combine(fixture,"backups"),ArchiveRoot=Path.Combine(fixture,"readers")};JsonFiles.Write(Path.Combine(fixture,"preferences.json"),prefs);
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};var type=typeof(ShellWindow);const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        var account=new ChatLocation(ChatPlatform.QQ,source,"Fixture account",Path.Combine(source,"nt_msg.db"),5120);
+        try{
+            window.Show();window.Navigate("chats");type.GetField("activeChat",flags)!.SetValue(window,account);
+            var project=new ChatArchiveProject(ChatArchiveProject.Identity(account.Platform,account.Directory),account.Account,account.Platform,account.Directory,Path.Combine(fixture,"account-backups")){ReadingRoot=Path.Combine(fixture,"account-readers")};type.GetMethod("SaveArchive",flags)!.Invoke(window,[project]);
+            foreach(var size in new[]{(950d,760d),(760d,640d)}){
+                window.Width=size.Item1;window.Height=size.Item2;
+                foreach(int step in new[]{1,6,4}){
+                    if(step==4)Wait(AsResult((Task)type.GetMethod("PrepareIndependentReading",flags)!.Invoke(window,[account])!));
+                    else{type.GetField("chatStep",flags)!.SetValue(window,step);type.GetMethod("RenderChatStage",flags)!.Invoke(window,null);}Pump();window.UpdateLayout();
+                    if(step==6)Assert.Equal(project.BackupRoot,((TextBox)type.GetField("backupInput",flags)!.GetValue(window)!).Text);
+                    if(step==4)Assert.Equal(project.ReadingRoot,((TextBox)type.GetField("readingRootInput",flags)!.GetValue(window)!).Text);
+                    foreach(var scroll in Descendants(window).OfType<ScrollViewer>().Where(v=>v.IsVisible&&v.Content is StackPanel panel&&Descendants(panel).OfType<Control>().Any(c=>c is TextBox or PasswordBox))){
+                        Assert.InRange(scroll.ScrollableHeight,0,1);var bounds=scroll.TransformToAncestor(window).TransformBounds(new Rect(0,0,scroll.ActualWidth,scroll.ActualHeight));
+                        foreach(var control in Descendants(scroll).OfType<Control>().Where(c=>c.IsVisible&&c is TextBox or PasswordBox or Button)){var box=control.TransformToAncestor(window).TransformBounds(new Rect(0,0,control.ActualWidth,control.ActualHeight));Assert.True(box.Right<=bounds.Right+1);Assert.True(box.Bottom<=bounds.Bottom+1);}
+                    }
+                    Capture(window,"account-task-"+step+"-"+theme+"-"+(int)size.Item1);
+                }
+                foreach(string page in new[]{"overview","cleanup","chats"}){window.Navigate(page);Pump();Assert.All(Descendants(window).OfType<Button>().Where(b=>b.IsVisible),b=>Assert.True(b.TranslatePoint(new Point(b.ActualWidth,b.ActualHeight),window).X<=window.ActualWidth+1));}
+            }
+            var dialog=(Window)Activator.CreateInstance(type.Assembly.GetType("Storloom.App.PreferencesWindow")!,[prefs,Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false])!;
+            try{dialog.ShowInTaskbar=false;dialog.Show();Pump();var tabs=Descendants(dialog).OfType<TabControl>().Single();Assert.Equal(3,tabs.Items.Count);for(int tab=0;tab<2;tab++){tabs.SelectedIndex=tab;Pump();Assert.All(Descendants(dialog).OfType<ScrollViewer>().Where(v=>v.IsVisible&&v.Content is Grid),v=>Assert.InRange(v.ScrollableHeight,0,1));Capture(dialog,"grouped-preferences-"+tab+"-"+theme);}}finally{dialog.Close();}
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
 

@@ -10,11 +10,11 @@ public sealed partial class ShellWindow {
         discoveryStarted=false;
         if(chatStep==0)RenderChatStage();
     }
-    private async void RestoreChatBackup() {
+    private async void RestoreChatBackup(){try{await RestoreChatBackupFrom(null);}catch(Exception ex){Error(ex);}}
+    private async Task RestoreChatBackupFrom(string? selectedManifest) {
         try {
-            var picker=new Microsoft.Win32.OpenFileDialog{Title=L.T("RestoreChatBackup"),Filter="Storloom backup manifest|*.json"};
-            if(PickerHistory.Show(picker,this,"chat-restore-manifest")!=true)return;
-            var journal=JsonFiles.Read<TransferJournal>(picker.FileName);
+            if(selectedManifest==null){var picker=new Microsoft.Win32.OpenFileDialog{Title=L.T("RestoreChatBackup"),Filter="Storloom backup manifest|*.json"};if(PickerHistory.Show(picker,this,"chat-restore-manifest")!=true)return;selectedManifest=picker.FileName;}
+            var journal=JsonFiles.Read<TransferJournal>(selectedManifest);
             string parent=View.Folder(this,purpose:"chat-restore-parent");if(parent=="")return;
             string name=Path.GetFileName(PathPolicy.Normalize(journal.Plan.Source));
             if(string.IsNullOrWhiteSpace(name))throw new InvalidDataException(L.T("NoAccounts"));
@@ -22,7 +22,7 @@ public sealed partial class ShellWindow {
             ChatPlatform platform=ChatExporter.FindDatabases(journal.Plan.Destination,ChatPlatform.QQ).Any()?ChatPlatform.QQ:ChatPlatform.WeChat;
             if(!Confirm(L.T("RestoreChatConfirm",destination)))return;
             bool complete=false;
-            await RunPausable(async token=>{await Task.Run(()=>ChatRestore.Restore(picker.FileName,destination,platform,Progress(),token),token);complete=true;});
+            await RunPausable(async token=>{await Task.Run(()=>ChatRestore.Restore(selectedManifest,destination,platform,Progress(),token),token);complete=true;});
             if(complete){operationView.AddLog(L.T("RestoreChatDone",destination));OpenFolder(destination);}
         }catch(Exception ex){Error(ex);}
     }

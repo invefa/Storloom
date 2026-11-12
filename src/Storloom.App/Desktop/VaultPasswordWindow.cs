@@ -13,14 +13,13 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
     public VaultPasswordWindow(bool creating,bool encrypting,string? directory=null) : base(L.T(creating?"VaultCreate":"VaultUnlock"),520,creating?480:encrypting?390:260) {
         MinWidth=500;MinHeight=240;SizeToContent=SizeToContent.Height;MaxHeight=SystemParameters.WorkArea.Height-40;ResizeMode=ResizeMode.NoResize;
         Caption.ShowMaximize=Caption.ShowMinimize=false;
-        var stack=new StackPanel{Margin=new Thickness(20)};
-        Body.Children.Add(new ScrollViewer{Content=stack,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,MaxHeight=SystemParameters.WorkArea.Height-100});
+        var layout=View.Grid(View.Fill,View.Auto);layout.Margin=new Thickness(20);Body.Children.Add(layout);var stack=new StackPanel();var scroll=View.FormScroll(stack);scroll.MaxHeight=SystemParameters.WorkArea.Height-180;View.Add(layout,scroll,0);
         stack.Children.Add(View.Text(L.T(creating?"VaultCreateHelp":"VaultUnlockHelp"),color:"Muted"));
-        stack.Children.Add(View.Text(L.T("VaultPassword")));stack.Children.Add(password);
-        if(creating){stack.Children.Add(View.Text(L.T("VaultConfirmPassword")));stack.Children.Add(confirmation);}
+        stack.Children.Add(View.Field("VaultPassword",password));
+        if(creating)stack.Children.Add(View.Field("VaultConfirmPassword",confirmation));
         var media=new CheckBox{Content=L.T("VaultIncludeMedia"),IsChecked=true,Margin=new Thickness(0,12,0,0)};
         var workers=WorkerRecommendation.Selector(2,true,"encryption",()=>directory);
-        if(encrypting){stack.Children.Add(media);stack.Children.Add(View.Text(L.T("VaultPartialHelp"),color:"Muted"));stack.Children.Add(View.Text(L.T("VaultWorkers")));stack.Children.Add(workers);}
+        if(encrypting){stack.Children.Add(media);stack.Children.Add(new Expander{Header=L.T("TaskDetails"),Content=View.Text(L.T("VaultPartialHelp"),color:"Muted"),Margin=new Thickness(0,8,0,8)});stack.Children.Add(View.Field("VaultWorkers",workers));}
         Func<ChatProtectionSelection?> selection=()=>null;
         if(creating&&encrypting&&directory!=null&&Directory.Exists(directory)){
             var scope=new CheckBox{Content=L.T("VaultSelectScope"),Margin=new Thickness(0,12,0,4)};stack.Children.Add(scope);
@@ -51,6 +50,6 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
             if(creating&&(password.Password.Length<8||password.Password!=confirmation.Password)){error.Text=L.T("VaultPasswordMismatch");return;}
             if(password.Password.Length==0)return;
             Selection=selection();Password=password.Password;IncludeMedia=media.IsChecked==true;Workers=workers.SelectedValue is int count&&count>0?count:WorkerRecommendation.For("encryption",directory);password.Clear();confirmation.Clear();DialogResult=true;
-        };row.Children.Add(okay);stack.Children.Add(row);Loaded+=(_,_)=>password.Focus();Closed+=(_,_)=>{password.Clear();confirmation.Clear();};
+        };row.Children.Add(okay);View.Add(layout,row,1);Loaded+=(_,_)=>password.Focus();Closed+=(_,_)=>{password.Clear();confirmation.Clear();};
     }
 }

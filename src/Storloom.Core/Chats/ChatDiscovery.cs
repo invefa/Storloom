@@ -7,6 +7,7 @@ public sealed record ChatLocation(ChatPlatform Platform, string Directory, strin
     public long? AccountBytes { get; init; }
     public long AccountFiles { get; init; }
     public bool SizeComplete { get; init; }
+    public DateTimeOffset? SizeScannedAt { get; init; }
 }
 
 public static class ChatDiscovery {
@@ -73,10 +74,10 @@ public static class ChatDiscovery {
             cancellation.ThrowIfCancellationRequested();
             var first = group.First();
             if (!measureSize) return first with { DatabaseBytes = group.Sum(r => r.DatabaseBytes) };
-            var size = new StorageScanner().Scan(first.Directory, progress, cancellation);
+            var size = new StorageScanner().Measure(first.Directory, progress, cancellation);
             cancellation.ThrowIfCancellationRequested();
             return first with { DatabaseBytes = group.Sum(r => r.DatabaseBytes), AccountBytes = size.Bytes,
-                AccountFiles = size.Files, SizeComplete = size.Issues.Count == 0 };
+                AccountFiles = size.Files, SizeComplete = size.Issues.Count == 0, SizeScannedAt = size.CreatedAt };
         }).ToList();
     }
     private static IEnumerable<(ChatPlatform Platform, string Path)> FindFast(string root, CancellationToken cancellation) {

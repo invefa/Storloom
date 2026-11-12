@@ -44,7 +44,7 @@ public static class ChatRestore {
         }
         foreach (string relative in journal.Plan.EmptyDirectories) if (relative != ".") Directory.CreateDirectory(TransferService.Child(staging, relative));
         OperationPause.Check(cancellation);
-        PathPolicy.AssertNoLinks(parent); Directory.Move(staging, destination);
+        PathPolicy.AssertNoLinks(parent); DirectoryPublication.Move(staging, destination,cancellation);
         progress?.Report(new("chat-restore", files, bytes, total, files)); return destination;
     }
 }

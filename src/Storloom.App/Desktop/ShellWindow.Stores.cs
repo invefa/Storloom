@@ -3,11 +3,11 @@ using Storloom.Core.Chats;
 namespace Storloom.App;
 
 public sealed partial class ShellWindow {
-    private sealed record StoreEntry(string Id,string Directory,string Source,bool Complete){public string Name=>Path.GetFileName(Directory);public string State=>L.T(Complete?"StoreReady":"StorePending");}
+    private sealed record StoreEntry(string Id,string Directory,string Source,bool Complete){public string? AccountId{get;init;}public string Name=>Path.GetFileName(Directory);public string State=>L.T(Complete?"StoreReady":"StorePending");}
     private string StoreCatalog=>Path.Combine(dataRoot,"archive-stores.json");
     private List<StoreEntry> stores=[];private DataGrid? storeTable;
     private void LoadStores(){stores=File.Exists(StoreCatalog)?JsonFiles.Read<StoreEntry[]>(StoreCatalog).ToList():[];}
-    private void SaveStore(StoreEntry entry){stores.RemoveAll(s=>s.Directory.Equals(entry.Directory,StringComparison.OrdinalIgnoreCase));stores.Add(entry);JsonFiles.Write(StoreCatalog,stores.ToArray());}
+    private void SaveStore(StoreEntry entry){var previous=stores.FirstOrDefault(s=>s.Directory.Equals(entry.Directory,StringComparison.OrdinalIgnoreCase));entry=entry with{Id=string.IsNullOrEmpty(entry.Id)?previous?.Id??entry.Id:entry.Id,Source=string.IsNullOrEmpty(entry.Source)?previous?.Source??entry.Source:entry.Source,AccountId=entry.AccountId??previous?.AccountId??archiveProjects.Values.FirstOrDefault(p=>p.Reading?.Equals(entry.Source,StringComparison.OrdinalIgnoreCase)==true)?.Id};stores.RemoveAll(s=>s.Directory.Equals(entry.Directory,StringComparison.OrdinalIgnoreCase));stores.Add(entry);JsonFiles.Write(StoreCatalog,stores.ToArray());}
     private StoreEntry SelectedStore()=>storeTable?.SelectedItem as StoreEntry??throw new InvalidOperationException(L.T("StoreSelect"));
     private void BuildStores(){
         LoadStores();var grid=View.Grid(View.Auto,View.Auto,View.Fill);chatContent.Children.Add(grid);View.Add(grid,View.Text(L.T("StoreHomeHelp"),color:"Muted"),0);
@@ -31,10 +31,10 @@ public sealed partial class ShellWindow {
             var progress=Progress();using var store=await Task.Run(()=>ArchiveStore.Exists(dialog.TargetDirectory)?ArchiveStore.Open(dialog.TargetDirectory,dialog.TargetPassword.AsSpan(),progress,token):ArchiveStore.Create(dialog.TargetDirectory,dialog.Encrypt?dialog.TargetPassword.AsSpan():default),token);
             var result=await Task.Run(()=>store.ImportReader(dialog.SourceDirectory,progress,token,dialog.SourcePassword.AsSpan()),token);
             SaveStore(new(store.Id,dialog.TargetDirectory,dialog.SourceDirectory,result.Stage=="complete"));status.Text=L.T("StoreMigrationDone",result.Messages,result.Files,View.Size(result.Bytes));operationView.AddLog(status.Text);
-        });}finally{dialog.ClearSecrets();chatStep=5;RenderChatStage();}
+        });}finally{dialog.ClearSecrets();chatStep=-1;RenderChatStage();}
     }
-    private async Task RunStoreAction(string action){
-        if(operation!=null)return;var entry=SelectedStore();string? secret=null,newSecret=null,target=null,exportSecret=null;int exportWorkers=2;
+    private async Task RunStoreAction(string action,StoreEntry? selected=null){
+        if(operation!=null)return;var entry=selected??SelectedStore();string? secret=null,newSecret=null,target=null,exportSecret=null;int exportWorkers=2;
         try{
             bool encrypted=ArchiveStore.NeedsPassword(entry.Directory);
             if(action=="password"&&!encrypted)throw new InvalidOperationException(L.T("StoreNotEncrypted"));

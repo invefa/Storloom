@@ -13,6 +13,42 @@ public sealed class ArchiveWorkflowTests:IDisposable {
     private string TaskFile=>Path.Combine(root,"state","task.json");
     private ChatArchiveProject Update(ChatArchiveProject p,string? password=null,ChatArchiveUpdateRequest? request=null,IProgress<ScanProgress>? progress=null,CancellationToken token=default){Directory.CreateDirectory(Path.GetDirectoryName(TaskFile)!);return ChatArchiveWorkflow.Update(p,TaskFile,null,password,2,changed=>latest=changed,request,progress,token,checkRunningClients:false);}
     private ChatArchiveProject? latest;
+
+
+
+    [Fact]public void IndependentProtectedReadingsKeepRawBackupAbsentAndRetainTheOldCiphertext(){
+        const string password="fixture-independent-password";
+        var first=Update(Project(),password,request:new(DirectReading:true,Mode:ChatArchiveProtectionMode.All));Assert.Null(first.Manifest);Assert.True(ChatVault.Exists(first.Reading!));
+        string old=first.Reading!;byte[] before=File.ReadAllBytes(Path.Combine(old,"vault.storloom.json"));
+        Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000003,'fixture','independent protected message');");
+        var second=Update(first,password,request:new(DirectReading:true));Assert.Null(second.Manifest);Assert.NotEqual(old,second.Reading);Assert.Equal(before,File.ReadAllBytes(Path.Combine(old,"vault.storloom.json")));
+        using var vault=ChatVault.Open(second.Reading!,password);using var text=new StreamReader(vault.OpenRead("messages.jsonl"));Assert.Contains("independent protected message",text.ReadToEnd());Assert.False(File.Exists(Path.Combine(second.Reading!,"messages.jsonl")));
+    }
+    [Fact]public void RawAndReadingLocationsRemainIndependentAcrossUpdates(){
+        var project=Project() with{ReadingRoot=Path.Combine(root,"reading-location")};
+        var first=Update(project,request:new(DirectReading:true));Assert.True(PathPolicy.Under(first.Reading!,project.ReadingRoot));Assert.Null(first.Manifest);
+        var backed=Update(first,request:new(BackupOnly:true));Assert.NotNull(backed.Manifest);Assert.Equal(first.Reading,backed.Reading);Assert.Equal(project.BackupRoot,backed.BackupRoot);
+        var raw=JsonFiles.Read<TransferJournal>(backed.Manifest!);Assert.True(PathPolicy.Under(raw.Plan.Destination,project.BackupRoot));
+        Database(Path.Combine(project.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000002,'fixture','independent newer message');");
+        var next=Update(backed,request:new(DirectReading:true));Assert.Equal(backed.Manifest,next.Manifest);Assert.Equal(backed.BackedUpAt,next.BackedUpAt);Assert.Equal(2,File.ReadLines(Path.Combine(next.Reading!,"messages.jsonl")).Count());
+    }
+    [Fact]public void IndependentReadingKeepsSourceDatabasesReadLockedUntilPublication(){
+        var project=Project();bool checkedLock=false;
+        var result=Update(project,request:new(DirectReading:true),progress:new Callback(p=>{if(p.RuleId=="chat-source-lock"&&!checkedLock){checkedLock=true;Assert.ThrowsAny<IOException>(()=>{using var writer=new FileStream(Path.Combine(project.Source,"message_0.db"),FileMode.Open,FileAccess.Write,FileShare.ReadWrite);});}}));
+        Assert.True(checkedLock);Assert.NotNull(result.Reading);Assert.Null(result.Manifest);
+    }
+    [Fact]public void IndependentReadingUpdatesDoNotCreateRawBackupsAndPreserveArchivedHistory(){
+        var first=Update(Project(),request:new(DirectReading:true));Assert.Null(first.Manifest);Assert.Null(first.BackedUpAt);Assert.NotNull(first.Reading);
+        Database(Path.Combine(first.Source,"message_0.db"),"DELETE FROM MSG;INSERT INTO MSG VALUES(1,1700000002,'fixture','new direct message');");
+        var second=Update(first,request:new(DirectReading:true));Assert.Null(second.Manifest);Assert.NotEqual(first.Reading,second.Reading);Assert.Equal(2,File.ReadLines(Path.Combine(second.Reading!,"messages.jsonl")).Count());Assert.Single(File.ReadLines(Path.Combine(first.Reading!,"messages.jsonl")));
+        Assert.Empty(Directory.GetDirectories(first.BackupRoot,"*-raw",SearchOption.AllDirectories));
+    }
+    [Fact]public void IndependentReadingRefusesChangedDatabasesAfterInterruption(){
+        using var stop=new CancellationTokenSource();var project=Project();
+        Assert.ThrowsAny<OperationCanceledException>(()=>Update(project,request:new(DirectReading:true),progress:new Callback(p=>{if(p.RuleId=="chat-source-lock"&&p.Files>0&&p.Bytes==p.TotalBytes)stop.Cancel();}),token:stop.Token));
+        Assert.NotNull(latest);Assert.NotNull(latest!.TaskFile);Database(Path.Combine(project.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000002,'fixture','changed after interruption');");
+        Assert.Throws<IOException>(()=>Update(latest!));Assert.Null(latest!.Reading);Assert.True(File.Exists(latest.TaskFile));
+    }
     [Fact]public void IncrementalUpdatesPublishNewGenerationsAndRetainPreviousReaders(){
         var first=Update(Project());string old=first.Reading!;byte[] transcript=File.ReadAllBytes(Path.Combine(old,"messages.jsonl"));
         Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000001,'fixture','second message');");

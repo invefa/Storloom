@@ -17,7 +17,7 @@ public static class ChatDatabaseKey {
     public static string Format(ReadOnlySpan<byte> key, ChatPlatform platform)=>
         platform==ChatPlatform.QQ?Encoding.ASCII.GetString(key):Convert.ToHexString(key);
     public static bool Verify(string database, ReadOnlySpan<byte> key, ChatPlatform platform) {
-        using var input=new FileStream(database,FileMode.Open,FileAccess.Read,FileShare.Read);
+        using var input=new FileStream(database,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
         byte[] prefix=new byte[Math.Min(input.Length,5120)];input.ReadExactly(prefix);
         try{return ChatCipher.Detect(prefix,key,platform)!=null;}
         finally{CryptographicOperations.ZeroMemory(prefix);}

@@ -24,8 +24,12 @@ internal static class View {
     public static StackPanel Stack(params UIElement[] elements) {
         var stack = new StackPanel(); foreach (var element in elements) stack.Children.Add(element); return stack;
     }
+    public static ScrollViewer FormScroll(FrameworkElement content) => new(){Content=content,
+        VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,
+        HorizontalContentAlignment=HorizontalAlignment.Stretch,Padding=new Thickness(0,0,12,0),
+        Style=(Style)Application.Current.FindResource("EditorScrollViewer")};
     public static WrapPanel Row(params UIElement[] elements) {
-        var row = new WrapPanel { VerticalAlignment = VerticalAlignment.Center }; foreach (var element in elements) row.Children.Add(element); return row;
+        var row = new WrapPanel { VerticalAlignment = VerticalAlignment.Center }; foreach (var element in elements) { if(element is Button button)button.Margin=new Thickness(0,3,8,3);row.Children.Add(element); } return row;
     }
     public static Grid Grid(params GridLength[] heights) {
         var grid = new Grid(); foreach (var height in heights) grid.RowDefinitions.Add(new RowDefinition { Height = height }); return grid;

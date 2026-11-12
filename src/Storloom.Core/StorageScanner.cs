@@ -5,8 +5,12 @@ public sealed record StorageScan(string Root, DateTimeOffset CreatedAt, List<Sto
     List<StorageEntry> LargeFiles, List<ScanIssue> Issues, long Files, long Bytes, bool Cancelled);
 
 public sealed class StorageScanner {
+    /// <summary>Count metadata only without retaining directory breakdowns or large-file candidates.</summary>
+    public StorageScan Measure(string root, IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellation = default) => Scan(root, progress, cancellation, includeDetails: false);
+
     public StorageScan Scan(string root, IProgress<ScanProgress>? progress = null,
-        CancellationToken cancellation = default) {
+        CancellationToken cancellation = default, bool includeDetails = true) {
         root = PathPolicy.Normalize(root);
         PathPolicy.AssertNoLinks(root);
         progress?.Report(new("storage", 0, 0, Detail: root));
@@ -17,12 +21,15 @@ public sealed class StorageScanner {
         var pending = new Stack<(string Path, int Depth)>();
         pending.Push((root, 0));
         long files = 0, bytes = 0;
+        var reporting = System.Diagnostics.Stopwatch.StartNew();
         while (pending.TryPop(out var next) && !cancellation.IsCancellationRequested) {
             long ownBytes = 0, ownFiles = 0;
             try {
+                OperationPause.Check(cancellation);
                 PathPolicy.AssertNoLinks(next.Path);
                 foreach (var item in new DirectoryInfo(next.Path).EnumerateFileSystemInfos()) {
                     if (cancellation.IsCancellationRequested) break;
+                    OperationPause.Check(cancellation);
                     try {
                         if ((item.Attributes & FileAttributes.ReparsePoint) != 0) {
                             if (issues.Count < 5000) issues.Add(new("storage", item.FullName, "Reparse point skipped."));
@@ -32,22 +39,29 @@ public sealed class StorageScanner {
                         } else if (item is FileInfo file) {
                             ownBytes += file.Length;
                             ownFiles++;
-                            var entry = new StorageEntry(file.FullName, file.Length, 1, next.Depth + 1);
-                            largest.Enqueue(entry, file.Length);
-                            if (largest.Count > 100) largest.Dequeue();
+                            if (includeDetails) {
+                                var entry = new StorageEntry(file.FullName, file.Length, 1, next.Depth + 1);
+                                largest.Enqueue(entry, file.Length);
+                                if (largest.Count > 100) largest.Dequeue();
+                            }
                         }
                     } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
                         if (issues.Count < 5000) issues.Add(new("storage", item.FullName, ex.Message));
                     }
+                    if (reporting.ElapsedMilliseconds >= 250) {
+                        progress?.Report(new("storage", (int)Math.Min(files + ownFiles, int.MaxValue), bytes + ownBytes, Detail: next.Path)); reporting.Restart();
+                    }
                 }
             } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
                 if (issues.Count < 5000) issues.Add(new("storage", next.Path, ex.Message));
+            } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
+                // Retain metadata already counted in this directory for an honest partial result.
             }
-            directories[next.Path] = new(next.Path, ownBytes, ownFiles, next.Depth);
+            if (includeDetails) directories[next.Path] = new(next.Path, ownBytes, ownFiles, next.Depth);
             files += ownFiles;
             bytes += ownBytes;
-            if (directories.Count % 100 == 0) progress?.Report(new("storage", (int)Math.Min(files, int.MaxValue), bytes));
         }
+        progress?.Report(new("storage", (int)Math.Min(files, int.MaxValue), bytes, Detail: root));
         foreach (string path in directories.Values.OrderByDescending(d => d.Depth).Select(d => d.Path).ToArray()) {
             var entry = directories[path];
             string? parent = Path.GetDirectoryName(entry.Path);

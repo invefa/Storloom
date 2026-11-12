@@ -43,5 +43,18 @@ public sealed class ChatToolsTests : IDisposable {
         var resource=journal.Receipts.Single(r=>r.RelativePath=="photo.dat");File.WriteAllText(ChatIncrementalBackup.Resolve(journal.Plan.Destination,resource),"tampered resource");
         string rejected=Path.Combine(root,"rejected");Assert.Throws<InvalidDataException>(()=>ChatRestore.Restore(next.Backup.Manifest,rejected,ChatPlatform.QQ));Assert.False(Directory.Exists(rejected));
     }
+
+    [Fact]
+    public void MetadataMeasurementDoesNotReadLockedFileContentsOrRetainDetailedTrees() {
+        string directory=Path.Combine(root,"measure");Directory.CreateDirectory(Path.Combine(directory,"nested"));
+        string locked=Path.Combine(directory,"locked.bin");File.WriteAllBytes(locked,new byte[4096]);File.WriteAllText(Path.Combine(directory,"nested","a"),"abc");
+        using var held=new FileStream(locked,FileMode.Open,FileAccess.ReadWrite,FileShare.None);
+        var result=new StorageScanner().Measure(directory);
+        Assert.Equal(4099,result.Bytes);Assert.Equal(2,result.Files);Assert.Empty(result.Directories);Assert.Empty(result.LargeFiles);Assert.Empty(result.Issues);Assert.False(result.Cancelled);
+        using var cancellation=new CancellationTokenSource();
+        var cancelled=new StorageScanner().Measure(directory,new CancelMeasurement(cancellation),cancellation.Token);
+        Assert.True(cancelled.Cancelled);Assert.Equal(0,cancelled.Bytes);Assert.True(File.Exists(locked));
+    }
+    private sealed class CancelMeasurement(CancellationTokenSource cancellation) : IProgress<ScanProgress> { public void Report(ScanProgress value)=>cancellation.Cancel(); }
     public void Dispose(){if(Directory.Exists(root))Directory.Delete(root,true);}
 }

@@ -20,8 +20,8 @@ internal sealed class StoreMigrationWindow:ThemeWindow {
         var targetRow=PathRow(targetInput,()=>{var dialog=new Microsoft.Win32.SaveFileDialog{FileName="Archive-"+DateTime.Now.ToString("yyyyMMdd-HHmm"),Filter="Directory name|*",AddExtension=false,OverwritePrompt=false};if(PickerHistory.Show(dialog,this,"store-migration-target")==true)targetInput.Text=dialog.FileName;});
         FrameworkElement sourcePasswordRow=View.Field("StoreSourcePassword",originalSecret),passwordRow=View.Field("VaultPassword",secret),confirmRow=View.Field("VaultConfirmPassword",confirm);
         var stack=View.Stack(View.Text(L.T("StoreMigrationHelp"),color:"Muted"),View.Field("StoreSource",sourceRow),View.Field("StoreDestination",targetRow),sourcePasswordRow,encryption,passwordRow,confirmRow);
-        var notice=View.Text(L.T("StoreMigrationConfirm"),color:"Muted");notice.Margin=new Thickness(0,12,0,8);stack.Children.Add(notice);stack.Children.Add(error);
-        var actions=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,10,0,0)};stack.Children.Add(actions);
+        var notice=new Expander{Header=L.T("TaskDetails"),Content=View.Text(L.T("StoreMigrationConfirm"),color:"Muted")};notice.Margin=new Thickness(0,12,0,8);stack.Children.Add(notice);stack.Children.Add(error);
+        var actions=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,10,0,0)};
         var cancel=View.Button("Cancel",Close);cancel.IsCancel=true;actions.Children.Add(cancel);
         var okay=View.Button("StoreMigrateStart",()=>{
             try{
@@ -38,7 +38,7 @@ internal sealed class StoreMigrationWindow:ThemeWindow {
         },true);okay.Name="store_migrate_start";okay.IsDefault=true;actions.Children.Add(okay);
         void Refresh(){try{bool exists=ArchiveStore.Exists(targetInput.Text),protectedSource=ChatVault.Exists(sourceInput.Text);sourcePasswordRow.Visibility=protectedSource?Visibility.Visible:Visibility.Collapsed;bool protect=exists?ArchiveStore.NeedsPassword(targetInput.Text):protectedSource||encryption.IsChecked==true;if(exists||protectedSource)encryption.IsChecked=protect;encryption.IsEnabled=!exists&&!protectedSource;passwordRow.Visibility=protect?Visibility.Visible:Visibility.Collapsed;confirmRow.Visibility=protect&&!exists?Visibility.Visible:Visibility.Collapsed;okay.Content=L.T(exists?"StoreContinueUpdate":"StoreMigrateStart");}catch(Exception ex)when(ex is IOException or ArgumentException or UnauthorizedAccessException or System.Text.Json.JsonException){error.Text=ex.Message;}}
         sourceInput.TextChanged+=(_,_)=>Refresh();targetInput.TextChanged+=(_,_)=>Refresh();encryption.Click+=(_,_)=>Refresh();Refresh();
-        var scroll=new ScrollViewer{Content=stack,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Margin=new Thickness(22),MaxHeight=SystemParameters.WorkArea.Height-110};Body.Children.Add(scroll);
+        var layout=View.Grid(View.Fill,View.Auto);layout.Margin=new Thickness(22);var scroll=View.FormScroll(stack);scroll.MaxHeight=SystemParameters.WorkArea.Height-190;View.Add(layout,scroll,0);View.Add(layout,actions,1);Body.Children.Add(layout);
         Closed+=(_,_)=>{originalSecret.Clear();secret.Clear();confirm.Clear();};
     }
 }

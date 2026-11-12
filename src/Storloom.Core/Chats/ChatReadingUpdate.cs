@@ -32,12 +32,18 @@ public static class ChatReadingUpdate {
     }
     public static ChatReadingUpdateResult Update(string manifestPath, string directory, ChatPlatform platform, byte[]? secret = null,
         int parallelism = 2, bool verifyBackup = true, bool useLocalConfiguration = false,
-        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool downloadQQGroupAvatars = false, string? originalReadingDirectory = null) {
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool downloadQQGroupAvatars = false, string? originalReadingDirectory = null) => UpdateCore(manifestPath,directory,platform,secret,parallelism,verifyBackup,useLocalConfiguration,progress,cancellation,downloadQQGroupAvatars,originalReadingDirectory);
+
+    internal static ChatReadingUpdateResult UpdateReadLockedSource(ChatSourceLease source,string directory,ChatPlatform platform,byte[]? secret,int parallelism,bool useLocalConfiguration,IProgress<ScanProgress>? progress,CancellationToken cancellation,bool downloadQQGroupAvatars=false,string? originalReadingDirectory=null) =>
+        UpdateCore("",directory,platform,secret,parallelism,false,useLocalConfiguration,progress,cancellation,downloadQQGroupAvatars,originalReadingDirectory,source);
+    private static ChatReadingUpdateResult UpdateCore(string manifestPath, string directory, ChatPlatform platform, byte[]? secret = null,
+        int parallelism = 2, bool verifyBackup = true, bool useLocalConfiguration = false,
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellation = default, bool downloadQQGroupAvatars = false, string? originalReadingDirectory = null, ChatSourceLease? sourceLease=null) {
         directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
         string lockPath = Path.Combine(directory, ".export.lock"); if (File.Exists(lockPath)) PathPolicy.AssertNoLinks(lockPath);
         using var lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         Recover(directory);
-        var manifest = JsonFiles.Read<TransferJournal>(manifestPath);
+        var manifest = sourceLease==null?JsonFiles.Read<TransferJournal>(manifestPath):new TransferJournal{Plan=new TransferPlan{Source=sourceLease.Root,Destination=sourceLease.Root}};
         string account = PathPolicy.Normalize(manifest.Plan.Source);
         string transcript = Path.Combine(directory, "messages.jsonl"); PathPolicy.AssertNoLinks(transcript);
         var report = JsonFiles.Read<ChatExportResult>(Path.Combine(directory, "export-report.json"));
@@ -63,14 +69,17 @@ public static class ChatReadingUpdate {
                 var firstMessage = File.ReadLines(transcript).Select(Message).FirstOrDefault();
                 if (firstMessage?.Platform != platform.ToString()) throw new InvalidDataException("Reader platform does not match the selected backup.");
             }
+            if(sourceLease!=null&&PathPolicy.Normalize(originalSource).Equals(account,StringComparison.OrdinalIgnoreCase))previousDatabases=null;
+            else {
             string parent = Path.GetDirectoryName(originalSource) ?? throw new InvalidDataException("Missing original backup.");
             PathPolicy.AssertNoLinks(parent);
             var original = Directory.GetFiles(parent, Path.GetFileName(originalSource) + ".storloom-*.json")
                 .Select(JsonFiles.Read<TransferJournal>).FirstOrDefault(j => j.Plan.Destination == originalSource && PathPolicy.Normalize(j.Plan.Source) == account);
             if (original == null) throw new InvalidDataException("Select a completed reading copy of this account.");
             previousDatabases = DatabaseHashes(original, platform);
+            }
         }
-        var databaseHashes = DatabaseHashes(manifest, platform);
+        var databaseHashes = sourceLease==null?DatabaseHashes(manifest, platform):ChatExporter.FindDatabases(sourceLease.Root,platform).Select(p=>Path.GetRelativePath(sourceLease.Root,p)).ToDictionary(p=>p,p=>JsonFiles.Hash(new[]{p,p+"-wal",p+"-shm"}.Select(n=>sourceLease.Hashes.GetValueOrDefault(n)??"")),StringComparer.OrdinalIgnoreCase);
         if (databaseHashes.Count == 0) throw new InvalidDataException("No supported message database in the new backup.");
         var changedDatabases = databaseHashes.Where(p => previousDatabases == null || !previousDatabases.TryGetValue(p.Key, out var hash) || hash != p.Value).Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if(ChatVault.Exists(directory))throw new InvalidOperationException("Encrypted readers cannot be updated in place. Keep the verified raw backup and update a separate reading copy.");
@@ -102,8 +111,7 @@ public static class ChatReadingUpdate {
                 if (index.Query("PRAGMA quick_check").Single()[0] != "ok") throw new InvalidDataException("Invalid update index.");
                 index.Execute("BEGIN");
                 string delta = Path.Combine(work, "delta");
-                var deltaResult = new ChatExporter(parallelism, useLocalConfiguration).ExportVerifiedBackup(manifestPath, delta, platform, secret, progress, cancellation, verifyBackup,
-                    selectMessage: message => {
+                ChatMessage? SelectMessage(ChatMessage message) {
                         OperationPause.Check(cancellation); string key = Key(message), hash = Fingerprint(message);
                         var found = index.Query("SELECT h,id FROM messages WHERE k=?", key).SingleOrDefault();
                         if (found != null && found[0] == hash) { unchanged++; return null; }
@@ -111,7 +119,10 @@ public static class ChatReadingUpdate {
                         if (found == null) added++; else changed++;
                         index.Execute("INSERT OR REPLACE INTO messages VALUES(?,?,?)", key, hash, id);
                         return message with { Id = id };
-                    }, includeDatabase: relative => changedDatabases.Contains(relative));
+                    }
+                var exporter=new ChatExporter(parallelism,useLocalConfiguration,downloadQQGroupAvatars);
+                var deltaResult=sourceLease==null?exporter.ExportVerifiedBackup(manifestPath,delta,platform,secret,progress,cancellation,verifyBackup,selectMessage:SelectMessage,includeDatabase:relative=>changedDatabases.Contains(relative)):
+                    exporter.ExportReadLockedSource(sourceLease,delta,platform,secret,progress,cancellation,SelectMessage,relative=>changedDatabases.Contains(relative));
                 OperationPause.Check(cancellation);
                 if (deltaResult.CanResume || (deltaResult.Databases != changedDatabases.Count) || deltaResult.Issues.Any(i => i.RuleId == "chat-export"))
                     throw new IOException("New database processing failed; the previous reading copy was retained.",new AggregateException(deltaResult.Issues.Select(i=>new IOException(i.Reason))));
@@ -133,7 +144,7 @@ public static class ChatReadingUpdate {
                     var latest = ReadIndex(delta); MergeMaps(oldIndex, latest); CopyAssets(delta, directory, cancellation);
                     File.WriteAllText(Path.Combine(emptyStage, "archive-index.js"), "window.archiveIndex=" + oldIndex.ToJsonString() + ";");
                     foreach (string asset in new[] { "messages.html", "reader.css", "reader.js" }) File.Copy(Path.Combine(delta, asset), Path.Combine(emptyStage, asset));
-                    File.Move(pendingIndex, Path.Combine(emptyStage, IndexFile));
+                    DirectoryPublication.MoveFile(pendingIndex, Path.Combine(emptyStage, IndexFile));
                     using (var stream = File.OpenRead(Path.Combine(emptyStage, IndexFile)))
                         JsonFiles.Write(Path.Combine(emptyStage, StateFile), new UpdateState(1, account, platform, NativeFile.ReadStamp(transcript), Convert.ToHexString(TransferService.Hash(stream, cancellation)), databaseHashes));
                     var noChange = new ChatReadingUpdateResult(0, 0, unchanged, 0, directory);
@@ -164,7 +175,7 @@ public static class ChatReadingUpdate {
                     }
                     writer.Finish(progress);
                 }
-                File.Move(all, Path.Combine(merged, "messages.jsonl"), true);
+                DirectoryPublication.MoveFile(all, Path.Combine(merged, "messages.jsonl"), true);
                 var rebuilt = ReadIndex(merged); var deltaIndex = ReadIndex(delta);
                 var conversations = oldIndex["conversations"]!.AsArray().ToDictionary(n => n!["id"]!.GetValue<string>(), n => n!.DeepClone());
                 foreach (var item in rebuilt["conversations"]!.AsArray()) conversations[item!["id"]!.GetValue<string>()] = item.DeepClone();
@@ -182,7 +193,7 @@ public static class ChatReadingUpdate {
                 index.Execute("DELETE FROM changes");
             }
             string stage = Path.Combine(work, "merged");
-            File.Move(pendingIndex, Path.Combine(stage, IndexFile));
+            DirectoryPublication.MoveFile(pendingIndex, Path.Combine(stage, IndexFile));
             using (var stream = File.OpenRead(Path.Combine(stage, IndexFile)))
                 JsonFiles.Write(Path.Combine(stage, StateFile), new UpdateState(1, account, platform, NativeFile.ReadStamp(Path.Combine(stage, "messages.jsonl")), Convert.ToHexString(TransferService.Hash(stream, cancellation)), databaseHashes));
             OperationPause.Check(cancellation);
@@ -212,7 +223,7 @@ public static class ChatReadingUpdate {
                         if (!Convert.ToHexString(TransferService.Hash(stream, cancellation)).Equals(Path.GetFileNameWithoutExtension(asset), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Invalid derived resource.");
                     string target = Path.Combine(directory, "assets", Path.GetFileName(asset)); Directory.CreateDirectory(Path.GetDirectoryName(target)!); PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);
                     if (File.Exists(target)) { PathPolicy.AssertNoLinks(target); using var stream = File.OpenRead(target); if (!Convert.ToHexString(TransferService.Hash(stream, cancellation)).Equals(Path.GetFileNameWithoutExtension(target), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Existing resource changed."); }
-                    else File.Move(asset, target);
+                    else DirectoryPublication.MoveFile(asset, target);
                 }
     }
     private static Dictionary<string, string> DatabaseHashes(TransferJournal journal, ChatPlatform platform) {
@@ -232,8 +243,8 @@ public static class ChatReadingUpdate {
             foreach (string path in paths.OrderBy(p => p == "archive-index.js" ? 2 : p==StateFile ? 1 : 0)) {
                 string target = TransferService.Child(directory, path), saved = TransferService.Child(backup, path);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!); PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);
-                if (files[path]) { Directory.CreateDirectory(Path.GetDirectoryName(saved)!); File.Move(target, saved); }
-                File.Move(TransferService.Child(stage, path), target);
+                if (files[path]) { Directory.CreateDirectory(Path.GetDirectoryName(saved)!); DirectoryPublication.MoveFile(target, saved); }
+                DirectoryPublication.MoveFile(TransferService.Child(stage, path), target);
                 if(path==StateFile&&stagedStamp!=null)RebindVerifiedCopy(directory,stagedStamp);
             }
             string bootstrap=Path.Combine(directory,".reading-update-bootstrap.db");
@@ -249,7 +260,7 @@ public static class ChatReadingUpdate {
         foreach (var pair in publication.Files.Reverse()) {
             string target = TransferService.Child(directory, pair.Key), saved = TransferService.Child(backup, pair.Key);
             if (File.Exists(target)) PathPolicy.AssertNoLinks(target);
-            if (File.Exists(saved)) { PathPolicy.AssertNoLinks(saved); if (File.Exists(target)) File.Delete(target); File.Move(saved, target); }
+            if (File.Exists(saved)) { PathPolicy.AssertNoLinks(saved); if (File.Exists(target)) File.Delete(target); DirectoryPublication.MoveFile(saved, target); }
             else if (!pair.Value && File.Exists(target)) File.Delete(target);
         }
         File.Delete(journal);

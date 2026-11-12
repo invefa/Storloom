@@ -78,6 +78,9 @@ public static class NativeFile {
         using var handle = Open(path, false);
         return Stamp(Info(handle, path));
     }
+    internal static FileStamp ReadDirectoryStamp(string path) {
+        using var handle=Open(path,false,true);return Stamp(Info(handle,path,true));
+    }
 
     public static void DeleteVerified(Candidate candidate) {
         var directoryHandles = new List<SafeFileHandle>();

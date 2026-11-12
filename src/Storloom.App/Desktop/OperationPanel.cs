@@ -143,7 +143,7 @@ public sealed class OperationPanel : Grid {
     }
     public void Report(ScanProgress value) {
         latest = value;
-        archiveStep=value.RuleId switch{"archive-backup"=>1,"archive-workspace-plan" or "archive-workspace"=>2,"archive-reading"=>3,"archive-protect"=>4,"archive-publish"=>5,_=>archiveStep};
+        archiveStep=value.RuleId switch{"chat-source-lock"=>1,"archive-backup"=>1,"archive-workspace-plan" or "archive-workspace"=>2,"archive-reading"=>3,"archive-protect"=>4,"archive-publish"=>5,_=>archiveStep};
         if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes is >0 ? value.Bytes : value.Files; if(seenPhases.Add(phase))AddLog(L.T(PhaseKey(phase))); if(DebugToggle.IsChecked==true)AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; if(DebugToggle.IsChecked==true)AddDebugDetail("file."+phase,detail); }
         var counts=new List<string>();
@@ -192,7 +192,7 @@ public sealed class OperationPanel : Grid {
         "archive-workspace-plan"=>"PhaseArchiveWorkspacePlan","archive-backup"=>"PhaseArchiveBackup","archive-workspace"=>"PhaseArchiveWorkspace","archive-reading"=>"PhaseArchiveReading","archive-protect"=>"PhaseArchiveProtect","archive-publish"=>"PhaseArchivePublish","archive-reuse-encrypted"=>"PhaseArchiveReuse",
         "chat-encryption-open"=>"PhaseEncryptionOpen","chat-encryption-check"=>"PhaseEncryptionCheck","chat-encryption-select"=>"PhaseEncryptionSelect","chat-encryption-plan"=>"PhaseEncryptionPlan","chat-encryption-derive"=>"PhaseEncryptionDerive","chat-encryption-save-plan"=>"PhaseEncryptionSavePlan",
         "transfer-plan"=>"PhaseTransferPlan", "transfer" => "PhaseCopyVerify", "transfer-remove" => "PhaseRemove", "chat-verify" => "PhaseBackupVerify", "chat-resume" => "PhaseResumeExport", "chat-discovery" => "FindAccounts",
-        "chat-restore" => "RestoreChatBackup", "chat-encrypt" => "Phase_chat-encrypt", "chat-avatars" => "PhaseGroupAvatars", "chat-update-index" => "PhaseUpdateIndex", "chat-update-merge" => "PhaseUpdateMerge", "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
+        "chat-source-lock"=>"ChatSourceLock", "chat-account-size"=>"ScanAccountSizes", "chat-restore" => "RestoreChatBackup", "chat-encrypt" => "Phase_chat-encrypt", "chat-avatars" => "PhaseGroupAvatars", "chat-update-index" => "PhaseUpdateIndex", "chat-update-merge" => "PhaseUpdateMerge", "chat-decrypt" => "PhaseDecrypt", "chat-export" => "PhaseParse", "chat-reader" or "chat-pages" => "PhaseReader", "native-tool" => "PhaseNative", _ => "PhaseScan" };
 }
 
 internal sealed class ActionCommand(Action action) : ICommand {
