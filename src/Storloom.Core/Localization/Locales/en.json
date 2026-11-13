@@ -835,5 +835,12 @@
   "CompactFreshHelp": "Create a new compact reading archive from the current local source. The old reading copy is retained. Messages that only exist in the old reading copy are not merged into the new one. To retain that old reading content in compact storage, use reading-copy import instead.",
   "StorageFormatLabel": "Storage format",
   "StorageAndWorkers": "Storage / workers",
-  "PhaseCompactCleanup": "Removing the temporary native input copy"
+  "PhaseCompactCleanup": "Removing the temporary native input copy",
+  "PreparingAccountTask": "Preparing...",
+  "BackupFormatChoiceHelp": "Choose the format for the next backup. Existing backups are retained; changing the choice does not convert or overwrite them.",
+  "AccountAliases": "Account and source aliases",
+  "AccountAliasesHelp": "Aliases change display names only. The account ID, source paths, keys and archive identity stay the same. Leave a field blank to restore its original display name.",
+  "AccountAlias": "Account alias",
+  "SourceAlias": "Source alias",
+  "AliasInvalid": "Use an alias without control characters."
 }

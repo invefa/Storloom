@@ -1,6 +1,6 @@
 # Compact archive v3, application 2.7
 
-New desktop accounts recommend compact storage for independent reading and native-backup outputs. Existing projects retain their format. Compatible-folder export and granular/direct-key protection remain available. See [user instructions](../docs/compact-archives.md).
+New desktop accounts recommend compact storage for independent reading and native-backup outputs. Existing projects retain their format. Compatible-folder export and granular protection remain available; compact archives support both password envelopes and direct data keys since 2.8. See [user instructions](../docs/compact-archives.md).
 
 ## Storage and publication
 
@@ -50,3 +50,11 @@ Initial creation/unlock KDF time is separate from the write measurement. Query c
 A separate 32 MiB mixed-entropy fixture exercised 1-8 pack workers. Single-run totals ranged from 323 to 380 ms, with small differences and substantial fixed overhead. This does not establish an optimum. Existing automatic selection considers storage seek penalty, CPU count and memory, with a manual 1-8 override. No new two-physical-disk, million-row end-to-end, p50/p95, exFAT or low-memory guarantee is made by these fixtures.
 
 Windows index connections use `multipleciphers-win32-longpath` with extended native paths, including journal paths. A bare `win32-longpath` VFS bypasses the encryption shim and is rejected. See the [maintainer VFS guidance](https://utelle.github.io/SQLite3MultipleCiphers/docs/faq/faq_overview/). Public and protected regression fixtures create index paths longer than 260 characters.
+
+## Direct keys (2.8)
+
+New-project factories select compact storage for both outputs, while legacy serialized defaults and explicit format choices retain their meaning. The previous constructor remains compatible for legacy callers.
+
+Keyring version 1 remains the password envelope. Version 2 with mode `direct-key` uses a supplied 256-bit hexadecimal master key and stores only a 48-byte authenticated empty-record verifier bound to the archive ID. It stores neither the supplied key nor a wrapped master. Existing domain and record derivation is unchanged. Wrong keys fail before opening or modifying the query cache. Direct-mode password rewrapping is rejected. Native backup and reading tasks retain their key mode across restarts; existing keyrings are authoritative.
+
+The standalone browser reader remains a separate [proposal](standalone-compact-html-proposal.zh-CN.md), not an implemented 2.8 feature.

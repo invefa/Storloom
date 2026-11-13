@@ -835,5 +835,12 @@
   "CompactFreshHelp": "从当前本地来源另建紧凑阅览版. 原阅览版保留. 仅存在于旧阅览版的历史消息不会合并进新副本. 如需将旧阅览内容保存在紧凑格式中, 请使用导入阅览版.",
   "StorageFormatLabel": "存储格式",
   "StorageAndWorkers": "存储与线程",
-  "PhaseCompactCleanup": "正在移除临时原件副本"
+  "PhaseCompactCleanup": "正在移除临时原件副本",
+  "PreparingAccountTask": "正在准备...",
+  "BackupFormatChoiceHelp": "选择下一次原件备份的格式. 已有备份保留, 不会原地转换或覆盖. 未完成任务期间需沿用原格式.",
+  "AccountAliases": "账号与来源别名",
+  "AccountAliasesHelp": "别名仅用于显示. 同一账号的来源共用账号别名, 来源别名单独保存. 原账号标识, 路径及密钥不变. 留空可恢复原显示名称.",
+  "AccountAlias": "账号别名",
+  "SourceAlias": "来源别名",
+  "AliasInvalid": "别名不能包含控制字符."
 }

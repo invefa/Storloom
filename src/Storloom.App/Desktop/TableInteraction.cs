@@ -4,6 +4,20 @@ using System.Windows.Data;
 namespace Storloom.App;
 
 internal static class TableInteraction {
+    // Selection tables use the same command for mouse, keyboard, and the visible action.
+    public static void Activate(DataGrid table,Button action){
+        table.PreviewMouseDoubleClick+=(_,args)=>{
+            if(args.ChangedButton!=System.Windows.Input.MouseButton.Left||args.OriginalSource is not DependencyObject source)return;
+            var row=Ancestor<DataGridRow>(source);if(row==null||ItemsControl.ItemsControlFromItemContainer(row)!=table)return;
+            table.SelectedItem=row.Item;
+            if(!action.IsEnabled||!action.IsVisible)return;
+            args.Handled=true;action.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        };
+        table.PreviewKeyDown+=(_,args)=>{
+            if(args.Key!=System.Windows.Input.Key.Enter||System.Windows.Input.Keyboard.Modifiers!=System.Windows.Input.ModifierKeys.None||table.SelectedItem==null||!action.IsEnabled||!action.IsVisible)return;
+            args.Handled=true;action.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        };
+    }
     public static void Configure(DataGrid table) {
         var original = table.Columns.ToDictionary(column => column, column => column.Width);
         foreach (var column in table.Columns) {

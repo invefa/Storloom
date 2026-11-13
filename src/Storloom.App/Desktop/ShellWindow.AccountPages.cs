@@ -3,14 +3,14 @@ using Storloom.Core.Chats;
 namespace Storloom.App;
 public sealed partial class ShellWindow {
     private string? keyAccountId;
-    private sealed record KeyAccount(ChatArchiveProject Project){public string Label=>Project.Account+" ("+Project.Platform+") / "+Project.Source;}
+    private sealed record KeyAccount(ChatArchiveProject Project,string? AccountAlias=null,string? SourceAlias=null){public string Label=>(string.IsNullOrEmpty(AccountAlias)?Project.Account:AccountAlias+" / "+Project.Account)+" ("+Project.Platform+") / "+(string.IsNullOrEmpty(SourceAlias)?"":SourceAlias+" / ")+Project.Source;}
     private void BuildAccountClientSettings(){
         chatContent.Children.Add(new ChatSettingsEditor(this,preferences,p=>{preferences=p;JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);discoveryStarted=false;status.Text=L.T("HubSettingsSaved");},()=>RenderChatStage()));
     }
     private void BuildDatabaseKeys(){
         var grid=View.Grid(View.Auto,View.Auto,View.Fill,View.Auto);chatContent.Children.Add(grid);
         View.Add(grid,View.Text(L.T("KeyLibraryHelp"),color:"Muted"),0);
-        var accounts=archiveProjects.Values.OrderBy(p=>p.Account).Select(p=>new KeyAccount(p)).ToArray();var selector=new ComboBox{ItemsSource=accounts,DisplayMemberPath="Label",Name="key_account_selector"};
+        var aliases=LoadAccountAliases();var accounts=archiveProjects.Values.OrderBy(p=>p.Account).Select(p=>new KeyAccount(p,aliases.Accounts.GetValueOrDefault("account:"+p.Platform+":"+p.Account),aliases.Sources.GetValueOrDefault(p.Id))).ToArray();var selector=new ComboBox{ItemsSource=accounts,DisplayMemberPath="Label",Name="key_account_selector"};
         selector.SelectedItem=accounts.FirstOrDefault(p=>p.Project.Id==(keyAccountId??selectedArchiveId))??accounts.FirstOrDefault();
         selector.SelectionChanged+=(_,_)=>{keyAccountId=(selector.SelectedItem as KeyAccount)?.Project.Id;SetCapturedKey(null);RenderChatStage();};
         var table=View.Table(("Account","Account",0),("Platform","Platform",90),("Path","Path",0));table.Name="database_key_files";table.ItemsSource=ReadKeyLibrary();View.Add(grid,table,2);
@@ -22,6 +22,7 @@ public sealed partial class ShellWindow {
         var unlock=AsyncButton("ProtectedKeyUnlock",async()=>{if(table.SelectedItem is KeyLibraryEntry entry)await WithAccount(()=>ImportChatKeyFrom(entry.Path));});unlock.IsEnabled=false;
         var forget=Button("KeyLibraryForget",()=>{if(table.SelectedItem is not KeyLibraryEntry entry)return;var entries=ReadKeyLibrary();entries.RemoveAll(e=>e.Path==entry.Path);JsonFiles.Write(KeyLibraryPath,entries);table.ItemsSource=entries;});forget.IsEnabled=false;
         table.SelectionChanged+=(_,_)=>{unlock.IsEnabled=table.SelectedItem is KeyLibraryEntry&&accounts.Length>0;forget.IsEnabled=table.SelectedItem is KeyLibraryEntry;};
+        TableInteraction.Activate(table,unlock);
         var actions=View.Row(unlock,forget);actions.Margin=new Thickness(0,12,0,0);View.Add(grid,actions,3);
     }
     private async Task<bool> PrepareKeyAccount(ChatArchiveProject project){
@@ -42,7 +43,10 @@ public sealed partial class ShellWindow {
         if(!Directory.Exists(project.Source))throw new IOException(L.T("AccountSourceOffline"));
         return PrepareArchiveUpdate(project,new(DirectReading:true));
     }
-    private void PrepareRawTask(ChatArchiveProject project){
+    private async Task PrepareRawTask(ChatArchiveProject project){
+        if(archivePreparing||operation!=null)return;
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+        if(windowClosed)return;
         if(PendingState(project)!=null)throw new InvalidOperationException(L.T("HubFinishPending"));
         activeChat=new(project.Platform,project.Source,project.Account,Path.Combine(project.Source,"source.db"),0);activeManifest=project.Manifest;pendingArchive=project;readingDirectory=project.Reading;directChatSource=false;SetCapturedKey(null);chatStep=6;RenderChatStage();
     }

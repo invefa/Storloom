@@ -22,14 +22,14 @@ public sealed partial class ShellWindow {
         var password=AsyncButton("StoreChangePassword",()=>RunStoreAction("password"));password.Name="store_password_change";
         var abandon=Button("ArchiveAbandonTask",()=>{if(!Confirm(L.T("ArchiveAbandonConfirm")))return;var item=SelectedStore();ArchiveStore.AbandonPending(item.Directory);SaveStore(item with{Complete=File.Exists(Path.Combine(item.Directory,"HEAD"))});RenderChatStage();});abandon.Visibility=Visibility.Collapsed;chatFooter.Children.Add(abandon);
         foreach(var button in new[]{open,update,backup,verify,export,password})chatFooter.Children.Add(button);
-        storeTable.SelectionChanged+=(_,_)=>{abandon.Visibility=storeTable.SelectedItem is StoreEntry pending&&ArchiveStore.SnapshotReads(pending.Directory)&&File.Exists(Path.Combine(pending.Directory,".write-task.json"))?Visibility.Visible:Visibility.Collapsed;bool selected=storeTable.SelectedItem is StoreEntry;foreach(var button in new[]{open,update,backup,verify,export,password})button.IsEnabled=selected;};
+        storeTable.SelectionChanged+=(_,_)=>{abandon.Visibility=storeTable.SelectedItem is StoreEntry pending&&ArchiveStore.SnapshotReads(pending.Directory)&&File.Exists(Path.Combine(pending.Directory,".write-task.json"))?Visibility.Visible:Visibility.Collapsed;bool selected=storeTable.SelectedItem is StoreEntry;foreach(var button in new[]{open,update,backup,verify,export,password})button.IsEnabled=selected;if(storeTable.SelectedItem is StoreEntry item){password.IsEnabled=ArchiveStore.NeedsPassword(item.Directory)&&ArchiveStore.ReadKeyMode(item.Directory)!=ChatVaultKeyMode.DirectKey;password.ToolTip=password.IsEnabled?null:L.T("VaultDirectKeyFixed");}};
         storeTable.SelectedItem=storeTable.Items.OfType<StoreEntry>().FirstOrDefault();if(storeTable.SelectedItem==null)foreach(var button in new[]{open,update,backup,verify,export,password})button.IsEnabled=false;
     }
     private async Task MigrateStore(string? source=null,string? target=null){
         if(operation!=null)return;var dialog=new StoreMigrationWindow(dataRoot,source,target){Owner=this};if(dialog.ShowDialog()!=true)return;
         LoadStores();SaveStore(new("",dialog.TargetDirectory,dialog.SourceDirectory,false));
         try{await RunPausable(async token=>{
-            var progress=Progress();using var store=await Task.Run(()=>ArchiveStore.Exists(dialog.TargetDirectory)?ArchiveStore.Open(dialog.TargetDirectory,dialog.TargetPassword.AsSpan(),progress,token):ArchiveStore.Create(dialog.TargetDirectory,dialog.Encrypt?dialog.TargetPassword.AsSpan():default),token);
+            var progress=Progress();using var store=await Task.Run(()=>ArchiveStore.Exists(dialog.TargetDirectory)?ArchiveStore.Open(dialog.TargetDirectory,dialog.TargetPassword.AsSpan(),progress,token):ArchiveStore.Create(dialog.TargetDirectory,dialog.Encrypt?dialog.TargetPassword.AsSpan():default,dialog.Encrypt?dialog.TargetKeyMode:ChatVaultKeyMode.Password),token);
             var result=await Task.Run(()=>store.ImportReader(dialog.SourceDirectory,progress,token,dialog.SourcePassword.AsSpan()),token);
             SaveStore(new(store.Id,dialog.TargetDirectory,dialog.SourceDirectory,result.Stage=="complete"));status.Text=L.T("StoreMigrationDone",result.Messages,result.Files,View.Size(result.Bytes));operationView.AddLog(status.Text);
         });}finally{dialog.ClearSecrets();chatStep=-1;RenderChatStage();}
@@ -38,7 +38,7 @@ public sealed partial class ShellWindow {
         if(operation!=null)return;var entry=selected??SelectedStore();string? secret=null,newSecret=null,target=null,exportSecret=null;int exportWorkers=2;
         try{
             bool encrypted=ArchiveStore.NeedsPassword(entry.Directory);
-            if(action=="password"&&!encrypted)throw new InvalidOperationException(L.T("StoreNotEncrypted"));
+            if(action=="password"&&!encrypted)throw new InvalidOperationException(L.T("StoreNotEncrypted"));if(action=="password"&&ArchiveStore.ReadKeyMode(entry.Directory)==ChatVaultKeyMode.DirectKey)throw new InvalidOperationException(L.T("VaultDirectKeyFixed"));
             if(encrypted){var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;secret=unlock.Password;unlock.ClearSecret();}
             if(action=="password"){var dialog=new VaultPasswordWindow(true,false,passwordChange:true){Owner=this};if(dialog.ShowDialog()!=true)return;newSecret=dialog.Password;dialog.ClearSecret();if(!Confirm(L.T("StorePasswordConfirm")))return;}
             if(action is "backup" or "export"){

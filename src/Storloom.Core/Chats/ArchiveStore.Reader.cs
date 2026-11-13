@@ -8,6 +8,8 @@ internal sealed partial class ArchiveStore {
     private readonly object readGate=new();
     internal string DirectoryPath=>root;
     internal bool Protected=>keys!=null;
+    internal ChatVaultKeyMode KeyMode=>keys?.KeyMode??ChatVaultKeyMode.Password;
+    internal static ChatVaultKeyMode ReadKeyMode(string directory)=>NeedsPassword(directory)?ArchiveKeyring.ReadKeyMode(directory):ChatVaultKeyMode.Password;
     internal void ChangePassword(ReadOnlySpan<char> password){using var lease=Lease();if(keys==null)throw new InvalidOperationException("This archive is not encrypted.");keys.ChangePassword(password);}
     internal static bool SnapshotReads(string directory)=>File.Exists(Path.Combine(directory,"projection.json"));
     internal static bool Exists(string directory)=>File.Exists(Path.Combine(directory,"archive.json"));

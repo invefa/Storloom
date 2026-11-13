@@ -36,7 +36,9 @@ public sealed partial class ShellWindow {
         var unlock=View.Button("ProtectedKeyUnlock",async()=>{
             if(table.SelectedItem is not KeyLibraryEntry entry||activeChat==null)return;
             try{if(entry.Platform!=Account().Platform)throw new InvalidDataException(L.T("KeyDoesNotMatch"));window.Close();await ImportChatKeyFrom(entry.Path);}catch(Exception ex){Error(ex);}
-        },true);unlock.IsEnabled=activeChat!=null&&chatStep is 2 or 4;
+        },true);unlock.IsEnabled=activeChat!=null&&chatStep is 2 or 4&&table.SelectedItem!=null;
+        table.Name="key_library_picker";table.SelectionChanged+=(_,_)=>unlock.IsEnabled=activeChat!=null&&chatStep is 2 or 4&&table.SelectedItem!=null;
+        TableInteraction.Activate(table,unlock);
         var forget=View.Button("KeyLibraryForget",()=>{if(table.SelectedItem is not KeyLibraryEntry entry)return;var entries=ReadKeyLibrary();entries.RemoveAll(e=>e.Path==entry.Path);JsonFiles.Write(KeyLibraryPath,entries);table.ItemsSource=entries;});
         var buttons=View.Row(unlock,forget,View.Button("Close",()=>window.Close()));buttons.HorizontalAlignment=HorizontalAlignment.Right;buttons.Margin=new Thickness(0,16,0,0);View.Add(grid,buttons,2);window.ShowDialog();
     }

@@ -5,6 +5,22 @@ namespace Storloom.Tests;
 public sealed class ArchiveKeyringTests:IDisposable {
     private readonly string root=Path.Combine(AppContext.BaseDirectory,"fixtures","archive-keyring-"+Guid.NewGuid().ToString("N"));
     public ArchiveKeyringTests()=>Directory.CreateDirectory(root);
+    [Fact]public void DirectKeysAreAuthenticatedWithoutAStoredKeyOrPasswordEnvelope(){
+        string secret=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));byte[] cipher;string id;
+        using(var keys=ArchiveKeyring.Create(root,secret,ChatVaultKeyMode.DirectKey)){id=keys.Id;Assert.Equal(ChatVaultKeyMode.DirectKey,keys.KeyMode);cipher=keys.Protect("fixture"u8.ToArray(),"pack/metadata");Assert.Throws<InvalidOperationException>(()=>keys.ChangePassword("new-password"));}
+        Assert.Equal(ChatVaultKeyMode.DirectKey,ArchiveKeyring.ReadKeyMode(root));
+        using(var keys=ArchiveKeyring.Open(root,secret.ToLowerInvariant())){Assert.Equal(id,keys.Id);Assert.Equal("fixture"u8.ToArray(),keys.Unprotect(cipher,"pack/metadata"));}
+        Assert.ThrowsAny<CryptographicException>(()=>ArchiveKeyring.Open(root,Convert.ToHexString(RandomNumberGenerator.GetBytes(32))));
+        Assert.Throws<ArgumentException>(()=>ArchiveKeyring.Open(root,"not-a-data-key"));
+        string config=File.ReadAllText(Path.Combine(root,"keyring.json"));Assert.DoesNotContain(secret,config,StringComparison.OrdinalIgnoreCase);
+        using var json=System.Text.Json.JsonDocument.Parse(config);Assert.Equal(0,json.RootElement.GetProperty("iterations").GetInt32());Assert.Equal(48,Convert.FromBase64String(json.RootElement.GetProperty("wrapped").GetString()!).Length);
+        string other=Path.Combine(root,"other");Directory.CreateDirectory(other);using var second=ArchiveKeyring.Create(other,secret,ChatVaultKeyMode.DirectKey);Assert.ThrowsAny<CryptographicException>(()=>second.Unprotect(cipher,"pack/metadata"));
+    }
+    [Fact]public void VersionOneKeyringsWithoutAModeStillOpenAsPasswordEnvelopes(){
+        using(var keys=ArchiveKeyring.Create(root,"password-one")){}
+        string file=Path.Combine(root,"keyring.json");var config=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();config.Remove("mode");File.WriteAllText(file,config.ToJsonString());
+        using var reopened=ArchiveKeyring.Open(root,"password-one");Assert.Equal(ChatVaultKeyMode.Password,reopened.KeyMode);reopened.ChangePassword("password-two");
+    }
     [Fact]public void PasswordChangesRewrapTheSameMasterAndLeaveExistingCiphertextReadable(){
         byte[] cipher;string id;
         using(var keys=ArchiveKeyring.Create(root,"password-one")){id=keys.Id;cipher=keys.Protect("private fixture"u8.ToArray(),"messages/private");keys.ChangePassword("password-two");}

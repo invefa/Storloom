@@ -29,13 +29,13 @@ internal sealed partial class ArchiveStore:IDisposable {
         catch{queryLease.Dispose();throw;}finally{if(queryKey!=null)CryptographicOperations.ZeroMemory(queryKey);}
         try{query.Replay(log,publishedHead,Decode,cancellation,progress,DecodeProjection);}catch{Dispose();throw;}
     }
-    internal static ArchiveStore Create(string directory,ReadOnlySpan<char> password=default){
+    internal static ArchiveStore Create(string directory,ReadOnlySpan<char> password=default,ChatVaultKeyMode keyMode=ChatVaultKeyMode.Password){
         string root=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(Path.GetDirectoryName(root)!);
         if(Directory.Exists(root)||File.Exists(root))throw new IOException("A new archive directory is required.");
-        if(!password.IsEmpty&&password.Length is <8 or >65536)throw new ArgumentException("Archive password must contain 8 to 65536 characters.",nameof(password));
+        if(!password.IsEmpty||keyMode!=ChatVaultKeyMode.Password)ChatVault.ValidateCredential(password,keyMode);
         Directory.CreateDirectory(root);ArchiveKeyring? keys=null;
         try{
-            if(!password.IsEmpty)keys=ArchiveKeyring.Create(root,password);
+            if(!password.IsEmpty)keys=ArchiveKeyring.Create(root,password,keyMode);
             var config=new Configuration(3,keys?.Id??Guid.NewGuid().ToString("N"),keys!=null);JsonFiles.Write(Path.Combine(root,"archive.json"),config);
             return new(root,config,keys);
         }catch{keys?.Dispose();throw;}

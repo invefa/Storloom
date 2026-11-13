@@ -15,6 +15,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private OperationPause? operationPause;
     private volatile bool debugEnabled;
     private bool operationIncomplete;
+    private bool windowClosed;
     private byte[]? capturedKey;
     private readonly Dictionary<string, Grid> pages = [];
     private readonly Dictionary<string, string> verifiedBackups = new(StringComparer.OrdinalIgnoreCase);
@@ -46,7 +47,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (File.Exists(backups)) foreach (var pair in JsonFiles.Read<Dictionary<string, string>>(backups)) verifiedBackups[pair.Key] = pair.Value;
         L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
         WindowGeometry.Attach(this,dataRoot,"main",640,480);
-        Closing += HandleClosing; Closed += (_, _) => tray?.Dispose();
+        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;tray?.Dispose();};
         if (preferences.CloseToTray) EnsureTray();
         InputBindings.Add(new KeyBinding(new ActionCommand(() => operationView.ToggleFollowing()), new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new ActionCommand(() => ShowHelp()), new KeyGesture(Key.F1)));
@@ -206,12 +207,23 @@ public sealed partial class ShellWindow : ThemeWindow {
         header.Margin = new Thickness(0, 0, 0, 8); View.Add(grid, header, 0); pages[id] = grid; pageHost.Children.Add(grid); return grid;
     }
     private Button Button(string key, Action action, bool primary = false) => View.Button(key, () => Guard(action), primary);
+    private bool preparationPending;
+    private Button PreparationButton(string key,Func<Task> action,bool primary=false){
+        Button? button=null;
+        button=AsyncButton(key,async()=>{
+            if(!button!.IsEnabled||archivePreparing||preparationPending)return;
+            preparationPending=true;
+            object caption=button.Content;button.IsEnabled=false;button.Content=L.T("PreparingAccountTask");
+            try{await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);await action();}
+            finally{preparationPending=false;button.Content=caption;button.IsEnabled=true;}
+        },primary);return button;
+    }
     private Button AsyncButton(string key, Func<Task> action, bool primary = false) {
         var button = View.Button(key, () => { }, primary);
         button.Click += async (_, _) => {
             if (operation != null) { if (operationButton == button) operation.Cancel(); return; }
             operationButton = button;
-            try { await action(); } catch (Exception ex) { Error(ex); } finally { operationButton = null; }
+            try { await action(); } catch (Exception ex) { if(!windowClosed)Error(ex); } finally { operationButton = null; }
         }; return button;
     }
     private void Guard(Action action) { try { action(); } catch (Exception ex) { Error(ex); } }

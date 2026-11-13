@@ -38,6 +38,6 @@ internal sealed class ChatSettingsEditor:Grid {
                 foreach(var pair in new[]{(qq.Text,ChatPlatform.QQ),(wx.Text,ChatPlatform.WeChat)})if(!string.IsNullOrWhiteSpace(pair.Item1)&&(!File.Exists(pair.Item1)||ChatPaths.Executable(pair.Item2,pair.Item1)!=Path.GetFullPath(pair.Item1)))throw new InvalidDataException(L.T("ClientPathInvalid"));
                 Result=preferences with{ChatSearchRoots=paths,ChatAutoDiscover=auto.IsChecked==true,QQExecutable=string.IsNullOrWhiteSpace(qq.Text)?null:Path.GetFullPath(qq.Text),WeChatExecutable=string.IsNullOrWhiteSpace(wx.Text)?null:Path.GetFullPath(wx.Text)};save(Result);
             }catch(Exception ex)when(ex is IOException or ArgumentException){error.Text=ex.Message;}
-        },true));buttons.HorizontalAlignment=HorizontalAlignment.Right;buttons.Margin=new Thickness(0,16,0,0);View.Add(layout,buttons,1);
+        },true));((Button)buttons.Children[0]).IsCancel=true;((Button)buttons.Children[1]).IsDefault=true;buttons.HorizontalAlignment=HorizontalAlignment.Right;buttons.Margin=new Thickness(0,16,0,0);View.Add(layout,buttons,1);
     }
 }

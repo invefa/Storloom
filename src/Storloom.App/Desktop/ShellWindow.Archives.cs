@@ -32,7 +32,7 @@ public sealed partial class ShellWindow {
     private void RegisterCurrentArchive(){
         if(directChatSource&&activeChat!=null&&readingDirectory!=null){
             string directId=ChatArchiveProject.Identity(activeChat.Platform,activeChat.Directory);
-            var directProject=archiveProjects.GetValueOrDefault(directId)??new ChatArchiveProject(directId,activeChat.Account,activeChat.Platform,activeChat.Directory,preferences.BackupRoot);
+            var directProject=archiveProjects.GetValueOrDefault(directId)??ChatArchiveProject.Create(activeChat.Account,activeChat.Platform,activeChat.Directory,preferences.BackupRoot);
             SaveArchive(directProject with{Reading=readingDirectory,ReadableAt=DateTimeOffset.UtcNow,Protection=ChatVault.Exists(readingDirectory)?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None});return;
         }
         if(activeChat==null||activeManifest==null||!File.Exists(activeManifest))return;
@@ -65,33 +65,36 @@ public sealed partial class ShellWindow {
             await StartArchiveUpdate(password);
         }finally{password=null;}
     }
-    private Task PrepareArchiveUpdate(ChatArchiveProject project,ChatArchiveUpdateRequest? request=null){
+    private async Task PrepareArchiveUpdate(ChatArchiveProject project,ChatArchiveUpdateRequest? request=null){
         if(PendingState(project)!=null&&request!=null)throw new InvalidOperationException(L.T("ArchiveFinishTaskFirst"));
-        if(archivePreparing||operation!=null)return Task.CompletedTask;
-        if(PendingState(project) is {Version:2,ProtectionOnly:true})return RepackCompact(project);
+        if(archivePreparing||operation!=null)return;
+        if(PendingState(project) is {Version:2,ProtectionOnly:true}){await RepackCompact(project);return;}
+        archivePreparing=true;try{
         request??=new(BackupOnly:PendingState(project)?.BackupOnly==true,DirectReading:PendingState(project)?.DirectReading==true){SourceSnapshot=PendingState(project)?.SourceSnapshot,CreateCompact=PendingState(project)?.CreateCompact==true};
-        if(request.BackupOnly){pendingArchive=project;pendingArchiveRequest=request;activeChat=new(project.Platform,project.Source,project.Account,Path.Combine(project.Source,"source.db"),0);activeManifest=project.Manifest;directChatSource=false;chatStep=project.BackupStorage==ChatStorageFormat.Compact?6:4;RenderChatStage();return Task.CompletedTask;}
+        if(request.BackupOnly){pendingArchive=project;pendingArchiveRequest=request;activeChat=new(project.Platform,project.Source,project.Account,Path.Combine(project.Source,"source.db"),0);activeManifest=project.Manifest;directChatSource=false;chatStep=project.BackupStorage==ChatStorageFormat.Compact?6:4;RenderChatStage();return;}
         directChatSource=request.DirectReading||PendingState(project)?.DirectReading==true; pendingArchive=project;pendingArchiveRequest=request;
         activeManifest=project.Manifest;readingDirectory=project.Reading;
         if(directChatSource){
             if(project.TaskFile==null&&string.IsNullOrWhiteSpace(project.ReadingRoot)){project=project with{ReadingRoot=!string.IsNullOrWhiteSpace(preferences.ArchiveRoot)?preferences.ArchiveRoot:project.BackupRoot};pendingArchive=project;}
-            string? sourceDb=ChatExporter.FindDatabases(request.SourceSnapshot??project.Source,project.Platform).FirstOrDefault();if(sourceDb==null&&PendingState(project)?.Phase is not ("protection" or "publish" or "published"))throw new InvalidOperationException(L.T("NoAccounts"));sourceDb??=Path.Combine(project.Source,"unavailable.db");
-            activeChat=new(project.Platform,request.SourceSnapshot??project.Source,project.Account,sourceDb,File.Exists(sourceDb)?new FileInfo(sourceDb).Length:0);SetCapturedKey(null);chatStep=4;RenderChatStage();return Task.CompletedTask;
+            string? sourceDb=await Task.Run(()=>ChatExporter.FindDatabases(request.SourceSnapshot??project.Source,project.Platform).FirstOrDefault());if(windowClosed)return;if(sourceDb==null&&PendingState(project)?.Phase is not ("protection" or "publish" or "published"))throw new InvalidOperationException(L.T("NoAccounts"));sourceDb??=Path.Combine(project.Source,"unavailable.db");
+            activeChat=new(project.Platform,request.SourceSnapshot??project.Source,project.Account,sourceDb,File.Exists(sourceDb)?new FileInfo(sourceDb).Length:0);SetCapturedKey(null);chatStep=4;RenderChatStage();return;
         }
         if(project.Manifest==null){
             if(request?.UseExistingBackup==true)throw new InvalidOperationException(L.T("ArchiveFirstBackup"));
-            string? liveDatabase=ChatExporter.FindDatabases(project.Source,project.Platform).FirstOrDefault();
+            string? liveDatabase=await Task.Run(()=>ChatExporter.FindDatabases(project.Source,project.Platform).FirstOrDefault());
+            if(windowClosed)return;
             if(liveDatabase==null)throw new InvalidOperationException(L.T("NoAccounts"));
             activeChat=new(project.Platform,project.Source,project.Account,liveDatabase,new FileInfo(liveDatabase).Length);SetCapturedKey(null);
-            directChatSource=request?.BackupOnly!=true;chatStep=directChatSource?2:1;RenderChatStage();return Task.CompletedTask;
+            directChatSource=request?.BackupOnly!=true;chatStep=directChatSource?2:1;RenderChatStage();return;
         }
-        var journal=JsonFiles.Read<TransferJournal>(project.Manifest);string? database=ChatExporter.FindDatabases(journal.Plan.Destination,project.Platform).FirstOrDefault();if(database==null)throw new InvalidDataException(L.T("NoAccounts"));
+        var journal=JsonFiles.Read<TransferJournal>(project.Manifest);string? database=await Task.Run(()=>ChatExporter.FindDatabases(journal.Plan.Destination,project.Platform).FirstOrDefault());if(windowClosed)return;if(database==null)throw new InvalidDataException(L.T("NoAccounts"));
         if(activeChat?.Directory!=project.Source||activeChat?.Platform!=project.Platform)SetCapturedKey(null);
         activeChat=new(project.Platform,project.Source,project.Account,TransferService.Child(project.Source,Path.GetRelativePath(journal.Plan.Destination,database)),new FileInfo(database).Length);preparedArchive=ReadChatArchive(project.Manifest,activeChat,journal);
-        chatStep=4;RenderChatStage();return Task.CompletedTask;
+        chatStep=4;RenderChatStage();return;
+        }finally{archivePreparing=false;}
     }
     private void BuildArchiveAccess(){
-        var project=pendingArchive??throw new InvalidOperationException();var request=pendingArchiveRequest??new();bool direct=request.DirectReading||PendingState(project)?.DirectReading==true;bool fresh=request.CreateCompact;bool compact=fresh||project.ReadingStorage==ChatStorageFormat.Compact;
+        var project=pendingArchive??throw new InvalidOperationException();var request=pendingArchiveRequest??new();bool direct=request.DirectReading||PendingState(project)?.DirectReading==true;bool fresh=request.CreateCompact;
         var stack=View.Stack(View.Field(request.SourceSnapshot!=null?"RawBackupLabel":direct||request.BackupOnly?"AccountFolderLabel":"RawBackupLabel",View.Input(request.SourceSnapshot!=null?project.NativeArchive??project.Manifest??project.Source:direct||request.BackupOnly?project.Source:ArchiveDirectory(),true)));
         if(fresh)stack.Children.Insert(0,View.Text(L.T("StorageCompact"),13,"Muted"));
         chatContent.Children.Add(View.FormScroll(stack));
@@ -114,7 +117,7 @@ public sealed partial class ShellWindow {
             var protect=new CheckBox{Content=L.T("EncryptAfterExport"),IsChecked=needsPassword,IsEnabled=!existingProtected,Margin=new Thickness(0,10,0,8)};stack.Children.Add(protect);
             archivePassword=View.SecretInput();archivePassword.Name="archive_unlock";archivePasswordConfirmation=existingProtected?null:View.SecretInput();
             var credentialField=View.Field(existingProtected?"VaultCredential":"VaultPassword",archivePassword);var confirmationField=View.Field("VaultConfirmPassword",archivePasswordConfirmation??View.SecretInput());var passwordFields=View.Stack(credentialField);
-            if(!existingProtected&&!compact){var mode=new ComboBox{Name="archive_key_mode",ItemsSource=new[]{L.T("VaultWrappedMode"),L.T("VaultDirectMode")},SelectedIndex=(int)request.KeyMode,Margin=new Thickness(0,4,0,8)};passwordFields.Children.Insert(0,View.Field("VaultKeyMode",mode));mode.SelectionChanged+=(_,_)=>{bool raw=mode.SelectedIndex==1;pendingArchiveRequest=(pendingArchiveRequest??request) with{KeyMode=(ChatVaultKeyMode)mode.SelectedIndex};credentialField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultDirectKey":"VaultPassword");confirmationField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultConfirmKey":"VaultConfirmPassword");archivePassword.Clear();archivePasswordConfirmation?.Clear();};mode.ToolTip=L.T("VaultKeyModeHelp");}
+            if(!existingProtected){var mode=new ComboBox{Name="archive_key_mode",ItemsSource=new[]{L.T("VaultWrappedMode"),L.T("VaultDirectMode")},SelectedIndex=(int)request.KeyMode,Margin=new Thickness(0,4,0,8)};passwordFields.Children.Insert(0,View.Field("VaultKeyMode",mode));mode.SelectionChanged+=(_,_)=>{bool raw=mode.SelectedIndex==1;pendingArchiveRequest=(pendingArchiveRequest??request) with{KeyMode=(ChatVaultKeyMode)mode.SelectedIndex};credentialField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultDirectKey":"VaultPassword");confirmationField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultConfirmKey":"VaultConfirmPassword");archivePassword.Clear();archivePasswordConfirmation?.Clear();};mode.ToolTip=L.T("VaultKeyModeHelp");bool raw=request.KeyMode==ChatVaultKeyMode.DirectKey;credentialField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultDirectKey":"VaultPassword");confirmationField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultConfirmKey":"VaultConfirmPassword");}
             if(!existingProtected)passwordFields.Children.Add(confirmationField);
             passwordFields.Visibility=needsPassword?Visibility.Visible:Visibility.Collapsed;stack.Children.Add(passwordFields);
             protect.Click+=(_,_)=>{bool encrypted=protect.IsChecked==true;pendingArchiveRequest=(pendingArchiveRequest??request) with{Mode=encrypted?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None};passwordFields.Visibility=encrypted?Visibility.Visible:Visibility.Collapsed;if(!encrypted){archivePassword.Clear();archivePasswordConfirmation?.Clear();}};

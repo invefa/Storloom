@@ -10,6 +10,31 @@ public sealed class CompactArchiveTests:IDisposable {
     public CompactArchiveTests()=>Directory.CreateDirectory(root);
     private string Dir(string name){string path=Path.Combine(root,name);Directory.CreateDirectory(path);return path;}
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
+    [Fact]public void NewProjectsDefaultToCompactWhileOldProjectsAndExplicitChoicesRemainCompatible(){
+        var project=ChatArchiveProject.Create("account",ChatPlatform.WeChat,Dir("account"),Dir("output"));Assert.Equal(ChatStorageFormat.Compact,project.ReadingStorage);Assert.Equal(ChatStorageFormat.Compact,project.BackupStorage);
+        var legacy=JsonSerializer.SerializeToNode(project,JsonFiles.Options)!.AsObject();legacy.Remove("readingStorage");legacy.Remove("backupStorage");var loaded=legacy.Deserialize<ChatArchiveProject>(JsonFiles.Options)!;Assert.Equal(ChatStorageFormat.Folder,loaded.ReadingStorage);Assert.Equal(ChatStorageFormat.Folder,loaded.BackupStorage);var explicitFolder=project with{ReadingStorage=ChatStorageFormat.Folder,BackupStorage=ChatStorageFormat.Folder};Assert.Equal(explicitFolder,JsonSerializer.Deserialize<ChatArchiveProject>(JsonSerializer.Serialize(explicitFolder,JsonFiles.Options),JsonFiles.Options));
+    }
+    [Fact]public void DirectKeyReadingUpdatesCopiesExportsAndReorganizationsRetainTheirProtection(){
+        string source=Dir("account"),db=Path.Combine(source,"message_0.db"),secret=Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),task=Path.Combine(root,"task.json");
+        Sql(db,"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','direct key original');");
+        var project=ChatArchiveProject.Create("account",ChatPlatform.WeChat,source,Dir("output"));
+        var first=ChatArchiveWorkflow.Update(project,task,null,secret,2,_=>{},new(DirectReading:true,Mode:ChatArchiveProtectionMode.All){KeyMode=ChatVaultKeyMode.DirectKey},checkRunningClients:false);
+        Assert.Equal(ChatVaultKeyMode.DirectKey,ArchiveStore.ReadKeyMode(first.Reading!));
+        Sql(db,"INSERT INTO MSG VALUES(1,1700000001,'fixture','direct key increment');");
+        // No mode needs to be supplied for subsequent updates: the archive is authoritative.
+        var second=ChatArchiveWorkflow.Update(first,task,null,secret,2,_=>{},new(DirectReading:true),checkRunningClients:false);
+        using(var store=ArchiveStore.Open(second.Reading!,secret)){Assert.Equal(2,store.Search("direct key").Count);Assert.Throws<InvalidOperationException>(()=>store.ChangePassword("another-password"));store.Verify();store.BackupTo(Path.Combine(root,"copy"));store.ExportReader(Path.Combine(root,"html"));using var organized=ArchiveStore.Create(Path.Combine(root,"organized"),secret,ChatVaultKeyMode.DirectKey);store.RepackTo(organized);Assert.Equal(2,organized.Search("direct key").Count);organized.Verify();}
+        using(var copy=ArchiveStore.Open(Path.Combine(root,"copy"),secret)){Assert.Equal(ChatVaultKeyMode.DirectKey,copy.KeyMode);Assert.Equal(2,copy.Search("direct key").Count);}
+        Assert.Equal(2,File.ReadLines(Path.Combine(root,"html","messages.jsonl")).Count());
+        var before=Directory.GetFiles(second.Reading!,"*",SearchOption.AllDirectories).ToDictionary(p=>p,p=>File.ReadAllBytes(p));
+        Assert.ThrowsAny<CryptographicException>(()=>ArchiveStore.Open(second.Reading!,Convert.ToHexString(RandomNumberGenerator.GetBytes(32))));foreach(var entry in before)Assert.Equal(entry.Value,File.ReadAllBytes(entry.Key));
+        foreach(string path in Directory.GetFiles(second.Reading!,"*",SearchOption.AllDirectories)){byte[] bytes=File.ReadAllBytes(path);Assert.True(bytes.AsSpan().IndexOf("direct key original"u8)<0);Assert.True(bytes.AsSpan().IndexOf(System.Text.Encoding.UTF8.GetBytes(secret))<0);}
+    }
+    [Fact]public void DirectKeyNativeBackupResumesWithItsSavedModeAndRestores(){
+        string source=Dir("source"),secret=Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),task=Path.Combine(root,"backup-task.json");File.WriteAllBytes(Path.Combine(source,"data"),RandomNumberGenerator.GetBytes(2*ArchiveStore.ChunkBytes));var project=ChatArchiveProject.Create("source",ChatPlatform.QQ,source,Dir("output"));ChatArchiveProject saved=project;using var stop=new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(()=>ChatArchiveWorkflow.Update(project,task,null,secret,2,p=>saved=p,new(BackupOnly:true){KeyMode=ChatVaultKeyMode.DirectKey},new Callback(p=>{if(p.RuleId=="archive-native-pack")stop.Cancel();}),stop.Token,checkRunningClients:false));Assert.Equal(ChatVaultKeyMode.DirectKey,JsonFiles.Read<ChatArchiveTask>(task).KeyMode);
+        var complete=ChatArchiveWorkflow.Update(saved,task,null,secret,2,_=>{},new(BackupOnly:true),checkRunningClients:false);using var store=ArchiveStore.Open(complete.NativeArchive!,secret);Assert.Equal(ChatVaultKeyMode.DirectKey,store.KeyMode);store.Verify();string restored=store.RestoreNative(Path.Combine(root,"restored"));Assert.Equal(File.ReadAllBytes(Path.Combine(source,"data")),File.ReadAllBytes(Path.Combine(restored,"data")));
+    }
     [Theory][InlineData(false)][InlineData(true)]public void NativeIndexesAndJournalsWorkBeyondTraditionalWindowsPathLimits(bool encrypted){
         string parent=Dir(new string('x',120)),archive=Path.Combine(parent,"deep-native-archive"),source=Dir("source");File.WriteAllText(Path.Combine(source,"one.txt"),"long path fixture");string password=encrypted?"fixture-password":"";
         using(var store=ArchiveStore.Create(archive,password)){store.BackupNative(source,ChatPlatform.QQ,checkClients:false);Assert.Contains(Directory.GetFiles(archive,"query.db",SearchOption.AllDirectories),p=>p.Length>260);store.Verify();}
