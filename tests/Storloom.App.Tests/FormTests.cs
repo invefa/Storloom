@@ -628,7 +628,7 @@ public sealed class FormTests {
                 Assert.False(window.IsVisible);Assert.False(token.IsCancellationRequested);
                 typeof(ShellWindow).GetMethod("RestoreFromTray",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Assert.True(window.IsVisible);
                 completion.TrySetResult();Wait(AsResult(task));typeof(ShellWindow).GetMethod("RequestExit",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);
-            } else {Assert.True(token.IsCancellationRequested);Wait(AsResult(task));Pump();Assert.False(window.IsVisible);}
+            } else {Assert.True(token.IsCancellationRequested);Wait(AsResult(task));Pump();Assert.False(window.IsVisible);Assert.Contains(L.T("OperationStopping"),Descendants(window).OfType<OperationPanel>().Single().Log.Text);}
         } finally {
             completion.TrySetResult();if(task!=null)Wait(AsResult(task));if(window.IsVisible)typeof(ShellWindow).GetMethod("RequestExit",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Directory.Delete(fixture,true);
         }

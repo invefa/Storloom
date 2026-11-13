@@ -22,7 +22,7 @@ public sealed partial class ShellWindow {
         if (operation != null) {
             e.Cancel = true;
             if (!exitAfterOperation && Confirm(L.T("ConfirmExitTask"))) {
-                exitAfterOperation = exitRequested = true; operation.Cancel();
+                exitAfterOperation = exitRequested = true; RequestOperationStop();
             } else if (!exitAfterOperation) exitRequested = false;
             return;
         }
