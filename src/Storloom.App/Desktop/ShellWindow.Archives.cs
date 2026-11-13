@@ -46,7 +46,7 @@ public sealed partial class ShellWindow {
         public string Protection=>!Project.ProtectionKnown?L.T("ArchiveProtectionLocked"):L.T(Project.Protection==ChatArchiveProtectionMode.None?"ArchiveProtectionNone":Project.Protection==ChatArchiveProtectionMode.Selected?"ArchiveProtectionSelected":Project.IncludeMedia?"ArchiveProtectionAll":"ArchiveProtectionMetadata");
         public string Task=>L.T(Project.TaskFile!=null&&File.Exists(Project.TaskFile)?"ArchiveContinue":"ArchiveReady");
     }
-    private ChatArchiveProject SelectedArchive()=>archiveTable?.SelectedItem is HomeAccountRow {Project:{} project}?archiveProjects[project.Id]:archiveTable?.SelectedItem is ArchiveRow row?archiveProjects[row.Project.Id]:throw new InvalidOperationException(L.T("ArchiveSelect"));
+    private ChatArchiveProject SelectedArchive()=>selectedHomeSource is {Project:{} project}?archiveProjects[project.Id]:archiveTable?.SelectedItem is ArchiveRow row?archiveProjects[row.Project.Id]:throw new InvalidOperationException(L.T("ArchiveSelect"));
     private void MigrateArchiveReaderPreferences(ChatArchiveProject project){if(project.Reading==null)return;string root=Path.Combine(dataRoot,"reader-preferences"),old=Path.Combine(root,JsonFiles.Hash(PathPolicy.Normalize(project.Reading).ToUpperInvariant())+".json"),target=Path.Combine(root,JsonFiles.Hash(new{archive=project.Id})+".json");if(!File.Exists(target)&&File.Exists(old)){PathPolicy.AssertNoLinks(old);Directory.CreateDirectory(root);File.Copy(old,target,false);}}
     private async Task VerifyArchiveBackup(ChatArchiveProject project){
         if(project.Manifest==null)return;

@@ -3,7 +3,7 @@ using Storloom.Core.Chats;
 namespace Storloom.App;
 public sealed partial class ShellWindow {
     private string? keyAccountId;
-    private sealed record KeyAccount(ChatArchiveProject Project){public string Label=>Project.Account+" ("+Project.Platform+")";}
+    private sealed record KeyAccount(ChatArchiveProject Project){public string Label=>Project.Account+" ("+Project.Platform+") / "+Project.Source;}
     private void BuildAccountClientSettings(){
         chatContent.Children.Add(new ChatSettingsEditor(this,preferences,p=>{preferences=p;JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);discoveryStarted=false;status.Text=L.T("HubSettingsSaved");},()=>RenderChatStage()));
     }

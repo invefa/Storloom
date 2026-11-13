@@ -787,5 +787,13 @@
   "HubDecryptCopyConfirm": "在 {0} 创建解密后的阅览副本? 新副本可直接从硬盘读取, 原加密资料保留.",
   "HubEncryptWhenCreated": "创建阅览版时加密",
   "HubOpenPacked": "打开打包副本",
-  "HubAccountConnected": "已连接账号: {0}"
+  "HubAccountConnected": "已连接账号: {0}",
+  "HubDataSource": "数据来源",
+  "HubSourceCount": "{0} 个来源",
+  "HubSourceScope": "下方操作仅针对当前来源. 不同位置分别保留阅览版、备份和任务, 不会自动合并.",
+  "HubProtectionPresetHelp": "设置初次创建时的保护选项. 创建阅览版时再确认加密范围与密码.",
+  "HubSourceNumber": "来源 {0}",
+  "HubHistory": "历史",
+  "HubHistoryUnavailable": "此接入资料没有已登记的历史记录.",
+  "HubHistoryScope": "这里展示该账号各存储位置的历史资料. 打开或恢复前请核对资料路径."
 }

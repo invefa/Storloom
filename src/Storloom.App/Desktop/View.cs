@@ -24,7 +24,7 @@ internal static class View {
     public static StackPanel Stack(params UIElement[] elements) {
         var stack = new StackPanel(); foreach (var element in elements) stack.Children.Add(element); return stack;
     }
-    public static ScrollViewer FormScroll(FrameworkElement content) => new(){Content=content,
+    public static ScrollViewer FormScroll(FrameworkElement content) => new(){Content=content,Focusable=false,FocusVisualStyle=null,
         VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,
         HorizontalContentAlignment=HorizontalAlignment.Stretch,Padding=new Thickness(0,0,12,0),
         Style=(Style)Application.Current.FindResource("EditorScrollViewer")};

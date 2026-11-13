@@ -1,6 +1,6 @@
 # Chat archive workflow
 
-Implemented in 2.4. Global tabs contain Account archives, Database key library, and Accounts and clients. Adding or connecting an account is an action inside the account page, not a task wizard.
+Implemented in 2.5. Global tabs contain Account archives, Database key library, and Accounts and clients. Adding or connecting an account is an action inside the account page, not a task wizard.
 
 Account details expose reading creation/open, update, protection/encryption/decryption, raw backup, verification, restore, current task and history. Tasks go directly to their settings. Continuation is explicit and blocks incompatible new tasks without changing another button's meaning. Back and completion return to the same selected account. Narrow layouts replace the account list with a compact selector.
 
@@ -9,3 +9,7 @@ Database keys are password-protected files with independent passwords and explic
 Reading updates and raw backups remain independent outputs. Direct reading holds source databases read-only and checkpoints their fingerprints. Managed protection and decryption publish new generations and retain historical readers. Raw backup remains suitable for client-data restoration; reading copies do not restore native client databases.
 
 Packed stores still import completed readers. Advanced format operations remain collapsed; routine reading, protection, backup and key actions are visible. Connected encrypted readers decrypt to a separate plain copy. Previous encrypted copies retain their original protection.
+
+Account identity and storage location are separate in the account view. Exact platform/account matches share one account entry, with a source count; each source retains its existing catalog identity, reader, backup and task. Unidentified connected materials stay separate. Grouping never merges, deletes or rewrites chat data. Selecting a source displays its full path and routes all actions to that source, including continuation and database-key verification. Setup and Back preserve the selected source. The key-library selector also includes the source path.
+
+The detail area separates Reading copy, Raw backup and History into tabs. Reading protection belongs with the reader; backup verification and restoration belong with the backup. Actions for nonexistent outputs are hidden. Creation has one protection preset, with scope and password confirmed during setup. Advanced format operations appear only for existing readers, separately from backup actions. History is loaded on demand and explicitly covers all locations for the account; pending-task continuation remains above all material tabs. Source explanations use a tooltip instead of a permanent paragraph. Account rows show platform and source count; source selectors use numbered location labels and retain the full path below. Toolbar controls have explicit gaps. The form scroll container is not a focus target and cannot draw a focus border around the entire details pane.

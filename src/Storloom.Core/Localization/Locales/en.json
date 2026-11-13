@@ -787,5 +787,13 @@
   "HubDecryptCopyConfirm": "Create a decrypted reading copy at {0}? The new copy will be readable directly from disk. The encrypted original is retained.",
   "HubEncryptWhenCreated": "Encrypt when the reading copy is created",
   "HubOpenPacked": "Open packed copy",
-  "HubAccountConnected": "Account connected: {0}"
+  "HubAccountConnected": "Account connected: {0}",
+  "HubDataSource": "Data source",
+  "HubSourceCount": "{0} source(s)",
+  "HubSourceScope": "Actions below apply only to the selected source. Separate locations keep their own reading copies, backups and tasks.",
+  "HubProtectionPresetHelp": "Sets the initial protection choice. Confirm scope and password when creating the reading copy.",
+  "HubSourceNumber": "Source {0}",
+  "HubHistory": "History",
+  "HubHistoryUnavailable": "No managed history is recorded for this connected material.",
+  "HubHistoryScope": "History includes all registered locations for this account. Check the material path before opening or restoring."
 }
