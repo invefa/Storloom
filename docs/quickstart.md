@@ -105,7 +105,7 @@ Cancel before publication leaves the existing reader intact. Files are staged an
 
 The bottom log bar is always present and collapses to a compact status line. Its icons provide pause, cancel, debug, wrapping, follow, automatic opening, export and collapse actions, with tooltips. Follow starts enabled. Disable automatic opening to keep new tasks from expanding the panel. Wrapping and automatic-opening choices are remembered; new tasks retain history.
 
-Backup, incremental backup, export and encryption accept 1-8 workers. Copy and verification can run concurrently; publication and source removal retain their safety order. Disk type, file sizes, caches and media affect performance, so more workers may be slower. Retained key files have no required filename or extension; exported contents are still plaintext.
+Backup, incremental backup, export and encryption accept 1-8 workers. Copy and verification can run concurrently; publication and source removal retain their safety order. Disk type, file sizes, caches and media affect performance, so more workers may be slower. Retained key files have no required filename or extension. New retained keys use an independent password-protected file; explicitly importing a legacy plaintext key does not rewrite it automatically.
 
 
 Workers default to Auto. The task and target volume seek behavior determine the recommendation, bounded by CPU count and available memory; the selector shows the current recommendation and still accepts manual values from 1 to 8. Unknown storage uses a conservative fallback. These are estimates, not guaranteed optimal settings under every disk load.

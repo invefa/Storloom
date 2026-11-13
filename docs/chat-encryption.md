@@ -1,6 +1,6 @@
 # Password-protected reading copies
 
-In Chat Archives, choose **Encrypt / resume reader encryption**, select a completed reading-copy directory, and set a separate password of at least eight characters. The confirmation identifies the directory and explains plaintext removal. No password or encryption key is saved. There is no password recovery.
+In Chat Archives, choose **Encrypt / resume reader encryption**, select a completed reading-copy directory, and set a separate password of at least eight characters. The confirmation identifies the directory and explains plaintext removal. The password is not saved. A random 256-bit data key is saved only inside its authenticated password envelope; there is no password recovery.
 
 Choose whether to include media. With media disabled, message pages, source JSONL, names, indexes and reports are protected first; images, voices, videos and files remain readable on disk. The title and completion message distinguish partial protection from completion. Original raw backups and other copies are separate and remain unchanged.
 
@@ -8,7 +8,7 @@ The operation writes authenticated ciphertext, decrypts it to verify its SHA-256
 
 Open `vault.storloom.json` using **Open reading copy**. Storloom requests the password and supplies decrypted, seekable streams to an InPrivate reader with `Cache-Control: no-store`; it does not extract a plaintext directory. Image preview, voice/video seeking, search and source details use the same reader. Explicit Save / Copy actions still produce plaintext where you choose. Close the reader before resuming encryption. Keep the marker and entire `.vault` directory together.
 
-Format version 1 uses PBKDF2-HMAC-SHA256 (600,000 iterations, a random 32-byte salt) and AES-256-GCM with 16-byte tags. Files use 1 MiB independently authenticated chunks, random per-file derivation salts and per-chunk nonces. Associated data binds the logical path, header and chunk position. The plan and append-only completion journal are also encrypted and authenticated. See [Microsoft's AES-GCM documentation](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.aesgcm.encrypt?view=net-10.0).
+Format version 3 uses a random 256-bit content key protected by an AES-256-GCM password envelope. PBKDF2-HMAC-SHA256 (600,000 iterations, a random 32-byte salt) derives the wrapping key. Content encryption uses AES-256-GCM with 16-byte tags. Files use 1 MiB independently authenticated chunks, random per-file derivation salts and per-chunk nonces. Associated data binds the logical path, header and chunk position. The plan and append-only completion journal are also encrypted and authenticated. See [Microsoft's AES-GCM documentation](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.aesgcm.encrypt?view=net-10.0).
 
 Important limits:
 
@@ -21,3 +21,9 @@ Important limits:
 Pause / Resume is also available during raw backups, incremental backups and exports. It is cooperative: workers finish their current bounded operation before waiting. Cancellation remains available while paused. Pausing a backup retains its running process; it does not add restart-resume support to a raw-backup transfer. Interrupted reading exports retain their existing export checkpoint workflow.
 
 Protection may also be selected in export settings. Fine-grained scope combines conversations, message types, content, sender or message IDs. Whole matching pages plus shared originals are recommended for speed and reduced quote-leak risk. Strict mode publishes sanitized public pages with selected messages removed and quote previews withheld, while unlock serves the full encrypted originals. It takes longer initially. Shared source records, indexes, reports and rollback copies are always protected; selected shared media affects every reference. A scoped operation does not protect the whole archive; unselected data may remain plaintext. Resume uses the saved scope.
+
+In Account archives > Reading copy, **Change reading password** authenticates the old password and replaces only the current reader key envelope. Legacy version 1 and 2 readers upgrade their original data key without rewriting content. Finish pending managed tasks first. Historical versions, external copies and already unlocked sessions retain their previous access; changing a password does not rotate a compromised content key. Version 3 requires Storloom 2.6 or later; unchanged older readers remain readable.
+
+Creation also offers **Direct 256-bit key (advanced)**. Enter and confirm exactly 64 hexadecimal characters. No password envelope is stored; changing the direct key requires re-encrypting content. Account and device information do not derive the data key. The recommended password-envelope mode keeps password changes independent of content encryption.
+
+Ordinary readers still keep many individual media/page files; encryption does not combine them into packs. File allocation, metadata, indexes and copied historical media can increase total occupied space. Raw incremental backups reference unchanged non-database resources but keep physical database snapshots. Packed archive storage reduces per-file overhead, while indexes and revisions remain. Changing a password rewrites neither the payload nor its storage layout.
