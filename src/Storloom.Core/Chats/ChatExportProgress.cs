@@ -7,6 +7,7 @@ internal sealed record ParsedDatabaseProgress(long Messages, ExportFileProgress 
 internal sealed record ChatExportProgress {
     public int Version { get; init; } = 1;
     public string Source { get; init; } = "";
+    public string? SourceIdentityRoot {get;init;}
     public ChatPlatform Platform { get; init; }
     public string Identity { get; init; } = "";
     public string Work { get; init; } = "";

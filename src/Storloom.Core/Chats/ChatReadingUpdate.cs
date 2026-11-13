@@ -12,10 +12,10 @@ public static class ChatReadingUpdate {
     private sealed record UpdateState(int Version, string Account, ChatPlatform Platform, FileStamp Transcript, string IndexSha256, Dictionary<string, string>? Databases = null);
     private sealed record Publication(string Work, Dictionary<string, bool> Files);
     private const string StateFile = ".reading-update-state.json", IndexFile = ".reading-update-index.db", PendingFile = ".reading-update-pending.json";
-    private static string Key(ChatMessage m) => JsonFiles.Hash(new { m.Platform, m.Conversation,
+    internal static string Key(ChatMessage m) => JsonFiles.Hash(new { m.Platform, m.Conversation,
         Identity = !string.IsNullOrEmpty(m.ServerId) && m.ServerId != "0" ? "server:" + m.ServerId :
             !string.IsNullOrEmpty(m.Sequence) && m.Sequence != "0" ? $"sequence:{m.Sequence}:{m.Sender}:{m.Timestamp}" : "payload:" + Fingerprint(m) });
-    private static string Fingerprint(ChatMessage m) { m = MessagePresentation.ResolveSenderPrefix(m); return JsonFiles.Hash(new { m.Platform, m.Conversation, m.Sender, m.Timestamp, m.Type, m.Text, m.SourceText, m.RawBase64, m.ExtraRawBase64, m.ReactionsRawBase64, Keys = m.LocalMediaKeys.Order(StringComparer.Ordinal) }); }
+    internal static string Fingerprint(ChatMessage m) { m = MessagePresentation.ResolveSenderPrefix(m); return JsonFiles.Hash(new { m.Platform, m.Conversation, m.Sender, m.Timestamp, m.Type, m.Text, m.SourceText, m.RawBase64, m.ExtraRawBase64, m.ReactionsRawBase64, Keys = m.LocalMediaKeys.Order(StringComparer.Ordinal) }); }
     private static JsonObject ReadIndex(string root) {
         string text = File.ReadAllText(Path.Combine(root, "archive-index.js"));
         if (!text.StartsWith("window.archiveIndex=", StringComparison.Ordinal)) throw new InvalidDataException("Unsupported reading index.");
@@ -43,7 +43,7 @@ public static class ChatReadingUpdate {
         string lockPath = Path.Combine(directory, ".export.lock"); if (File.Exists(lockPath)) PathPolicy.AssertNoLinks(lockPath);
         using var lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         Recover(directory);
-        var manifest = sourceLease==null?JsonFiles.Read<TransferJournal>(manifestPath):new TransferJournal{Plan=new TransferPlan{Source=sourceLease.Root,Destination=sourceLease.Root}};
+        var manifest = sourceLease==null?JsonFiles.Read<TransferJournal>(manifestPath):new TransferJournal{Plan=new TransferPlan{Source=sourceLease.IdentityRoot,Destination=sourceLease.Root}};
         string account = PathPolicy.Normalize(manifest.Plan.Source);
         string transcript = Path.Combine(directory, "messages.jsonl"); PathPolicy.AssertNoLinks(transcript);
         var report = JsonFiles.Read<ChatExportResult>(Path.Combine(directory, "export-report.json"));
@@ -59,7 +59,7 @@ public static class ChatReadingUpdate {
             if (File.Exists(progressPath)) {
                 PathPolicy.AssertNoLinks(progressPath); var old = JsonFiles.Read<ChatExportProgress>(progressPath);
                 if (old.Platform != platform || !old.Finished) throw new InvalidDataException("Select a completed reading copy of this account.");
-                originalSource = old.Source;
+                originalSource = old.SourceIdentityRoot??old.Source;
             } else {
                 // Older readers have no checkpoint. Their original sibling backup name is still unambiguous.
                 string origin=originalReadingDirectory==null?directory:PathPolicy.Normalize(originalReadingDirectory);

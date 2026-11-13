@@ -1,5 +1,7 @@
 # Archive storage v2 proposal
 
+Update for 2.7: [compact archive v3](compact-archive-v3.md) implements direct ingestion, binary resource records, range reads, native manifests and explicit maintenance. The historical measurements and limitations below describe the earlier v2 baseline.
+
 Status: optional archive-library import, reading, indexed text search, incremental backup, verification and reading-copy export are connected in 2.0.0. No automatic migration or replacement of existing archives. Running tasks are unchanged.
 
 ## Implementation status

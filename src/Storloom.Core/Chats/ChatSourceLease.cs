@@ -3,14 +3,15 @@ namespace Storloom.Core.Chats;
 /// <summary>A closed client's database files stay read-locked for one independent reading task.</summary>
 internal sealed class ChatSourceLease : IDisposable {
     internal string Root { get; }
+    internal string IdentityRoot {get;}
     internal Dictionary<string,string> Hashes { get; }=new(StringComparer.OrdinalIgnoreCase);
     private readonly List<FileStream> handles=[];
-    private ChatSourceLease(string root)=>Root=root;
-    internal static ChatSourceLease Open(string root,ChatPlatform platform,CancellationToken cancellation,bool checkRunningClients=true,IProgress<ScanProgress>? progress=null){
+    private ChatSourceLease(string root,string? identityRoot){Root=root;IdentityRoot=PathPolicy.Normalize(identityRoot??root);}
+    internal static ChatSourceLease Open(string root,ChatPlatform platform,CancellationToken cancellation,bool checkRunningClients=true,IProgress<ScanProgress>? progress=null,string? identityRoot=null){
         root=PathPolicy.Normalize(root);PathPolicy.AssertNoLinks(root);
         var names=platform==ChatPlatform.QQ?new[]{"QQ"}:new[]{"Weixin","WeChat"};
         if(checkRunningClients&&CleanupEngine.RunningProcesses(new CleanupRule{Processes=names}).Length>0)throw new IOException("Close the chat client before reading its databases.");
-        var result=new ChatSourceLease(root);
+        var result=new ChatSourceLease(root,identityRoot);
         try{
             var files=new List<string>();
             var queue=new Queue<(string Path,int Depth)>();queue.Enqueue((root,0));

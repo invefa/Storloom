@@ -23,6 +23,7 @@ public sealed partial class ShellWindow {
         });if(chatStep<0)RenderChatStage();}finally{password.ClearSecret();}
     }
     private async Task ChangeReadingPassword(string directory){
+        if(ArchiveStore.Exists(directory)){await RunStoreAction("password",new("",directory,"",true));return;}
         if(archiveProjects.Values.Any(p=>p.Reading==directory&&PendingState(p)!=null))throw new InvalidOperationException(L.T("HubFinishPending"));
         var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;string? oldSecret=unlock.Password;unlock.ClearSecret();
         try{

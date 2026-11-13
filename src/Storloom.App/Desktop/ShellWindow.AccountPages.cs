@@ -37,6 +37,7 @@ public sealed partial class ShellWindow {
     }
     private Task PrepareReadingTask(ChatArchiveProject project,bool fromBackup=false){
         if(PendingState(project)!=null)throw new InvalidOperationException(L.T("HubFinishPending"));
+        if(fromBackup&&(project.NativeArchive!=null||project.ReadingStorage==ChatStorageFormat.Compact&&project.Manifest!=null))return PrepareCompactBackupReading(project);
         if(fromBackup){activeChat=new(project.Platform,project.Source,project.Account,Path.Combine(project.Source,"source.db"),0);return UseChatBackup(project.Manifest??throw new InvalidOperationException(L.T("ArchiveFirstBackup")));}
         if(!Directory.Exists(project.Source))throw new IOException(L.T("AccountSourceOffline"));
         return PrepareArchiveUpdate(project,new(DirectReading:true));
@@ -48,6 +49,7 @@ public sealed partial class ShellWindow {
     private void AbandonAccountTask(ChatArchiveProject project){
         if(project.TaskFile==null||!Confirm(L.T("ArchiveAbandonConfirm")))return;
         PathPolicy.AssertNoLinks(project.TaskFile);if(!PathPolicy.Under(project.TaskFile,Path.Combine(dataRoot,"archive-tasks")))throw new IOException("Unexpected task location.");
+        var state=PendingState(project);if(state?.Version==2){if(ArchiveStore.Exists(state.Generation))ArchiveStore.AbandonPending(state.Generation);if(state.Work!=state.Generation&&Path.GetFileName(state.Work).StartsWith(".compact-work-",StringComparison.Ordinal)&&Directory.Exists(state.Work)){PathPolicy.AssertNoLinks(state.Work);Directory.Move(state.Work,state.Work+"."+Guid.NewGuid().ToString("N")+".abandoned");}}
         File.Move(project.TaskFile,project.TaskFile+"."+Guid.NewGuid().ToString("N")+".abandoned",false);SaveArchive(project with{TaskFile=null});chatStep=-1;RenderChatStage();
     }
 }

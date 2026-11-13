@@ -22,7 +22,7 @@ internal sealed class ArchiveSqlite:IDisposable {
             Query("SELECT count(*) FROM sqlite_master").ToArray();
         }catch{connection.Dispose();throw;}
     }
-    private SqliteCommand Command(string sql,string[] values){
+    private SqliteCommand Command(string sql,object[] values){
         if(!commands.TryGetValue(sql,out var command)){
             command=connection.CreateCommand();
             // All SQL is internal. Replace positional placeholders with named parameters.
@@ -31,12 +31,13 @@ internal sealed class ArchiveSqlite:IDisposable {
             command.Prepare();commands.Add(sql,command);
         }
         if(command.Parameters.Count!=values.Length)throw new InvalidOperationException("Archive SQL parameter mismatch.");
-        for(int n=0;n<values.Length;n++)command.Parameters[n].Value=values[n];return command;
+        for(int n=0;n<values.Length;n++){command.Parameters[n].SqliteType=values[n] is byte[]?SqliteType.Blob:SqliteType.Text;command.Parameters[n].Value=values[n];}return command;
     }
     internal void Execute(string sql,params string[] values)=>Command(sql,values).ExecuteNonQuery();
+    internal void ExecuteValues(string sql,params object[] values)=>Command(sql,values).ExecuteNonQuery();
     internal IReadOnlyList<string[]> Query(string sql,params string[] values){
         using var reader=Command(sql,values).ExecuteReader();var rows=new List<string[]>();
-        while(reader.Read()){var row=new string[reader.FieldCount];for(int n=0;n<row.Length;n++)row[n]=reader.IsDBNull(n)?"":reader.GetValue(n).ToString()!;rows.Add(row);}return rows;
+        while(reader.Read()){var row=new string[reader.FieldCount];for(int n=0;n<row.Length;n++)row[n]=reader.IsDBNull(n)?"":reader.GetValue(n) is byte[] blob?"!"+Convert.ToBase64String(blob):reader.GetValue(n).ToString()!;rows.Add(row);}return rows;
     }
     public void Dispose(){foreach(var command in commands.Values)command.Dispose();commands.Clear();connection.Dispose();}
 }

@@ -9,6 +9,7 @@ internal sealed partial class ArchiveStore {
     internal string DirectoryPath=>root;
     internal bool Protected=>keys!=null;
     internal void ChangePassword(ReadOnlySpan<char> password){using var lease=Lease();if(keys==null)throw new InvalidOperationException("This archive is not encrypted.");keys.ChangePassword(password);}
+    internal static bool SnapshotReads(string directory)=>File.Exists(Path.Combine(directory,"projection.json"));
     internal static bool Exists(string directory)=>File.Exists(Path.Combine(directory,"archive.json"));
     internal static bool NeedsPassword(string directory){string marker=Path.Combine(directory,"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");return JsonFiles.Read<Configuration>(marker).Protected;}
     private Dictionary<string,string>? readerConversations;

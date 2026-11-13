@@ -1013,7 +1013,7 @@ public sealed class FormTests {
             window.Navigate("chats");
             foreach(int step in new[]{6,3}) {
                 Set("chatStep",step);type.GetMethod("RenderChatStage",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);Pump();window.UpdateLayout();
-                var labels=Descendants(window).OfType<Label>().Where(l=>l.IsVisible&&!Equals(l.Content,L.T("ChatWorkers"))).ToArray();Assert.Equal(2,labels.Length);
+                var labels=Descendants(window).OfType<Label>().Where(l=>l.IsVisible&&!Equals(l.Content,L.T("ChatWorkers"))&&!Equals(l.Content,L.T("StorageAndWorkers"))).ToArray();Assert.Equal(2,labels.Length);
                 Assert.Equal(step==6?new[]{L.T("AccountFolderLabel"),L.T("BackupTo")}:new[]{L.T("RawBackupLabel"),L.T("ReadingCopyLabel")},labels.Select(l=>l.Content));
                 foreach(var label in labels) {
                     var target=(FrameworkElement)label.Target;var lp=label.TranslatePoint(new Point(),window);var cp=target.TranslatePoint(new Point(),window);
@@ -1376,12 +1376,12 @@ public sealed class FormTests {
             Assert.False(File.Exists(Path.Combine(reading,"archive-index.js")));Assert.False(File.Exists(Path.Combine(reading,"messages.jsonl")));
         }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
-    [Theory][InlineData(false)][InlineData(true)]
-    public void PackedArchiveReaderSearchesAndExportsCurrentMessagesWithoutExtractingPrivateData(bool encrypted)=>OnUi(()=>{
+    [Theory][InlineData(false,false)][InlineData(true,false)][InlineData(false,true)][InlineData(true,true)]
+    public void PackedArchiveReaderSearchesAndExportsCurrentMessagesWithoutExtractingPrivateData(bool encrypted,bool snapshot)=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");string fixture=Fixture(),source=Path.Combine(fixture,"account"),reading=Path.Combine(fixture,"reading"),packed=Path.Combine(fixture,"packed");Directory.CreateDirectory(source);
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);"+string.Join("",Enumerable.Range(0,215).Select(i=>$"INSERT INTO MSG VALUES(1,{1700000000+i},'alpha','indexed needle {i}');"))+"INSERT INTO MSG VALUES(1,1700000300,'beta','indexed needle beta');");
         var service=new TransferService();var backup=service.Execute(service.Plan(source,Path.Combine(fixture,"raw")),Path.Combine(fixture,"journals"));new ChatExporter().ExportVerifiedBackup(backup.Manifest,reading,ChatPlatform.WeChat);
-        using(var store=ArchiveStore.Create(packed,encrypted?"fixture-reader-password":default))store.ImportReader(reading);
+        using(var store=ArchiveStore.Create(packed,encrypted?"fixture-reader-password":default)){store.ImportReader(reading);if(snapshot){string target=packed+"-snapshot";using var destination=ArchiveStore.Create(target,encrypted?"fixture-reader-password":default);store.RepackTo(destination);packed=target;}}
         var window=new ChatReaderWindow(packed,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};typeof(ChatReaderWindow).GetProperty("VaultPasswordProvider",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,(Func<string?>)(()=>"fixture-reader-password"));
         try{
             window.Show();DateTime until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.True(window.Browser.CoreWebView2!=null,"Stage: "+typeof(ChatReaderWindow).GetProperty("LoadingStage",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)+" | "+string.Join(" | ",window.Body.Children.OfType<TextBlock>().Select(t=>t.Text)));var core=window.Browser.CoreWebView2!;string Query(string code)=>Wait(core.ExecuteScriptAsync(code));
@@ -1391,8 +1391,8 @@ public sealed class FormTests {
             Until("document.querySelectorAll('.message').length","100");Until("document.querySelector('#stop-search').hidden","true");Assert.Contains("indexed needle 0",Query("document.querySelector('#messages').textContent"));
             Query("document.querySelector('#next').click();true");Until("document.querySelector('#messages').textContent.includes('indexed needle 100')","true");Until("document.querySelector('#stop-search').hidden","true");
             Query("document.querySelector('#next').click();true");Until("document.querySelectorAll('.message').length","16");Until("document.querySelector('#stop-search').hidden","true");Assert.Contains("indexed needle beta",Query("document.querySelector('#messages').textContent"));
-            using var store=ArchiveStore.Open(packed,encrypted?"fixture-reader-password":default);Assert.ThrowsAny<IOException>(()=>store.ImportReader(reading));
-            string exported=Path.Combine(fixture,"exported");store.ExportReader(exported);Assert.Equal(216,File.ReadLines(Path.Combine(exported,"messages.jsonl")).Count());Assert.False(File.Exists(Path.Combine(packed,"messages.jsonl")));
+            using var store=ArchiveStore.Open(packed,encrypted?"fixture-reader-password":default);if(!snapshot)Assert.ThrowsAny<IOException>(()=>store.ImportReader(reading));else{File.AppendAllText(Path.Combine(reading,"messages.jsonl"),System.Text.Json.JsonSerializer.Serialize(new ChatMessage("WeChat","alpha","fixture",1700000400,1,"new snapshot fixture"){Id="added"})+"\n");store.ImportReader(reading);Assert.Single(store.Search("new snapshot fixture"));Query("document.querySelector('#message-search').value='new snapshot fixture';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();true");Until("document.querySelectorAll('.message').length","0");}
+            string exported=Path.Combine(fixture,"exported");store.ExportReader(exported);Assert.Equal(snapshot?217:216,File.ReadLines(Path.Combine(exported,"messages.jsonl")).Count());Assert.False(File.Exists(Path.Combine(packed,"messages.jsonl")));
             if(encrypted){using var png=new MemoryStream();Wait(AsResult(core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png,png)));File.WriteAllBytes(Path.Combine(AppContext.BaseDirectory,"packed-reader.png"),png.ToArray());}
         }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });
@@ -1645,6 +1645,19 @@ public sealed class FormTests {
         string credential=mode==ChatVaultKeyMode.Password?"fixture-password":new string('a',64);using(var vault=ChatVault.Create(reading,credential,keyMode:mode))vault.Encrypt();
         var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.QQ,source),"Fixture account",ChatPlatform.QQ,source,Path.Combine(fixture,"backup")){Reading=reading,Protection=ChatArchiveProtectionMode.All};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,Language="zh-CN",ReduceMotion=true,LogAutoShow=false});
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=900,Height=700};try{window.Show();window.Navigate("chats");Pump();var change=Descendants(window).OfType<Button>().Single(b=>b.Name=="archive_change_password");Assert.True(change.IsVisible);Assert.Equal(mode==ChatVaultKeyMode.Password,change.IsEnabled);Capture(window,"account-reading-key-mode-"+mode);}finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory][InlineData(AppTheme.Light,"en")][InlineData(AppTheme.OneDark,"zh-CN")]
+    public void CompactAccountsExposePortableExportNativeRestoreAndStorageChoices(AppTheme theme,string locale)=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),reading=Path.Combine(fixture,"compact"),native=Path.Combine(fixture,"native"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);
+        using(var store=ArchiveStore.Create(reading))using(var writer=store.BeginWrite()){writer.Add(new("QQ","direct:fixture","sender",1,1,"display fixture"){Id="one"});writer.Complete(new(new string('a',64),"complete",0,0,1,0,0));}
+        using(var store=ArchiveStore.Create(native))store.BackupNative(source,ChatPlatform.QQ,checkClients:false);
+        var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.QQ,source),"Fixture account",ChatPlatform.QQ,source,Path.Combine(fixture,"backups")){Reading=reading,NativeArchive=native,ReadingStorage=ChatStorageFormat.Compact,BackupStorage=ChatStorageFormat.Compact,ReadableAt=DateTimeOffset.UtcNow,BackedUpAt=DateTimeOffset.UtcNow};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=theme,Language=locale,ReduceMotion=true,LogAutoShow=false});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=950,Height=760};const BindingFlags flags=BindingFlags.NonPublic|BindingFlags.Instance;
+        try{window.Show();window.Navigate("chats");Pump();Assert.Contains(Descendants(window).OfType<Button>(),b=>b.IsVisible&&Equals(b.Content,L.T("StoreExportReader")));var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="account_material_tabs");tabs.SelectedIndex=1;Pump();Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name=="archive_restore").IsEnabled);Assert.True(Descendants(window).OfType<Button>().Single(b=>b.Name=="archive_verify_now").IsEnabled);Capture(window,"compact-native-"+theme);
+            typeof(ShellWindow).GetMethod("SaveArchive",flags)!.Invoke(window,[project with{Reading=null}]);var account=new ChatLocation(ChatPlatform.QQ,source,project.Account,Path.Combine(source,"nt_msg.db"),5120);Wait(AsResult((Task)typeof(ShellWindow).GetMethod("PrepareIndependentReading",flags)!.Invoke(window,[account])!));Pump();
+            foreach(double width in new[]{950d,760d}){window.Width=width;Pump();var selector=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="reading_storage_format");Assert.Equal(1,selector.SelectedIndex);Assert.DoesNotContain(Descendants(window).OfType<ComboBox>(),c=>c.Name=="archive_key_mode");Assert.True(selector.TranslatePoint(new Point(selector.ActualWidth,selector.ActualHeight),window).X<=window.ActualWidth);Capture(window,"compact-reading-options-"+theme+"-"+width);}
+        }finally{window.Close();Directory.Delete(fixture,true);}
     });
 
 }

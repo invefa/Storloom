@@ -1,0 +1,86 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Storloom.Core;
+using Storloom.Core.Chats;
+using Xunit;
+namespace Storloom.Tests;
+public sealed class CompactArchiveTests:IDisposable {
+    private readonly string root=Path.Combine(AppContext.BaseDirectory,"fixtures","compact-"+Guid.NewGuid().ToString("N"));
+    public CompactArchiveTests()=>Directory.CreateDirectory(root);
+    private string Dir(string name){string path=Path.Combine(root,name);Directory.CreateDirectory(path);return path;}
+    private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
+    [Theory][InlineData(ChatStorageFormat.Folder)][InlineData(ChatStorageFormat.Compact)]public void MaterializedBackupsKeepLogicalAccountIdentityAcrossDifferentInputDirectories(ChatStorageFormat format){
+        string source=Dir("original"),database=Path.Combine(source,"message_0.db");Sql(database,"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','first restored message');");var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"original",ChatPlatform.WeChat,source,Dir("output")){ReadingStorage=format};string task=Path.Combine(root,"task.json"),firstInput=Dir("input-one");File.Copy(database,Path.Combine(firstInput,"message_0.db"));Sql(database,"INSERT INTO MSG VALUES(1,1700000001,'fixture','second restored message');");string secondInput=Dir("input-two");File.Copy(database,Path.Combine(secondInput,"message_0.db"));Directory.Delete(source,true);
+        var first=ChatArchiveWorkflow.Update(project,task,null,null,2,_=>{},new(DirectReading:true){SourceSnapshot=firstInput},checkRunningClients:false);Directory.Delete(firstInput,true);var second=ChatArchiveWorkflow.Update(first,task,null,null,2,_=>{},new(DirectReading:true){SourceSnapshot=secondInput},checkRunningClients:false);
+        if(format==ChatStorageFormat.Compact){using var store=ArchiveStore.Open(second.Reading!);Assert.Equal(2,store.Page("WeChat/fixture",100).Count);}else Assert.Equal(2,File.ReadLines(Path.Combine(second.Reading!,"messages.jsonl")).Count());
+    }
+    [Fact]public void FreshCompactCreationRetainsTheOldFolderWhilePausedAndResumesIntoTheSameTarget(){
+        string source=Dir("account");Sql(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','current source');");string task=Path.Combine(root,"task.json");var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"account",ChatPlatform.WeChat,source,Dir("output"));
+        var old=ChatArchiveWorkflow.Update(project,task,null,null,2,_=>{},new(DirectReading:true),checkRunningClients:false);ChatArchiveProject latest=old;using var cancellation=new CancellationTokenSource();
+        Assert.ThrowsAny<Exception>(()=>ChatArchiveWorkflow.Update(old,task,null,null,2,p=>latest=p,new(DirectReading:true){CreateCompact=true},new Callback(p=>{if(p.RuleId=="chat-reader")cancellation.Cancel();}),cancellation.Token,checkRunningClients:false));Assert.Equal(old.Reading,latest.Reading);Assert.Equal(ChatStorageFormat.Folder,latest.ReadingStorage);string target=JsonFiles.Read<ChatArchiveTask>(task).Generation;
+        var compact=ChatArchiveWorkflow.Update(latest,task,null,null,2,_=>{},new(DirectReading:true){CreateCompact=true},checkRunningClients:false);Assert.Equal(target,compact.Reading);Assert.Equal(ChatStorageFormat.Compact,compact.ReadingStorage);Assert.True(File.Exists(Path.Combine(old.Reading!,"messages.html")));using var reader=ArchiveStore.Open(compact.Reading!);Assert.Single(reader.Search("current source"));
+    }
+    [Fact]public void PublishedReadersRetainTheirSnapshotAndUnusedQueryCopiesAreReclaimed(){
+        string archive=Path.Combine(root,"archive"),proof=new string('a',64);using var store=ArchiveStore.Create(archive);
+        void Add(int n){using var writer=store.BeginWrite();writer.Add(new("Fixture","room","sender",n,1,"message "+n){Id="m"+n});writer.Complete(new(proof,"complete",0,0,n,0,0));}
+        Add(1);using(var old=ArchiveStore.Open(archive)){string head=old.Head!;Add(2);Assert.Equal(head,old.Head);Assert.Single(old.Page("Fixture/room",100));Assert.Equal(2,store.Page("Fixture/room",100).Count);Assert.Equal(2,Directory.GetDirectories(Path.Combine(archive,"query"),"stage-*").Length);}
+        Add(3);Assert.Single(Directory.GetDirectories(Path.Combine(archive,"query"),"stage-*"));Assert.Equal(3,store.Verify().MessageRevisions);
+    }
+    [Fact]public void DirectUpdatesRetainIdenticalOccurrencesAcrossDatabases(){
+        string source=Dir("account");foreach(string name in new[]{"message_0.db","message_1.db"})Sql(Path.Combine(source,name),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','same message');INSERT INTO MSG VALUES(1,1700000000,'fixture','same message');");
+        var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"account",ChatPlatform.WeChat,source,Dir("output")){ReadingStorage=ChatStorageFormat.Compact};
+        ChatArchiveProject Update(ChatArchiveProject p)=>ChatArchiveWorkflow.Update(p,Path.Combine(root,"task.json"),null,null,2,_=>{},new(DirectReading:true),checkRunningClients:false);
+        var first=Update(project);using(var store=ArchiveStore.Open(first.Reading!))Assert.Equal(4,store.Page("WeChat/fixture",100).Count);
+        Sql(Path.Combine(source,"message_1.db"),"INSERT INTO MSG VALUES(1,1700000001,'fixture','new message');");var updated=Update(first);using var current=ArchiveStore.Open(updated.Reading!);Assert.Equal(5,current.Page("WeChat/fixture",100).Count);Assert.Equal(4,current.Search("same message").Count);
+    }
+    [Fact]public void VersionTwoJsonPacksRemainReadable(){
+        string archive=Dir("old-format");JsonFiles.Write(Path.Combine(archive,"archive.json"),new{Version=2,Id=Guid.NewGuid().ToString("N"),Protected=false});var message=new ChatMessage("Fixture","room","sender",1,1,"legacy fixture"){Id="legacy"};var row=new ArchiveQueryCache.Message("legacy","Fixture/room",1,"legacy fixture",JsonSerializer.Serialize(message));new ArchiveCommitLog(archive).Append(JsonSerializer.SerializeToUtf8Bytes(new ArchiveDelta(1,[row],[],[],[])),null);using var store=ArchiveStore.Open(archive);Assert.Single(store.Search("legacy"));Assert.Equal(1,store.Verify().MessageRevisions);
+    }
+    [Fact]public void RepackPreservesNativeHistoryAndCanChangeProtectionWithoutTouchingTheSource(){
+        string source=Dir("native"),archive=Path.Combine(root,"archive");File.WriteAllText(Path.Combine(source,"one"),"original");
+        using var original=ArchiveStore.Create(archive);var first=original.BackupNative(source,ChatPlatform.QQ,checkClients:false);File.WriteAllText(Path.Combine(source,"one"),"changed");original.BackupNative(source,ChatPlatform.QQ,checkClients:false);string head=original.Head!;
+        using(var encrypted=ArchiveStore.Create(Path.Combine(root,"encrypted"),"fixture-password")){original.RepackTo(encrypted);encrypted.ChangePassword("changed-password");encrypted.Verify();Assert.Equal(head,original.Head);Assert.Equal("original",File.ReadAllText(Path.Combine(encrypted.RestoreNative(Path.Combine(root,"history"),snapshotId:first.Id),"one")));Assert.Equal("changed",File.ReadAllText(Path.Combine(encrypted.RestoreNative(Path.Combine(root,"latest")),"one")));}
+        Assert.ThrowsAny<Exception>(()=>ArchiveStore.Open(Path.Combine(root,"encrypted"),"fixture-password"));using var reopened=ArchiveStore.Open(Path.Combine(root,"encrypted"),"changed-password");Assert.True(reopened.Protected);
+    }
+    [Theory][InlineData(false)][InlineData(true)]public void ProjectionRebuildReadsMetadataAndResourcesAreIndividuallyVerified(bool encrypted){
+        string archive=Path.Combine(root,"archive");byte[] data=RandomNumberGenerator.GetBytes(ArchiveStore.ChunkBytes*3);string password=encrypted?"fixture-password":"";
+        using(var store=ArchiveStore.Create(archive,password))using(var writer=store.BeginWrite()){using var input=new MemoryStream(data);writer.Put("assets/fixture.bin",input);writer.Add(new("Fixture","room","sender",1,1,"searchable fixture"){Id="stable"});writer.Complete(new(new string('a',64),"complete",0,0,1,1,data.Length));}
+        // The immutable payload's last byte belongs to a resource record, not metadata.
+        string pack=Directory.GetFiles(archive,"*.pack").Single();using(var file=new FileStream(pack,FileMode.Open,FileAccess.ReadWrite)){file.Position=file.Length-1;int value=file.ReadByte();file.Position--;file.WriteByte((byte)(value^1));}
+        Directory.Delete(Path.Combine(archive,"query"),true);
+        using var rebuilt=ArchiveStore.Open(archive,password);Assert.Single(rebuilt.Search("searchable"));using var resource=rebuilt.OpenFile("assets/fixture.bin");byte[] first=new byte[16];resource.ReadExactly(first);Assert.Equal(data[..16],first);resource.Position=data.Length-1;Assert.ThrowsAny<Exception>(()=>resource.ReadByte());Assert.ThrowsAny<Exception>(()=>rebuilt.Verify());
+    }
+    [Fact]public void AbandonAndPostPublicationCrashKeepThePublishedSnapshot(){
+        string archive=Path.Combine(root,"archive");using var store=ArchiveStore.Create(archive);string proof=new string('a',64);
+        using(var writer=store.BeginWrite(source:proof)){writer.Add(new("Fixture","room","sender",1,1,"one"){Id="one"});writer.Complete(new(proof,"complete",0,0,1,0,0));}
+        string head=store.Head!;using(var writer=store.BeginWrite(source:proof)){writer.Add(new("Fixture","room","sender",2,1,"pending"){Id="two"});writer.Flush();}
+        Assert.Throws<IOException>(()=>store.BeginWrite(source:new string('b',64)));ArchiveStore.AbandonPending(archive);Assert.Equal(head,store.Head);
+        using(var writer=store.BeginWrite(source:"restart")){writer.Add(new("Fixture","room","sender",3,1,"three"){Id="three"});writer.Complete(new(proof,"complete",0,0,2,0,0));}
+        using var reopened=ArchiveStore.Open(archive);Assert.Equal(2,reopened.Page("Fixture/room",100).Count);
+    }
+    [Theory][InlineData(false)][InlineData(true)]public void NativeSnapshotsReuseChunksAndRestoreRemovedFilesFromHistory(bool encrypted){
+        string source=Dir("source"),target=Path.Combine(root,"backup");Directory.CreateDirectory(Path.Combine(source,"empty"));for(int i=0;i<2000;i++)File.WriteAllText(Path.Combine(source,i+".txt"),"small fixture "+i);string password=encrypted?"fixture-password":"";
+        using(var store=ArchiveStore.Create(target,password)){var first=store.BackupNative(source,ChatPlatform.QQ,checkClients:false);int packs=Directory.GetFiles(target,"*.pack").Length;Assert.True(packs<20);File.Delete(Path.Combine(source,"1.txt"));File.WriteAllText(Path.Combine(source,"changed.txt"),"new fixture");var second=store.BackupNative(source,ChatPlatform.QQ,checkClients:false);Assert.NotEqual(first.Id,second.Id);Assert.InRange(Directory.GetFiles(target,"*.pack").Length-packs,1,5);string current=store.RestoreNative(Path.Combine(root,"current"));Assert.False(File.Exists(Path.Combine(current,"1.txt")));Assert.Equal("new fixture",File.ReadAllText(Path.Combine(current,"changed.txt")));string old=store.RestoreNative(Path.Combine(root,"old"),snapshotId:first.Id);Assert.Equal("small fixture 1",File.ReadAllText(Path.Combine(old,"1.txt")));Assert.True(Directory.Exists(Path.Combine(old,"empty")));store.Verify();}
+        using var reopened=ArchiveStore.Open(target,password);Assert.Equal(2000,reopened.NativeCurrent().Files.Length);
+    }
+    [Fact]public void PendingWriterNeverChangesThePublishedReaderAndCanResume(){
+        string target=Path.Combine(root,"reader");using var store=ArchiveStore.Create(target);string proof=new string('a',64);
+        using(var writer=store.BeginWrite(source:proof)){writer.Add(new("Fixture","room","sender",1,1,"published"){Id="one"});writer.Complete(new(proof,"complete",0,0,1,0,0));}
+        string head=store.Head!;using(var writer=store.BeginWrite(source:proof)){writer.Add(new("Fixture","room","sender",2,1,"pending"){Id="two"});writer.Flush();using var reader=ArchiveStore.Open(target);Assert.Single(reader.Page("Fixture/room",100));Assert.Equal(head,reader.Head);}
+        using(var writer=store.BeginWrite(source:proof))writer.Complete(new(proof,"complete",0,0,2,0,0));using var completed=ArchiveStore.Open(target);Assert.Equal(2,completed.Page("Fixture/room",100).Count);
+    }
+    [Theory][InlineData(false)][InlineData(true)]public void DirectReadersAvoidHtmlPagesAndReuseOldMessagesDuringIncrementalUpdates(bool encrypted){
+        string source=Dir("account"),db=Path.Combine(source,"message_0.db");Sql(db,"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','first compact message');");var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.WeChat,source),"account",ChatPlatform.WeChat,source,Dir("output")){ReadingStorage=ChatStorageFormat.Compact};string task=Path.Combine(root,"task.json"),password=encrypted?"fixture-password":"";
+        ChatArchiveProject Update(ChatArchiveProject p)=>ChatArchiveWorkflow.Update(p,task,null,password,2,_=>{},new(DirectReading:true,Mode:encrypted?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None),checkRunningClients:false);
+        var first=Update(project);Assert.True(ArchiveStore.Exists(first.Reading!));Assert.False(File.Exists(Path.Combine(first.Reading!,"messages.jsonl")));Assert.False(Directory.Exists(Path.Combine(first.Reading!,"assets")));string head;using(var before=ArchiveStore.Open(first.Reading!,password)){head=before.Head!;Assert.Single(before.Search("first compact"));}
+        var unchanged=Update(first);using(var same=ArchiveStore.Open(unchanged.Reading!,password))Assert.Equal(head,same.Head);
+        Sql(db,"INSERT INTO MSG VALUES(1,1700000001,'fixture','second compact message');");var second=Update(unchanged);Assert.Equal(first.Reading,second.Reading);using var store=ArchiveStore.Open(second.Reading!,password);Assert.Equal(2,store.Search("compact").Count);Assert.Equal(2,store.Page("WeChat/fixture",100).Count);store.Verify();
+        string compatible=Path.Combine(root,"html-export");store.ExportReader(compatible);Assert.True(File.Exists(Path.Combine(compatible,"messages.html")));Assert.Equal(2,File.ReadLines(Path.Combine(compatible,"messages.jsonl")).Count());
+    }
+    private static void Sql(string path,string sql){if(sqlite3_open_v2(path,out nint handle,6,0)!=0)throw new Exception("fixture open");try{if(sqlite3_exec(handle,sql,0,0,0)!=0)throw new Exception("fixture SQL");}finally{sqlite3_close_v2(handle);}}
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)]string path,out nint handle,int flags,nint vfs);
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_exec(nint handle,[MarshalAs(UnmanagedType.LPUTF8Str)]string sql,nint callback,nint state,nint error);
+    [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_close_v2(nint handle);
+    public void Dispose()=>Directory.Delete(root,true);
+}

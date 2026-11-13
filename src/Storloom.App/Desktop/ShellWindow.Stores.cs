@@ -20,8 +20,9 @@ public sealed partial class ShellWindow {
         var verify=AsyncButton("VerifyBackupNow",()=>RunStoreAction("verify"));verify.Name="store_verify";
         var export=AsyncButton("StoreExportReader",()=>RunStoreAction("export"));export.Name="store_export";
         var password=AsyncButton("StoreChangePassword",()=>RunStoreAction("password"));password.Name="store_password_change";
+        var abandon=Button("ArchiveAbandonTask",()=>{if(!Confirm(L.T("ArchiveAbandonConfirm")))return;var item=SelectedStore();ArchiveStore.AbandonPending(item.Directory);SaveStore(item with{Complete=File.Exists(Path.Combine(item.Directory,"HEAD"))});RenderChatStage();});abandon.Visibility=Visibility.Collapsed;chatFooter.Children.Add(abandon);
         foreach(var button in new[]{open,update,backup,verify,export,password})chatFooter.Children.Add(button);
-        storeTable.SelectionChanged+=(_,_)=>{bool selected=storeTable.SelectedItem is StoreEntry;foreach(var button in new[]{open,update,backup,verify,export,password})button.IsEnabled=selected;};
+        storeTable.SelectionChanged+=(_,_)=>{abandon.Visibility=storeTable.SelectedItem is StoreEntry pending&&ArchiveStore.SnapshotReads(pending.Directory)&&File.Exists(Path.Combine(pending.Directory,".write-task.json"))?Visibility.Visible:Visibility.Collapsed;bool selected=storeTable.SelectedItem is StoreEntry;foreach(var button in new[]{open,update,backup,verify,export,password})button.IsEnabled=selected;};
         storeTable.SelectedItem=storeTable.Items.OfType<StoreEntry>().FirstOrDefault();if(storeTable.SelectedItem==null)foreach(var button in new[]{open,update,backup,verify,export,password})button.IsEnabled=false;
     }
     private async Task MigrateStore(string? source=null,string? target=null){
@@ -41,7 +42,7 @@ public sealed partial class ShellWindow {
             if(encrypted){var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;secret=unlock.Password;unlock.ClearSecret();}
             if(action=="password"){var dialog=new VaultPasswordWindow(true,false,passwordChange:true){Owner=this};if(dialog.ShowDialog()!=true)return;newSecret=dialog.Password;dialog.ClearSecret();if(!Confirm(L.T("StorePasswordConfirm")))return;}
             if(action is "backup" or "export"){
-                if(action=="backup"){string parent=PickerHistory.Folder(this,null,"store-backup-parent");if(parent=="")return;target=Path.Combine(parent,entry.Name+"-backup");}
+                if(action=="backup"){string parent=PickerHistory.Folder(this,null,ArchiveStore.IsNative(entry.Directory)?"native-store-backup-parent":"store-backup-parent");if(parent=="")return;target=Path.Combine(parent,entry.Name+"-backup");}
                 else{var dialog=new StoreExportWindow(dataRoot,entry.Name){Owner=this};if(dialog.ShowDialog()!=true)return;target=dialog.Destination;exportSecret=dialog.Password;exportWorkers=dialog.Workers;dialog.ClearSecret();}
                 if(!Confirm(L.T(action=="backup"?"StoreBackupConfirm":"StoreExportConfirm",entry.Directory,target)))return;
             }

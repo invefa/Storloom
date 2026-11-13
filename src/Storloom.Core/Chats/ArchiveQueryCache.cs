@@ -9,9 +9,10 @@ namespace Storloom.Core.Chats;
 internal sealed class ArchiveQueryCache:IDisposable {
     internal sealed record Message(string Id,string Conversation,long Timestamp,string Text,string Json);
     private readonly ArchiveSqlite index;
+    internal string DatabasePath{get;}
     internal ArchiveQueryCache(string directory,bool protectedArchive,byte[]? key=null){
         PathPolicy.AssertNoLinks(directory);if(protectedArchive&&key==null)throw new IOException("Protected archive query cache requires an encryption key.");
-        string path=Path.Combine(directory,"query.db");if(File.Exists(path))PathPolicy.AssertNoLinks(path);
+        string path=Path.Combine(directory,"query.db");DatabasePath=path;if(File.Exists(path))PathPolicy.AssertNoLinks(path);
         index=new ArchiveSqlite(path,key);
         try{
             index.Execute("CREATE TABLE IF NOT EXISTS projection(k TEXT PRIMARY KEY,v TEXT NOT NULL) WITHOUT ROWID");
@@ -20,6 +21,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
             index.Execute("CREATE TABLE IF NOT EXISTS message_references(conversation TEXT NOT NULL,reference TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(conversation,reference,message_id)) WITHOUT ROWID");
             index.Execute("CREATE INDEX IF NOT EXISTS reference_message ON message_references(message_id)");
             index.Execute("CREATE TABLE IF NOT EXISTS archive_objects(id TEXT PRIMARY KEY,commit_id TEXT NOT NULL,ordinal INTEGER NOT NULL,bytes INTEGER NOT NULL) WITHOUT ROWID");
+            index.Execute("CREATE TABLE IF NOT EXISTS source_assets(stamp TEXT PRIMARY KEY,path TEXT NOT NULL) WITHOUT ROWID");
             index.Execute("CREATE TABLE IF NOT EXISTS archive_files(path TEXT PRIMARY KEY,body TEXT NOT NULL) WITHOUT ROWID");
             index.Execute("CREATE TABLE IF NOT EXISTS archive_file_parts(version TEXT NOT NULL,ordinal INTEGER NOT NULL,object_id TEXT NOT NULL,PRIMARY KEY(version,ordinal)) WITHOUT ROWID");
             // Caller-generated Unicode tokens allow single-character and mixed-script queries.
@@ -29,6 +31,9 @@ internal sealed class ArchiveQueryCache:IDisposable {
     }
     internal string? Applied=>index.Query("SELECT v FROM projection WHERE k='applied'").SingleOrDefault()?[0];
     internal ArchiveImportCursor? Cursor=>index.Query("SELECT v FROM projection WHERE k='import'").Select(r=>JsonSerializer.Deserialize<ArchiveImportCursor>(r[0])).SingleOrDefault();
+    internal string? AssetFor(FileStamp stamp)=>index.Query("SELECT path FROM source_assets WHERE stamp=?",JsonFiles.Hash(stamp)).SingleOrDefault()?[0];
+    internal long MessageCount=>long.Parse(index.Query("SELECT count(*) FROM current_messages").Single()[0],CultureInfo.InvariantCulture);
+    internal int AssetCount=>int.Parse(index.Query("SELECT count(*) FROM archive_files WHERE path>='assets/' AND path<'assets0'").Single()[0],CultureInfo.InvariantCulture);
     internal bool HasObject(string id)=>index.Query("SELECT 1 FROM archive_objects WHERE id=?",id).Count!=0;
     internal Message? Find(string id)=>index.Query("SELECT body FROM current_messages WHERE id=?",id).Select(r=>Read(r[0])).SingleOrDefault();
     internal IReadOnlyList<(string Key,long Count)> Conversations()=>index.Query("SELECT conversation,count(*) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture))).ToArray();
@@ -39,6 +44,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
     internal long Rank(Message message)=>long.Parse(index.Query("SELECT count(*) FROM current_messages WHERE conversation=? AND (time,id)<(CAST(? AS INTEGER),?)",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),message.Id).Single()[0],CultureInfo.InvariantCulture);
     internal Message? Reference(string conversation,string reference)=>index.Query("SELECT m.body FROM message_references r JOIN current_messages m ON m.id=r.message_id WHERE r.conversation=? AND r.reference=? ORDER BY m.time DESC,m.id DESC LIMIT 1",conversation,reference).Select(r=>Read(r[0])).FirstOrDefault();
     internal IReadOnlyList<ArchiveFileEntry> Files()=>index.Query("SELECT body FROM archive_files ORDER BY path").Select(r=>JsonSerializer.Deserialize<ArchiveFileEntry>(r[0])!).ToArray();
+    internal IReadOnlyList<ArchiveFileEntry> NativeSnapshotFiles()=>index.Query("SELECT body FROM archive_files WHERE path>='native-snapshots/' AND path<'native-snapshots0' ORDER BY path").Select(r=>JsonSerializer.Deserialize<ArchiveFileEntry>(r[0])!).ToArray();
     internal ArchiveFileEntry? FileEntry(string path)=>index.Query("SELECT body FROM archive_files WHERE path=?",path).Select(r=>JsonSerializer.Deserialize<ArchiveFileEntry>(r[0])).SingleOrDefault();
     internal (string Commit,int Ordinal,long Bytes) Locate(string id){var row=index.Query("SELECT commit_id,ordinal,bytes FROM archive_objects WHERE id=?",id).SingleOrDefault()??throw new FileNotFoundException("Missing archive object.");return(row[0],int.Parse(row[1],CultureInfo.InvariantCulture),long.Parse(row[2],CultureInfo.InvariantCulture));}
     internal IReadOnlyList<string> FileParts(string version)=>index.Query("SELECT object_id FROM archive_file_parts WHERE version=? ORDER BY ordinal",version).Select(r=>r[0]).ToArray();
@@ -50,29 +56,27 @@ internal sealed class ArchiveQueryCache:IDisposable {
         for(int n=0;n<runes.Length;n++){tokens.Add(Token(runes.AsSpan(n,1)));if(n+3<=runes.Length)tokens.Add(Token(runes.AsSpan(n,3)));}
         return string.Join(' ',tokens.Order(StringComparer.Ordinal));
     }
-    private static Message Read(string text)=>JsonSerializer.Deserialize<Message>(text)??throw new InvalidDataException("Invalid archive message delta.");
+    private static Message Read(string text){if(!text.StartsWith('!'))return JsonSerializer.Deserialize<Message>(text)??throw new InvalidDataException("Invalid archive message delta.");byte[] plain=ArchivePackCodec.Expand(Convert.FromBase64String(text[1..]));try{return JsonSerializer.Deserialize<Message>(plain)??throw new InvalidDataException("Invalid compressed query row.");}finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain);}}
+    private static byte[] Body(Message message){byte[] plain=JsonSerializer.SerializeToUtf8Bytes(message);try{return ArchivePackCodec.Compress(plain);}finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain);}}
     internal void Validate(ArchiveDelta batch){
         if(batch.Version!=1||batch.Messages==null||batch.Objects==null||batch.Parts==null||batch.Files==null)throw new InvalidDataException("Unsupported archive delta.");
         foreach(var message in batch.Messages){if(message==null||string.IsNullOrEmpty(message.Id)||message.Conversation==null||message.Text==null||message.Json==null)throw new InvalidDataException("Invalid archive message.");_ = Normalize(message.Text);using var raw=JsonDocument.Parse(message.Json);}
-        foreach(var item in batch.Objects)if(item==null||!ValidId(item.Id)||item.Bytes==null||item.Bytes.Length is <1 or >4*1024*1024)throw new InvalidDataException("Invalid resource chunk.");
+        foreach(var item in batch.Objects)if(item==null||!ValidId(item.Id)||item.Bytes==null||item.Length is <1 or >4*1024*1024)throw new InvalidDataException("Invalid resource chunk.");
         var known=batch.Objects.Select(o=>o.Id).ToHashSet(StringComparer.Ordinal);
         foreach(var part in batch.Parts)if(part==null||!ValidId(part.Version)||!ValidId(part.Object)||part.Ordinal<0||!known.Contains(part.Object)&&!HasObject(part.Object))throw new InvalidDataException("Missing resource chunk reference.");
         foreach(var file in batch.Files){ValidatePath(file.Path);if(!ValidId(file.Version)||file.Length<0||file.Chunks<0)throw new InvalidDataException("Invalid archive file.");}
         if(batch.Cursor is{} cursor&&(!ValidId(cursor.Snapshot)||cursor.Stage is not ("messages" or "files" or "complete")||cursor.File<0||cursor.Offset<0||cursor.Messages<0||cursor.Files<0||cursor.Bytes<0))throw new InvalidDataException("Invalid migration checkpoint.");
     }
-    internal int Replay(ArchiveCommitLog log,string? snapshot,Func<byte[],byte[]> decode,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null){
+    internal int Replay(ArchiveCommitLog log,string? snapshot,Func<byte[],byte[]> decode,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null)=>Replay(log,snapshot,bytes=>{byte[] plain=decode(bytes);try{using var doc=JsonDocument.Parse(plain);return doc.RootElement.ValueKind==JsonValueKind.Array?new ArchiveDelta(1,JsonSerializer.Deserialize<Message[]>(plain)!,[],[],[]):JsonSerializer.Deserialize<ArchiveDelta>(plain)??throw new InvalidDataException("Invalid archive delta.");}finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain);}},cancellation,progress);
+    internal int Replay(ArchiveCommitLog log,string? snapshot,Func<byte[],ArchiveDelta> decode,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null,Func<Stream,ArchiveDelta>? projection=null){
         OperationPause.Check(cancellation);int applied=0;long bytes=0;
         var commits=log.CommitsSince(Applied,snapshot).ToArray();long total=commits.Sum(c=>c.Entry.Bytes);
         progress?.Report(new("archive-query-replay",0,0,total,commits.Length));
         foreach(var commit in commits){
-            OperationPause.Check(cancellation);var delta=log.Read(commit.Id);
-            OperationPause.Check(cancellation);byte[] plain=decode(delta.Payload);ArchiveDelta? batch=null;
+            OperationPause.Check(cancellation);using var indexed=projection==null?null:log.OpenProjection(commit.Id);
+            OperationPause.Check(cancellation);ArchiveDelta? batch=null;
             try{
-                // Initial internal prototypes used bare message arrays; preserve their readability.
-                using var document=JsonDocument.Parse(plain);
-                batch=document.RootElement.ValueKind==JsonValueKind.Array
-                    ?new ArchiveDelta(1,JsonSerializer.Deserialize<Message[]>(plain)!,[],[],[])
-                    :JsonSerializer.Deserialize<ArchiveDelta>(plain)??throw new InvalidDataException("Invalid archive delta.");
+                batch=indexed==null?decode(log.Read(commit.Id).Payload):projection!(indexed);
                 Validate(batch);
                 index.Execute("BEGIN");
                 try{
@@ -82,8 +86,8 @@ internal sealed class ArchiveQueryCache:IDisposable {
                         var previous=index.Query("SELECT rowid,body FROM current_messages WHERE id=?",message.Id).SingleOrDefault();
                         if(previous!=null){
                             index.Execute("INSERT INTO message_search(message_search,rowid,tokens) VALUES('delete',?,?)",previous[0],Tokens(Read(previous[1]).Text));
-                            index.Execute("UPDATE current_messages SET conversation=?,time=CAST(? AS INTEGER),text=?,body=? WHERE id=?",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),Normalize(message.Text),JsonSerializer.Serialize(message),message.Id);
-                        }else index.Execute("INSERT INTO current_messages VALUES(?,?,CAST(? AS INTEGER),?,?)",message.Id,message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),Normalize(message.Text),JsonSerializer.Serialize(message));
+                            index.ExecuteValues("UPDATE current_messages SET conversation=?,time=CAST(? AS INTEGER),text=?,body=? WHERE id=?",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),Normalize(message.Text),Body(message),message.Id);
+                        }else index.ExecuteValues("INSERT INTO current_messages VALUES(?,?,CAST(? AS INTEGER),?,?)",message.Id,message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),Normalize(message.Text),Body(message));
                         string row=index.Query("SELECT rowid FROM current_messages WHERE id=?",message.Id).Single()[0];
                         index.Execute("INSERT INTO message_search(rowid,tokens) VALUES(?,?)",row,Tokens(message.Text));
                         index.Execute("DELETE FROM message_references WHERE message_id=?",message.Id);
@@ -94,8 +98,8 @@ internal sealed class ArchiveQueryCache:IDisposable {
                         }
                     }
                     for(int n=0;n<batch.Objects.Length;n++){
-                        var item=batch.Objects[n];if(!ValidId(item.Id)||item.Bytes==null||item.Bytes.Length is <1 or >4*1024*1024)throw new InvalidDataException("Invalid resource chunk.");
-                        index.Execute("INSERT OR IGNORE INTO archive_objects VALUES(?,?,CAST(? AS INTEGER),CAST(? AS INTEGER))",item.Id,delta.Id,n.ToString(CultureInfo.InvariantCulture),item.Bytes.Length.ToString(CultureInfo.InvariantCulture));
+                        var item=batch.Objects[n];if(!ValidId(item.Id)||item.Bytes==null||item.Length is <1 or >4*1024*1024)throw new InvalidDataException("Invalid resource chunk.");
+                        index.Execute("INSERT OR IGNORE INTO archive_objects VALUES(?,?,CAST(? AS INTEGER),CAST(? AS INTEGER))",item.Id,commit.Id,n.ToString(CultureInfo.InvariantCulture),item.Length.ToString(CultureInfo.InvariantCulture));
                     }
                     foreach(var part in batch.Parts){
                         if(!ValidId(part.Version)||part.Ordinal<0||!HasObject(part.Object))throw new InvalidDataException("Missing resource chunk reference.");
@@ -103,16 +107,16 @@ internal sealed class ArchiveQueryCache:IDisposable {
                     }
                     foreach(var file in batch.Files){
                         ValidatePath(file.Path);if(!ValidId(file.Version)||file.Length<0||file.Chunks<0)throw new InvalidDataException("Invalid archive file.");
-                        index.Execute("INSERT OR REPLACE INTO archive_files VALUES(?,?)",file.Path,JsonSerializer.Serialize(file));
+                        index.Execute("INSERT OR REPLACE INTO archive_files VALUES(?,?)",file.Path,JsonSerializer.Serialize(file));if(file.SourceStamp!=null&&file.Path.StartsWith("assets/",StringComparison.Ordinal))index.Execute("INSERT OR REPLACE INTO source_assets VALUES(?,?)",JsonFiles.Hash(file.SourceStamp),file.Path);
                     }
                     if(batch.Cursor!=null){
                         var cursor=batch.Cursor;if(!ValidId(cursor.Snapshot)||cursor.Stage is not ("messages" or "files" or "complete")||cursor.File<0||cursor.Offset<0||cursor.Messages<0||cursor.Files<0||cursor.Bytes<0)throw new InvalidDataException("Invalid migration checkpoint.");
                         index.Execute("INSERT OR REPLACE INTO projection VALUES('import',?)",JsonSerializer.Serialize(cursor));
                     }
-                    index.Execute("INSERT OR REPLACE INTO projection VALUES('applied',?)",delta.Id);index.Execute("COMMIT");applied++;
+                    index.Execute("INSERT OR REPLACE INTO projection VALUES('applied',?)",commit.Id);index.Execute("COMMIT");applied++;
                 }catch{index.Execute("ROLLBACK");throw;}
                 bytes+=commit.Entry.Bytes;progress?.Report(new("archive-query-replay",applied,bytes,total,commits.Length));
-            }finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain);if(batch?.Objects!=null)foreach(var item in batch.Objects)if(item?.Bytes!=null)System.Security.Cryptography.CryptographicOperations.ZeroMemory(item.Bytes);}
+            }finally{if(batch?.Objects!=null)foreach(var item in batch.Objects)if(item?.Bytes!=null)System.Security.Cryptography.CryptographicOperations.ZeroMemory(item.Bytes);}
         }
         return applied;
     }

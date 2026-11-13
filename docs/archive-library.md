@@ -1,5 +1,7 @@
 # Archive library
 
+New accounts in 2.7 default to direct compact archives. See [Compact archives](compact-archives.md) for format selection, native snapshots, protection and maintenance. The import path below remains available for existing reading copies.
+
 Open **Chat archives > Tools > Storage maintenance** to manage the packed storage format. Existing backups and reading copies remain available through their original entries. Nothing is migrated automatically.
 
 ## Import and update

@@ -15,7 +15,7 @@ internal sealed partial class ArchiveStore {
         PathPolicy.AssertNoLinks(Path.GetDirectoryName(destination)!);string taskPath=Path.Combine(destination,"backup-task.json");
         if(Directory.Exists(destination)){
             PathPolicy.AssertNoLinks(destination);string marker=Path.Combine(destination,"archive.json");
-            if(File.Exists(marker)){PathPolicy.AssertNoLinks(marker);var config=JsonFiles.Read<Configuration>(marker);if(config.Id!=Id||config.Version!=2||config.Protected!=(keys!=null))throw new InvalidDataException("Backup belongs to another archive.");}
+            if(File.Exists(marker)){PathPolicy.AssertNoLinks(marker);var config=JsonFiles.Read<Configuration>(marker);if(config.Id!=Id||config.Version is not (2 or 3)||config.Protected!=(keys!=null))throw new InvalidDataException("Backup belongs to another archive.");}
             else if(!File.Exists(taskPath))throw new IOException("Choose a new backup directory or this archive's existing backup.");
         }else Directory.CreateDirectory(destination);
         string lockPath=Path.Combine(destination,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);
@@ -31,7 +31,7 @@ internal sealed partial class ArchiveStore {
             task=new(Id,log.Head,target.Head,File.ReadAllText(configurationPath),keyring);task=task with{Proof=BackupProof(task)};JsonFiles.Write(taskPath,task);
         }
         var taskConfig=JsonSerializer.Deserialize<Configuration>(task.Configuration,JsonFiles.Options)??throw new InvalidDataException("Invalid backup configuration.");
-        if(taskConfig.Id!=Id||taskConfig.Version!=2||taskConfig.Protected!=(keys!=null)||(task.Keyring!=null)!=(keys!=null))throw new InvalidDataException("Invalid backup protection metadata.");
+        if(taskConfig.Id!=Id||taskConfig.Version is not (2 or 3)||taskConfig.Protected!=(keys!=null)||(task.Keyring!=null)!=(keys!=null))throw new InvalidDataException("Invalid backup protection metadata.");
         // A paused task finishes its captured snapshot even if the source advanced meanwhile.
         _ = log.CommitsSince(task.Head,log.Head).Count();
         if(target.Head!=task.Previous&&target.Head!=task.Head)throw new IOException("Backup destination changed since its checkpoint.");

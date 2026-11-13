@@ -195,6 +195,7 @@ public sealed class OperationPanel : Grid {
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
+        "archive-input-cleanup"=>"PhaseCompactCleanup","archive-query-copy"=>"PhaseCompactQueryCopy","archive-native-pack"=>"PhaseArchiveBackup","archive-native-restore"=>"PhaseCompactRestore","archive-repack-messages"=>"PhaseStoreMessages","archive-repack-files"=>"PhaseCompactRepack","archive-compact-unchanged"=>"PhaseCompactUnchanged",
         "archive-store-backup"=>"PhaseArchiveBackup","archive-query-replay"=>"PhaseStoreReplay","archive-migration-plan"=>"PhaseStorePlan","archive-migration-unlock"=>"PhaseStoreUnlock","archive-migration-messages"=>"PhaseStoreMessages","archive-migration-files"=>"PhaseStoreFiles","archive-reader-export"=>"PhaseStoreExport","archive-verify"=>"PhaseStoreVerify",
         "archive-workspace-plan"=>"PhaseArchiveWorkspacePlan","archive-backup"=>"PhaseArchiveBackup","archive-workspace"=>"PhaseArchiveWorkspace","archive-reading"=>"PhaseArchiveReading","archive-protect"=>"PhaseArchiveProtect","archive-publish"=>"PhaseArchivePublish","archive-reuse-encrypted"=>"PhaseArchiveReuse",
         "chat-encryption-open"=>"PhaseEncryptionOpen","chat-encryption-check"=>"PhaseEncryptionCheck","chat-encryption-select"=>"PhaseEncryptionSelect","chat-encryption-plan"=>"PhaseEncryptionPlan","chat-encryption-derive"=>"PhaseEncryptionDerive","chat-encryption-save-plan"=>"PhaseEncryptionSavePlan",

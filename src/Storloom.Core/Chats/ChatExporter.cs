@@ -44,7 +44,11 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
     private readonly int parallelism = maximumParallelism is >= 1 and <= 8 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     internal ChatExportResult ExportReadLockedSource(ChatSourceLease source,string destination,ChatPlatform platform,
         byte[]? secret,IProgress<ScanProgress>? progress,CancellationToken cancellation,Func<ChatMessage,ChatMessage?>? selectMessage=null,Func<string,bool>? includeDatabase=null,bool resume=false)=>
-        ExportCore(source.Root,destination,platform,secret,progress,cancellation,false,null,resume:resume,selectMessage:selectMessage,includeDatabase:includeDatabase,sourceProof:JsonFiles.Hash(new{Pipeline=1,Language=L.Language,LocalImages=useLocalImageConfiguration,Databases=source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}));
+        ExportCore(source.Root,destination,platform,secret,progress,cancellation,false,null,accountName:Path.GetFileName(source.IdentityRoot),resume:resume,selectMessage:selectMessage,includeDatabase:includeDatabase,sourceProof:JsonFiles.Hash(new{Pipeline=1,Language=L.Language,LocalImages=useLocalImageConfiguration,SourceIdentity=source.IdentityRoot,Databases=source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}),sourceIdentityRoot:source.IdentityRoot);
+    internal ChatExportResult ExportCompact(ChatSourceLease source,string workspace,ChatPlatform platform,byte[]? secret,ArchiveStore.Writer writer,IProgress<ScanProgress>? progress,CancellationToken cancellation,Func<string,bool>? includeDatabase=null,string? accountName=null){
+        string path=Path.Combine(workspace,"export-progress.json");if(File.Exists(path)&&JsonFiles.Read<ChatExportProgress>(path).Finished){PathPolicy.AssertNoLinks(path);File.Delete(path);}
+        return ExportCore(source.Root,workspace,platform,secret,progress,cancellation,false,null,accountName:accountName,sourceProof:JsonFiles.Hash(source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()),includeDatabase:includeDatabase,compact:writer,resume:File.Exists(path));
+    }
     public ChatExportResult Export(string source, string destination, ChatPlatform platform,
         byte[]? secret = null, IProgress<ScanProgress>? progress = null,
         CancellationToken cancellation = default) => ExportCore(source, destination, platform,
@@ -122,7 +126,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
 
     private ChatExportResult ExportCore(string source, string destination, ChatPlatform platform,
         byte[]? secret, IProgress<ScanProgress>? progress, CancellationToken cancellation,
-        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null, string? sourceProof=null) {
+        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null, string? sourceProof=null,ArchiveStore.Writer? compact=null,string? sourceIdentityRoot=null) {
         bool checkpointing=verified!=null||sourceProof!=null;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination);
@@ -132,7 +136,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         string[] processNames = platform == ChatPlatform.QQ ? ["QQ"] : ["Weixin", "WeChat"];
         if (requireClosedClient && CleanupEngine.RunningProcesses(new CleanupRule { Processes = processNames }).Length > 0)
             throw new IOException("Close the chat client before exporting a consistent snapshot.");
-        if (!resume && (Directory.Exists(destination) || File.Exists(destination))) throw new IOException("Export destination must be new.");
+        if (compact == null && !resume && (Directory.Exists(destination) || File.Exists(destination))) throw new IOException("Export destination must be new.");
         if (resume && (!checkpointing || !Directory.Exists(destination))) throw new InvalidDataException("Resume requires an existing checkpoint and verified backup.");
         if (resume && !File.Exists(Path.Combine(destination, "export-progress.json")))
             throw new InvalidDataException("This export has no supported checkpoint. Exports started by older versions cannot be resumed.");
@@ -145,7 +149,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         string identity = verified == null ? sourceProof??"" : JsonFiles.Hash(new { Pipeline = 1, Language = L.Language, LocalImages = useLocalImageConfiguration,
             Receipts = verified.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).ToArray() });
         var checkpoint = resume ? JsonFiles.Read<ChatExportProgress>(progressPath) : new ChatExportProgress {
-            Source = source, Platform = platform, Identity = identity, Work = ".work-" + Guid.NewGuid().ToString("N") };
+            Source = source, SourceIdentityRoot=sourceIdentityRoot, Platform = platform, Identity = identity, Work = ".work-" + Guid.NewGuid().ToString("N") };
         if (checkpoint.Version != 1 || checkpoint.Finished || checkpoint.Source != source || checkpoint.Platform != platform || checkpoint.Identity != identity ||
             !Regex.IsMatch(checkpoint.Work, "^\\.work-[a-f0-9]{32}$")) throw new InvalidDataException("Export checkpoint does not match this backup or export format.");
         string work = TransferService.Child(destination, checkpoint.Work);
@@ -228,10 +232,11 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
             if (checkpointing && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
             using var voices = platform == ChatPlatform.WeChat ? new WeChatVoices(source, work, secret, cancellation) : null;
-            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, checkpointing, parallelism, voices, avatars, downloadQQGroupAvatars, identities, defaultReaderDark, platform.ToString().ToLowerInvariant());
+            archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, checkpointing, parallelism, voices, avatars, downloadQQGroupAvatars, identities, defaultReaderDark, platform.ToString().ToLowerInvariant(),compact);
             progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
             for (int index = 0; index < databases.Length; index++) {
+                archive.SetCompactSource(Path.GetRelativePath(source,databases[index]));
                 string output = Path.Combine(work, $"{index}.jsonl"); if (!File.Exists(output)) continue;
                 foreach (string line in File.ReadLines(output)) {
                     OperationPause.Check(cancellation);

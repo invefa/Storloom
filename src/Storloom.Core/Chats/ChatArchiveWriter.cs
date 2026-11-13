@@ -15,6 +15,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
         bool? Ordered = null, long? LastTimestamp = null);
     private readonly string source, destination, work;
     private readonly string account;
+    private readonly ArchiveStore.Writer? compact;
+    private string compactScope="";private readonly Dictionary<string,int> compactOccurrences=new(StringComparer.Ordinal);
+    internal void SetCompactSource(string source){compactScope=source;compactOccurrences.Clear();}
     private readonly bool? defaultReaderDark;
     private readonly string? defaultReaderPalette;
     private readonly Dictionary<string, string> contacts;
@@ -54,7 +57,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
     public int UnresolvedMedia { get; private set; }
     public int UnsupportedMessages { get; private set; }
     public ChatArchiveWriter(string source, string destination, string work, Dictionary<string, string> contacts,
-        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null, bool downloadQQGroupAvatars = false, IReadOnlyDictionary<string,ChatIdentity>? identities = null, bool? defaultReaderDark = null, string? defaultReaderPalette = null) {
+        Dictionary<string, TransferReceipt>? verified, CancellationToken cancellation, string account, bool useLocalImageConfiguration = false, bool resumable = false, int pageParallelism = 1, WeChatVoices? voices = null, IReadOnlyDictionary<string,string>? avatars = null, bool downloadQQGroupAvatars = false, IReadOnlyDictionary<string,ChatIdentity>? identities = null, bool? defaultReaderDark = null, string? defaultReaderPalette = null, ArchiveStore.Writer? compact = null) {
+        this.compact=compact;
         this.defaultReaderDark=defaultReaderDark;this.defaultReaderPalette=defaultReaderPalette;
         this.identities = identities ?? new Dictionary<string,ChatIdentity>();
         this.avatars=avatars==null?new(StringComparer.Ordinal):new(avatars,StringComparer.Ordinal);
@@ -65,7 +69,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         this.source = source; this.destination = destination; this.work = work; this.contacts = contacts;
         this.verified = verified; this.cancellation = cancellation;
         this.account = account;
-        this.resumable = resumable;
+        this.resumable = resumable&&compact==null;resumable=this.resumable;
         images = new WeChatImages(account, source, useLocalImageConfiguration);
         emoji = new BuiltInEmoji(source,destination,useLocalImageConfiguration);
         WriterProgress? previous = resumable && File.Exists(ProgressPath) ? JsonFiles.Read<WriterProgress>(ProgressPath) : null;
@@ -113,6 +117,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             // Older checkpoints can recover native IDs from their already-authenticated JSONL prefix.
             foreach(string line in File.ReadLines(json.Path)){OperationPause.Check(cancellation);using var entry=JsonDocument.Parse(line);string native=entry.RootElement.GetProperty("Conversation").GetString()!;conversationIds.TryAdd(native,JsonFiles.Hash(native)[..24].ToLowerInvariant());}
         }
+        if(compact!=null){string prior=compact.Metadata();using var metadata=JsonDocument.Parse(prior["window.archiveIndex=".Length..].Trim().TrimEnd(';'));if(metadata.RootElement.TryGetProperty("identityVersions",out var versions))foreach(var item in versions.EnumerateObject()){var value=item.Value.Deserialize<ChatIdentity>();if(value!=null)identityVersions.TryAdd(item.Name,value);}if(metadata.RootElement.TryGetProperty("avatars",out var oldAvatars))foreach(var pair in oldAvatars.Deserialize<Dictionary<string,string>>()??[])this.avatars.TryAdd(pair.Key,pair.Value);if(metadata.RootElement.TryGetProperty("conversationKeys",out var oldChats))foreach(var pair in oldChats.EnumerateObject())if(pair.Value.GetString() is{} key)conversationIds.TryAdd(key,pair.Name);if(metadata.RootElement.TryGetProperty("builtInEmoji",out var oldEmoji))emoji.Restore(oldEmoji.Deserialize<Dictionary<string,string>>());}
         IEnumerable<string> files = verified?.Keys ?? EnumerateMediaFiles(source);
         foreach (string relative in files) {
             OperationPause.Check(cancellation);
@@ -142,7 +147,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
         string peer = original.Conversation.StartsWith("direct:") ? original.Conversation[7..] :
             original.Conversation.StartsWith("group:") ? original.Conversation[6..] : original.Conversation;
         string name = contacts.GetValueOrDefault(original.Conversation, contacts.GetValueOrDefault(peer, original.ConversationName ?? peer));
-        var message = original with { Id = original.Id ?? "m" + (messageId + 1), ConversationName = name, SenderName = original.SenderName ?? contacts.GetValueOrDefault(original.Conversation + "/" + original.Sender, contacts.GetValueOrDefault(original.Sender, original.Sender)),
+        string? compactId=null;if(compact!=null){string key=ChatReadingUpdate.Key(original);int occurrence=compactOccurrences.GetValueOrDefault(key);compactOccurrences[key]=occurrence+1;compactId="n"+JsonFiles.Hash(new{Source=compactScope,Key=key,Occurrence=occurrence}).ToLowerInvariant();}
+        if(compactId!=null&&compact!.TryReuse(original,compactId)){conversationIds.TryAdd(original.Conversation,JsonFiles.Hash(original.Conversation)[..24].ToLowerInvariant());messageId++;adding=false;return;}
+        var message = original with { Id = compactId ?? original.Id ?? "m" + (messageId + 1), ConversationName = name, SenderName = original.SenderName ?? contacts.GetValueOrDefault(original.Conversation + "/" + original.Sender, contacts.GetValueOrDefault(original.Sender, original.Sender)),
             Identity = CaptureIdentity(original),
             IsSelf = original.IsSelf || original.Sender == account || account.StartsWith(original.Sender + "_", StringComparison.Ordinal) };
         var attachments = new List<ChatMedia>();
@@ -151,9 +158,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
             string voiceKey = "voice:" + WeChatVoices.Identity(message.Conversation, message.ServerId!);
             string filename = Convert.ToHexString(SHA256.HashData(wave)).ToLowerInvariant() + ".wav";
             string assets = Path.Combine(destination, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
-            string path = Path.Combine(assets, filename); if (File.Exists(path)) PathPolicy.AssertNoLinks(path);
-            if (!File.Exists(path)) { File.WriteAllBytes(path, wave); MediaFiles++; }
-            else { using var existing = File.OpenRead(path); if (!SHA256.HashData(existing).AsSpan().SequenceEqual(SHA256.HashData(wave))) throw new InvalidDataException("Exported voice changed."); }
+            string path = Path.Combine(assets, filename); if(compact!=null){compact.Bytes("assets/"+filename,wave);resolved[voiceKey]=new("assets/"+filename,"audio","voice.wav"){Key=voiceKey};MediaFiles++;parts=parts.Select(p=>p.Kind=="audio"?p with{MediaKeys=[..p.MediaKeys??[],voiceKey]}:p).ToArray();}else if (File.Exists(path)) PathPolicy.AssertNoLinks(path);
+            if (compact==null&&!File.Exists(path)) { File.WriteAllBytes(path, wave); MediaFiles++; }
+            else if(compact==null) { using var existing = File.OpenRead(path); if (!SHA256.HashData(existing).AsSpan().SequenceEqual(SHA256.HashData(wave))) throw new InvalidDataException("Exported voice changed."); }
             resolved[voiceKey] = new("assets/" + filename, "audio", "voice.wav") { Key = voiceKey };
             parts = parts.Select(p => p.Kind == "audio" ? p with { MediaKeys = [.. p.MediaKeys ?? [], voiceKey] } : p).ToArray();
         }
@@ -206,6 +213,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
             message = message with { IdentityVersion = identity.Version, Identity = null };
         }
         OperationPause.Check(cancellation);
+        if(compact!=null){conversationIds.TryAdd(message.Conversation,JsonFiles.Hash(message.Conversation)[..24].ToLowerInvariant());compact.Add(message);messageId++;adding=false;return;}
         string name = message.ConversationName ?? message.Conversation;
         string line = JsonSerializer.Serialize(message);
         jsonBuffer.AppendLine(line);
@@ -233,6 +241,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         bufferedCharacters -= buffer.Length; buffers.Remove(id);
     }
     internal void SaveProgress() {
+        if(compact!=null){compact.Flush();return;}
         FlushJson(); foreach (string id in buffers.Keys.ToArray()) FlushSpool(id);
         if (resumable) JsonFiles.Write(ProgressPath, new WriterProgress(messageId, MediaFiles, UnresolvedMedia, UnsupportedMessages,
             conversations.Values.Select(c => c with { File = Path.GetFileName(c.File) }).ToArray(), json.Proof(destination), spools.Values.Select(f => f.Proof(destination)).ToArray(), generated,new(emoji.Exported),new(conversationIds),identityObservedAt,new(identityVersions)));
@@ -262,12 +271,14 @@ internal sealed class ChatArchiveWriter : IDisposable {
         path.Replace('\\', '/').Split('/').Any(segment => segment.Equals("Thumb", StringComparison.OrdinalIgnoreCase) || segment.Equals("ThumbStore", StringComparison.OrdinalIgnoreCase));
     private ChatMedia? ResolveFile(string key, string relative) {
         string path = verified != null ? ChatIncrementalBackup.Resolve(source, verified[relative]) : TransferService.Child(source, relative); PathPolicy.AssertNoLinks(path);
+        var sourceStamp=NativeFile.ReadStamp(path);
+        if(compact?.AssetFor(sourceStamp) is{} cached){string ext=Path.GetExtension(cached).ToLowerInvariant();return new(cached,ext is ".mp4" or ".webm"?"video":ext is ".wav" or ".ogg" or ".mp3"?"audio":ext is ".jpg" or ".png" or ".gif" or ".webp"?"image":"file",Path.GetFileName(relative)){Key=key,Quality=Thumbnail(relative)?"thumbnail":null};}
         if (Path.GetExtension(path).ToLowerInvariant() is ".silk" or ".amr") {
             if(new FileInfo(path).Length>32*1024*1024)return null;
             byte[] encoded=File.ReadAllBytes(path);if(verified!=null&&(!verified.TryGetValue(relative,out var proof)||Convert.ToHexString(SHA256.HashData(encoded))!=proof.Sha256))throw new InvalidDataException("Archived voice changed after verification.");
             byte[]? wave=SilkAudio.Decode(encoded,cancellation);if(wave==null)return null;
             string voiceAssets=Path.Combine(destination,"assets");Directory.CreateDirectory(voiceAssets);PathPolicy.AssertNoLinks(voiceAssets);string name=Convert.ToHexString(SHA256.HashData(wave)).ToLowerInvariant()+".wav",targetVoice=Path.Combine(voiceAssets,name);if(File.Exists(targetVoice))PathPolicy.AssertNoLinks(targetVoice);
-            if(!File.Exists(targetVoice)){using var output=new FileStream(targetVoice,FileMode.CreateNew,FileAccess.Write);output.Write(wave);MediaFiles++;}else{using var inputVoice=File.OpenRead(targetVoice);if(!SHA256.HashData(inputVoice).AsSpan().SequenceEqual(SHA256.HashData(wave)))throw new InvalidDataException("Voice asset conflicts with existing content.");}
+            if(compact!=null){using var converted=new MemoryStream(wave,false);compact.Put("assets/"+name,converted,sourceStamp);if(NativeFile.ReadStamp(path)!=sourceStamp)throw new IOException("Source audio changed while decoding.");MediaFiles++;}else if(!File.Exists(targetVoice)){using var output=new FileStream(targetVoice,FileMode.CreateNew,FileAccess.Write);output.Write(wave);MediaFiles++;}else{using var inputVoice=File.OpenRead(targetVoice);if(!SHA256.HashData(inputVoice).AsSpan().SequenceEqual(SHA256.HashData(wave)))throw new InvalidDataException("Voice asset conflicts with existing content.");}
             return new("assets/"+name,"audio",Path.GetFileName(relative)){Key=key};
         }
         string originalExtension = Path.GetExtension(path).ToLowerInvariant();
@@ -291,11 +302,12 @@ internal sealed class ChatArchiveWriter : IDisposable {
         string assets = Path.Combine(destination, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
         string filename = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant() + extension;
         string target = Path.Combine(assets, filename);
-        if (!File.Exists(target)) { using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write); output.Write(data); MediaFiles++; }
+        if(compact!=null){using var bytes=new MemoryStream(data,false);compact.Put("assets/"+filename,bytes,sourceStamp);if(NativeFile.ReadStamp(path)!=sourceStamp)throw new IOException("Source image changed while decoding.");MediaFiles++;}else if (!File.Exists(target)) { using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write); output.Write(data); MediaFiles++; }
         else { PathPolicy.AssertNoLinks(target); using var existing = File.OpenRead(target); if (Convert.ToHexString(SHA256.HashData(existing)).ToLowerInvariant() != Path.GetFileNameWithoutExtension(target)) throw new InvalidDataException("Exported media changed; resume refused."); }
         return new("assets/" + filename, kind, Path.GetFileName(relative)) { Key = key, Quality = Thumbnail(relative) ? "thumbnail" : null };
     }
     private ChatMedia CopyStreaming(string key, string relative, string path, string extension) {
+        if(compact!=null){var stamp=NativeFile.ReadStamp(path);using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);var file=compact.Put(null,input,stamp,extension);if(NativeFile.ReadStamp(path)!=stamp)throw new IOException("Source media changed while reading.");MediaFiles++;return new(file.Path,extension is ".mp4" or ".webm"?"video":extension is ".mp3" or ".wav" or ".ogg" or ".m4a"?"audio":"file",Path.GetFileName(relative)){Key=key};}
         string assets = Path.Combine(destination, "assets"); Directory.CreateDirectory(assets); PathPolicy.AssertNoLinks(assets);
         string temporary = Path.Combine(assets, ".pending-" + Guid.NewGuid().ToString("N"));
         try {
@@ -316,6 +328,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public void Finish(IProgress<ScanProgress>? progress) {
+        if(compact!=null){WriteMetadata(progress);foreach(string asset in Directory.Exists(Path.Combine(destination,"assets"))?Directory.GetFiles(Path.Combine(destination,"assets")):[]){PathPolicy.AssertNoLinks(asset);using var input=File.OpenRead(asset);compact.Put("assets/"+Path.GetFileName(asset),input,NativeFile.ReadStamp(asset));}compact.Bytes("archive-index.js",File.ReadAllBytes(Path.Combine(destination,"archive-index.js")));compact.Flush();return;}
         SaveProgress();
         try { FinishCore(progress); }
         catch { SaveProgress(); throw; }
@@ -396,6 +409,9 @@ internal sealed class ChatArchiveWriter : IDisposable {
                 progress?.Report(new("chat-pages", ++done, 0, TotalFiles: entries.Length, Detail: entry.Name));
             }
         });
+        WriteMetadata(progress);
+    }
+    private void WriteMetadata(IProgress<ScanProgress>? progress){
         if(downloadQQGroupAvatars){var downloaded=ChatAvatars.DownloadQQGroups(conversationIds.Keys,destination,progress,cancellation,out int failed,pageParallelism);AvatarDownloadFailures=failed;foreach(var pair in downloaded)avatars[pair.Key]=pair.Value;}
         var labels = L.Keys.Where(k => k.StartsWith("Reader", StringComparison.Ordinal)).Append("ChatArchive")
             .ToDictionary(k => k, k => L.T(k));

@@ -11,13 +11,14 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
     internal int Workers { get; private set; }=2;
     internal ChatVaultKeyMode KeyMode {get;private set;}
     internal ChatProtectionSelection? Selection {get;private set;}
-    public VaultPasswordWindow(bool creating,bool encrypting,string? directory=null,bool passwordChange=false) : base(L.T(passwordChange?"ReadingChangePassword":creating?"VaultCreate":"VaultUnlock"),520,creating?480:encrypting?390:260) {
+    public VaultPasswordWindow(bool creating,bool encrypting,string? directory=null,bool passwordChange=false):this(creating,encrypting,directory,passwordChange,true){}
+    internal VaultPasswordWindow(bool creating,bool encrypting,string? directory,bool passwordChange,bool allowDirect) : base(L.T(passwordChange?"ReadingChangePassword":creating?"VaultCreate":"VaultUnlock"),520,creating?480:encrypting?390:260) {
         MinWidth=500;MinHeight=240;SizeToContent=SizeToContent.Height;MaxHeight=SystemParameters.WorkArea.Height-40;ResizeMode=ResizeMode.NoResize;
         Caption.ShowMaximize=Caption.ShowMinimize=false;
         var layout=View.Grid(View.Fill,View.Auto);layout.Margin=new Thickness(20);Body.Children.Add(layout);var stack=new StackPanel();var scroll=View.FormScroll(stack);scroll.MaxHeight=SystemParameters.WorkArea.Height-180;View.Add(layout,scroll,0);
         var credentialHelp=View.Text(L.T(passwordChange?"ReadingPasswordChangeHelp":creating?"VaultEnvelopeHelp":"VaultUnlockHelp"),color:"Muted");stack.Children.Add(credentialHelp);
         var keyMode=new ComboBox{Name="vault_key_mode",ItemsSource=new[]{L.T("VaultWrappedMode"),L.T("VaultDirectMode")},SelectedIndex=0};
-        if(creating&&!passwordChange){stack.Children.Add(View.Field("VaultKeyMode",keyMode));stack.Children.Add(new Expander{Header=L.T("VaultKeyDetails"),Content=View.Text(L.T("VaultKeyModeHelp"),color:"Muted"),Margin=new Thickness(0,4,0,10)});}
+        if(creating&&!passwordChange&&allowDirect){stack.Children.Add(View.Field("VaultKeyMode",keyMode));stack.Children.Add(new Expander{Header=L.T("VaultKeyDetails"),Content=View.Text(L.T("VaultKeyModeHelp"),color:"Muted"),Margin=new Thickness(0,4,0,10)});}
         var credentialField=View.Field(creating?"VaultPassword":"VaultCredential",password);stack.Children.Add(credentialField);
         var confirmationField=View.Field("VaultConfirmPassword",confirmation);if(creating)stack.Children.Add(confirmationField);
         keyMode.SelectionChanged+=(_,_)=>{bool direct=keyMode.SelectedIndex==1;credentialField.Children.OfType<Label>().Single().Content=L.T(direct?"VaultDirectKey":"VaultPassword");confirmationField.Children.OfType<Label>().Single().Content=L.T(direct?"VaultConfirmKey":"VaultConfirmPassword");credentialHelp.Text=L.T(direct?"VaultDirectKeyHelp":"VaultEnvelopeHelp");password.Clear();confirmation.Clear();};

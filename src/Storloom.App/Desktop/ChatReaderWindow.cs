@@ -26,9 +26,10 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 LoadingStage="opening archive";directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
                 if(File.Exists(Path.Combine(directory,".storloom-export.json")))throw new IOException(L.T("StoreFinishExport"));
                 bool packed=ArchiveStore.Exists(directory);
+                if(!packed||!ArchiveStore.SnapshotReads(directory)){
                 string lockPath=Path.Combine(directory,packed?"operation.lock":".export.lock");
                 if(!File.Exists(lockPath)){using var create=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.Write,FileShare.Read);}
-                PathPolicy.AssertNoLinks(lockPath);readerLease=new FileStream(lockPath,FileMode.Open,FileAccess.Read,FileShare.Read);
+                PathPolicy.AssertNoLinks(lockPath);readerLease=new FileStream(lockPath,FileMode.Open,FileAccess.Read,FileShare.Read);}
                 if(ChatVault.Exists(directory)||packed&&ArchiveStore.NeedsPassword(directory)){
                     string? secret;
                     if(VaultPasswordProvider!=null){secret=VaultPasswordProvider();VaultPasswordProvider=null;}

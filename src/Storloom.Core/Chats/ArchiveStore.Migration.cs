@@ -47,9 +47,14 @@ internal sealed partial class ArchiveStore {
     }
     // The source is never modified or removed. Each committed batch includes its exact cursor.
     internal ArchiveImportCursor ImportReader(string directory,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default,ReadOnlySpan<char> sourcePassword=default){
+        directory=PathPolicy.Normalize(directory);if(directory.Equals(root,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(root,directory)||PathPolicy.Under(directory,root))throw new InvalidOperationException("Source and archive directories must be separate.");
+        if(SnapshotReads(root)){using var writer=BeginWrite(cancellation,"reader-import:"+PathPolicy.Normalize(directory).ToUpperInvariant(),progress);var cursor=ImportReaderCore(directory,progress,cancellation,sourcePassword,writer.Log,writer.Query);writer.Complete(cursor);return cursor;}
+        using var operation=Lease();return ImportReaderCore(directory,progress,cancellation,sourcePassword,log,query);
+    }
+    private ArchiveImportCursor ImportReaderCore(string directory,IProgress<ScanProgress>? progress,CancellationToken cancellation,ReadOnlySpan<char> sourcePassword,ArchiveCommitLog importLog,ArchiveQueryCache projection){
         directory=PathPolicy.Normalize(directory);
         if(directory.Equals(root,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(root,directory)||PathPolicy.Under(directory,root))throw new InvalidOperationException("Source and archive directories must be separate.");
-        using var operation=Lease();query.Replay(log,log.Head,Decode,cancellation,progress);
+        projection.Replay(importLog,importLog.Head,Decode,cancellation,progress,DecodeProjection);
         using var source=new MigrationSource(directory,sourcePassword,keys!=null,progress,cancellation);
         var transcript=source.Files.SingleOrDefault(f=>f.Path=="messages.jsonl")??throw new InvalidDataException("Reader has no message transcript.");
         var report=source.Files.SingleOrDefault(f=>f.Path=="export-report.json");long? messageTotal=null;
@@ -59,7 +64,7 @@ internal sealed partial class ArchiveStore {
         if(metadata!=null){using var text=new StreamReader(source.Open(metadata));string raw=text.ReadToEnd();const string prefix="window.archiveIndex=";if(!raw.StartsWith(prefix,StringComparison.Ordinal))throw new InvalidDataException("Invalid source reader metadata.");using var doc=JsonDocument.Parse(raw[prefix.Length..].Trim().TrimEnd(';'));if(doc.RootElement.TryGetProperty("sourceIdentity",out var storedIdentity)&&storedIdentity.ValueKind==JsonValueKind.String)sourceIdentity=storedIdentity.GetString();else if(doc.RootElement.TryGetProperty("preferenceScope",out var scope))sourceIdentity=scope.GetString();}
         sourceIdentity??="source:"+JsonFiles.Hash(directory.ToUpperInvariant());
         string snapshot=JsonFiles.Hash(source.Files).ToLowerInvariant();
-        var cursor=query.Cursor;
+        var cursor=projection.Cursor;
         if(cursor?.SourceIdentity is{} originalIdentity&&originalIdentity!=sourceIdentity)throw new InvalidDataException("Source reader belongs to another archive identity.");
         if(cursor!=null&&cursor.Snapshot!=snapshot){if(cursor.Stage!="complete")throw new InvalidDataException("Migration source snapshot differs from the saved checkpoint.");cursor=null;}
         cursor??=new(snapshot,"messages",0,0,0,0,0,sourceIdentity);
@@ -69,7 +74,7 @@ internal sealed partial class ArchiveStore {
             using var lines=new Utf8LineCursor(source.Open(transcript),cursor.Offset);var messages=new List<ArchiveQueryCache.Message>();long count=cursor.Messages;int characters=0;
             void FlushMessages(string stage){
                 source.Check(transcript);cursor=new(snapshot,stage,0,stage=="messages"?lines.Offset:0,count,0,0,sourceIdentity);
-                Commit(new(1,messages.ToArray(),[],[],[],cursor));messages.Clear();characters=0;
+                CommitTo(new(1,messages.ToArray(),[],[],[],cursor),importLog,projection,cancellation);messages.Clear();characters=0;
                 progress?.Report(new("archive-migration-messages",(int)Math.Min(count,int.MaxValue),lines.Offset,transcript.Stamp.Bytes,messageTotal==null?null:(int)Math.Min(messageTotal.Value,int.MaxValue)));
             }
             string? line;
@@ -81,20 +86,20 @@ internal sealed partial class ArchiveStore {
                 string identity=!string.IsNullOrEmpty(message.Id)?"legacy:"+message.Id:"occurrence:"+start;
                 string id=JsonFiles.Hash(new{message.Platform,message.Conversation,Identity=identity}).ToLowerInvariant();
                 var candidate=new ArchiveQueryCache.Message(id,message.Platform+"/"+message.Conversation,message.Timestamp,SearchableText(message),line);
-                if(query.Find(id)!=candidate)messages.Add(candidate);count++;characters=checked(characters+line.Length);
+                if(projection.Find(id)!=candidate)messages.Add(candidate);count++;characters=checked(characters+line.Length);
                 if(messages.Count>=512||characters>=2*1024*1024)FlushMessages("messages");
             }
             FlushMessages("files");
         }
         long totalBytes=source.Files.Sum(f=>f.Stamp.Bytes);var objects=new List<ArchiveObject>();var parts=new List<ArchiveFilePart>();var files=new List<ArchiveFileEntry>();var pendingIds=new HashSet<string>(StringComparer.Ordinal);int buffered=0;
         void FlushFiles(){
-            Commit(new(1,[],objects.ToArray(),parts.ToArray(),files.ToArray(),cursor));objects.Clear();parts.Clear();files.Clear();pendingIds.Clear();buffered=0;
+            CommitTo(new(1,[],objects.ToArray(),parts.ToArray(),files.ToArray(),cursor),importLog,projection,cancellation);objects.Clear();parts.Clear();files.Clear();pendingIds.Clear();buffered=0;
             progress?.Report(new("archive-migration-files",(int)Math.Min(cursor!.Files,int.MaxValue),cursor.Bytes,totalBytes,source.Files.Length));
         }
         try{
         for(int n=cursor!.File;n<source.Files.Length;n++){
             OperationPause.Check(cancellation);var file=source.Files[n];
-            var previous=query.FileEntry(file.Path);
+            var previous=projection.FileEntry(file.Path);
             if(previous is{Complete:true}&&previous.SourceStamp==file.Stamp){source.Check(file);cursor=cursor with{File=n+1,Offset=0,Files=cursor.Files+1,Bytes=cursor.Bytes+file.Stamp.Bytes};if((n+1)%128==0)FlushFiles();continue;}
             long offset=n==cursor.File?cursor.Offset:0;
             if(offset<0||offset>file.Stamp.Bytes||offset%ChunkBytes!=0&&offset!=file.Stamp.Bytes)throw new InvalidDataException("Invalid media migration cursor.");
@@ -102,7 +107,7 @@ internal sealed partial class ArchiveStore {
             using var input=source.Open(file);input.Position=offset;
             while(offset<file.Stamp.Bytes){
                 OperationPause.Check(cancellation);int length=(int)Math.Min(ChunkBytes,file.Stamp.Bytes-offset);byte[] bytes=new byte[length];input.ReadExactly(bytes);
-                string id=ObjectId(bytes);if(!query.HasObject(id)&&pendingIds.Add(id))objects.Add(new(id,bytes));else CryptographicOperations.ZeroMemory(bytes);
+                string id=ObjectId(bytes);if(!projection.HasObject(id)&&pendingIds.Add(id))objects.Add(new(id,bytes));else CryptographicOperations.ZeroMemory(bytes);
                 parts.Add(new(version,ordinal++,id));offset+=length;buffered+=length;
                 cursor=cursor with{File=n,Offset=offset,Bytes=cursor.Bytes+length};
                 files.Add(new(file.Path,version,file.Stamp.Bytes,ordinal,false,file.Stamp));

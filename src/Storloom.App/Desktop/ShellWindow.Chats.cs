@@ -89,7 +89,7 @@ public sealed partial class ShellWindow {
             if (chatList.SelectedItem is not AccountRow row) throw new InvalidOperationException(L.T("NoAccountSelected"));
             if (activeChat?.Directory != row.Location.Directory || activeChat?.Platform != row.Location.Platform) SetCapturedKey(null);
             activeChat = row.Location;directChatSource=false;
-            string id=ChatArchiveProject.Identity(row.Location.Platform,row.Location.Directory);var project=archiveProjects.GetValueOrDefault(id)??new ChatArchiveProject(id,row.Location.Account,row.Location.Platform,row.Location.Directory,preferences.BackupRoot){ReadingRoot=preferences.ArchiveRoot};SaveArchive(project);pendingArchive=project;
+            string id=ChatArchiveProject.Identity(row.Location.Platform,row.Location.Directory);var project=archiveProjects.GetValueOrDefault(id)??new ChatArchiveProject(id,row.Location.Account,row.Location.Platform,row.Location.Directory,preferences.BackupRoot){ReadingRoot=preferences.ArchiveRoot,ReadingStorage=ChatStorageFormat.Compact,BackupStorage=ChatStorageFormat.Compact};SaveArchive(project);pendingArchive=project;
             activeManifest=project.Manifest;readingDirectory=project.Reading;exportReport=null;chatStep=-1;RenderChatStage();
         }, true); chatNext.Name = "chat_next"; chatNext.IsEnabled = false;
         chatList.SelectionChanged += (_, _) => chatNext.IsEnabled = chatList.SelectedItem is AccountRow; chatFooter.Children.Add(chatNext);
@@ -114,17 +114,21 @@ public sealed partial class ShellWindow {
     private void BuildRawBackup() {
         var account = Account();
         string id=ChatArchiveProject.Identity(account.Platform,account.Directory);
+        if(!archiveProjects.ContainsKey(id))SaveArchive(new(id,account.Account,account.Platform,account.Directory,preferences.BackupRoot));
         backupInput = View.Input(archiveProjects.GetValueOrDefault(id)?.BackupRoot??preferences.BackupRoot);
+        backupInput.IsReadOnly=PendingState(archiveProjects[id])!=null||archiveProjects[id].NativeArchive!=null;backupInput.ToolTip=archiveProjects[id].NativeArchive;
         var destination = new DockPanel();
         var browse = Button("Browse", () => { string path = View.Folder(this, backupInput.Text,purpose:"raw-backup-root"); if (path != "") backupInput.Text = path; });
-        browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
-        var fields=View.Stack(View.Text(L.T("RawBackupHeading"),18),View.Text(L.T("RawBackupTaskHelp"),color:"Muted"),View.Field("AccountFolderLabel",View.Input(account.Directory,true)),View.Field("BackupTo",destination),View.Field("ChatWorkers",ChatWorkerSelector("backup",()=>backupInput.Text)));
+        browse.IsEnabled=!backupInput.IsReadOnly;browse.Margin = new Thickness(8, 0, 0, 0); DockPanel.SetDock(browse, Dock.Right); destination.Children.Add(browse); destination.Children.Add(backupInput);
+        var fields=View.Stack(View.Text(L.T("RawBackupHeading"),18),View.Text(L.T("RawBackupTaskHelp"),color:"Muted"),View.Field("AccountFolderLabel",View.Input(account.Directory,true)),View.Field("BackupTo",destination));
+        fields.Children.Add(StorageSelector(archiveProjects[id],true,ChatWorkerSelector("backup",()=>backupInput.Text)));
         chatContent.Children.Add(View.FormScroll(fields));
-        fields.Children.Add(new Expander{Header=L.T("RawBackupStrategy"),Content=View.Text(L.T("RawBackupStrategyHelp"),color:"Muted"),Margin=new Thickness(0,8,0,0)});
-        chatFooter.Children.Add(AsyncButton("StartRawBackup",()=>verifiedBackups.TryGetValue(account.Directory,out var previous)&&File.Exists(previous)?IncrementalBackupChat():BackupChat(),true));
+        var strategy=View.Stack(View.Text(L.T("RawBackupStrategyHelp"),color:"Muted"));compactNativeEncryption=null;if(archiveProjects[id].BackupStorage==ChatStorageFormat.Compact&&archiveProjects[id].NativeArchive==null&&PendingState(archiveProjects[id])==null){compactNativeEncryption=new CheckBox{Content=L.T("CompactNativeEncrypt"),Margin=new Thickness(0,8,0,0)};strategy.Children.Add(compactNativeEncryption);}
+        fields.Children.Add(new Expander{Header=L.T("RawBackupStrategy"),Content=strategy,Margin=new Thickness(0,8,0,0)});
+        chatFooter.Children.Add(AsyncButton("StartRawBackup",()=>archiveProjects[id].BackupStorage==ChatStorageFormat.Compact?StartCompactNative(archiveProjects[id]):verifiedBackups.TryGetValue(account.Directory,out var previous)&&File.Exists(previous)?IncrementalBackupChat():BackupChat(),true));
         var choices=new ContextMenu();var options=Button("RawBackupOptions",()=>choices.IsOpen=true);options.ContextMenu=choices;choices.PlacementTarget=options;
         var full=new MenuItem{Header=L.T("FullBackupOnce")};full.Click+=async(_,_)=>{try{await BackupChat();}catch(Exception ex){Error(ex);}};choices.Items.Add(full);
-        var choose=new MenuItem{Header=L.T("ChooseIncrementalBase")};choose.Click+=async(_,_)=>{try{await IncrementalBackupChat(true);}catch(Exception ex){Error(ex);}};choices.Items.Add(choose);chatFooter.Children.Add(options);
+        var choose=new MenuItem{Header=L.T("ChooseIncrementalBase")};choose.Click+=async(_,_)=>{try{await IncrementalBackupChat(true);}catch(Exception ex){Error(ex);}};choices.Items.Add(choose);options.Visibility=archiveProjects[id].BackupStorage==ChatStorageFormat.Compact?Visibility.Collapsed:Visibility.Visible;chatFooter.Children.Add(options);
         chatFooter.Children.Add(Button("GoBack", () => { chatStep = -1; RenderChatStage(); }));
     }
     private void BuildChatExport() {

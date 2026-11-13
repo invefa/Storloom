@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '2.6.0',
+    [string] $Version = '2.7.0',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -77,7 +77,7 @@ foreach ($folder in @('rules', 'docs')) {
     $files = if ($folder -eq 'rules') { @('builtin.json', 'browsers.json', 'development.json', 'desktop-apps.json',
         'communication-cn.json', 'media-cn.json', 'native-tools.json', 'sets.json', 'rules.schema.json') } else {
         @('rules.md', 'rules.zh-CN.md', 'ai-rules.md', 'ai-rules.zh-CN.md', 'chat-exporters.md', 'chat-exporters.zh-CN.md',
-            'chat-encryption.md', 'chat-encryption.zh-CN.md', 'archive-library.md', 'archive-library.zh-CN.md', 'message-display.md', 'message-display.zh-CN.md', 'themes.md', 'themes.zh-CN.md', 'quickstart.md', 'quickstart.zh-CN.md')
+            'chat-encryption.md', 'chat-encryption.zh-CN.md', 'archive-library.md', 'archive-library.zh-CN.md', 'compact-archives.md', 'compact-archives.zh-CN.md', 'message-display.md', 'message-display.zh-CN.md', 'themes.md', 'themes.zh-CN.md', 'quickstart.md', 'quickstart.zh-CN.md')
     }
     foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $repo "$folder/$file") -Destination $target -Force }
 }

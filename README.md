@@ -23,7 +23,7 @@ Extract the Windows x64 package into a writable folder and run **Storloom.exe**.
 
 - **Cleanup and archive:** choose rule sets, scan, inspect and check items, then review exact operations before executing. Every item starts unchecked. For a file cleanup item, choose the rule's action, archive while retaining originals, or archive then remove originals. Copy/move is part of the cleanup workflow; there is no separate GUI file mover.
 - **Storage analysis:** scan a mounted local drive/folder, drill into directory totals, inspect the largest 100 files, and read diagnostics. Sizes are logical lengths, not a promise of physical reclaimable bytes; hard links, compression, and sparse files can differ.
-- **Chat archives:** follow the account -> verified raw backup -> reading-copy steps. Raw backup needs no key and includes media. Supported databases export to JSONL and offline HTML with a completeness report. Previous verified backups are remembered privately.
+- **Chat archives:** manage each account and storage location separately. Create a reading archive directly from local data, or keep an independent native backup for restoration. New accounts default to compact storage; compatible folders remain available. Read and search compact archives in the app, or export a portable HTML copy. See [compact storage](docs/compact-archives.md).
 
 Language, backup/archive destinations, and enabled rule sets live in **Tools > Preferences**. **Help > Getting started** (F1) explains each workflow. About shows version, developer, and the repository. The native WPF UI uses virtualized tables, a shared theme including the title bar, and throttled progress updates.
 
