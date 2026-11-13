@@ -795,5 +795,6 @@
   "HubSourceNumber": "来源 {0}",
   "HubHistory": "历史",
   "HubHistoryUnavailable": "此接入资料没有已登记的历史记录.",
-  "HubHistoryScope": "这里展示该账号各存储位置的历史资料. 打开或恢复前请核对资料路径."
+  "HubHistoryScope": "这里展示该账号各存储位置的历史资料. 打开或恢复前请核对资料路径.",
+  "QQCaptureNoCandidate": "登录客户端未提供可验证的数据库密钥候选. 请检查是否完成登录, 以及客户端能否打开消息文件; 当前客户端版本也可能尚不受支持. 尚未验证任何密钥, 不能据此判定账号不匹配."
 }

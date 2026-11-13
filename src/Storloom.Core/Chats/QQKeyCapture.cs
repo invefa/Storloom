@@ -44,8 +44,8 @@ public static class QQKeyCapture {
         if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("qq.capture.inspect"));
         var target = Inspect(executable);
         if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("qq.capture.signature-and-function-verified", ElapsedSeconds: clock.Elapsed.TotalSeconds));
-        using var input = new FileStream(location.Database, FileMode.Open, FileAccess.Read, FileShare.Read);
-        byte[] prefix = new byte[Math.Min(input.Length, 5120)]; input.ReadExactly(prefix);
+        byte[] prefix = ReadVerificationPrefix(location.Database);
+        if(ChatDiagnostic.Enabled(diagnostics))diagnostics!.Report(new("qq.capture.database-prefix-released", ElapsedSeconds: clock.Elapsed.TotalSeconds));
         cancellation.ThrowIfCancellationRequested();
         var extractor = new KeyExtractor(target.Executable, target.FunctionRva, target.Wrapper, target.CodePrefix,
             candidate => ChatCipher.Detect(prefix, candidate, ChatPlatform.QQ) != null,
@@ -54,9 +54,16 @@ public static class QQKeyCapture {
         byte[] key = string.IsNullOrEmpty(found) ? [] : Encoding.ASCII.GetBytes(found);
         if (cancellation.IsCancellationRequested) { CryptographicOperations.ZeroMemory(key); cancellation.ThrowIfCancellationRequested(); }
         if (key.Length is not (16 or 32) || ChatCipher.Detect(prefix, key, ChatPlatform.QQ) == null) {
-            CryptographicOperations.ZeroMemory(key); throw new CryptographicException(L.T("QQCaptureFailed"));
+            CryptographicOperations.ZeroMemory(key); throw new CryptographicException(L.T(extractor.Candidates==0?"QQCaptureNoCandidate":"QQCaptureFailed"));
         }
         return key;
+    }
+    // Snapshot only. The native client must be able to reopen, write and rotate its
+    // database while logging in; retaining this handle blocks that operation.
+    internal static byte[] ReadVerificationPrefix(string database) {
+        using var input = new FileStream(database, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        byte[] prefix = new byte[Math.Min(input.Length, 5120)]; input.ReadExactly(prefix);
+        return prefix;
     }
 }
 

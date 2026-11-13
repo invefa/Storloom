@@ -795,5 +795,6 @@
   "HubSourceNumber": "Source {0}",
   "HubHistory": "History",
   "HubHistoryUnavailable": "No managed history is recorded for this connected material.",
-  "HubHistoryScope": "History includes all registered locations for this account. Check the material path before opening or restoring."
+  "HubHistoryScope": "History includes all registered locations for this account. Check the material path before opening or restoring.",
+  "QQCaptureNoCandidate": "The login client did not provide a verifiable database-key candidate. Check whether login completed and the client could open its message files. The client version may also be unsupported. No key was validated, so this result does not establish an account mismatch."
 }

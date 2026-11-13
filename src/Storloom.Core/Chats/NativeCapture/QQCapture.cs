@@ -279,6 +279,7 @@ namespace Storloom.Core.Chats.NativeCapture.QQ
         private readonly Func<byte[], bool> _verify;
         private readonly Action<string, int> _diagnostic;
         private int _candidates;
+        internal int Candidates => _candidates;
         public KeyExtractor(string qqExePath, ulong functionRva, string wrapperPath, byte[] expectedBytes, Func<byte[], bool> verify, Action<string, int> diagnostic, int timeoutSeconds)
         {
             _qqExePath = qqExePath;
@@ -535,6 +536,7 @@ namespace Storloom.Core.Chats.NativeCapture.QQ
 
                     case Native.EXIT_PROCESS_DEBUG_EVENT:
                         uint exitCode = DebugEventParser.GetExitCode(debugEvent.u);
+                        _diagnostic("qq.capture.client-exited", _candidates);
 
                         shouldContinue = false;
                         break;

@@ -55,4 +55,18 @@ public sealed class QQKeyCaptureTests {
         try {string executable=Path.Combine(directory,"QQ.exe");File.WriteAllText(executable,"Unsigned fixture");Assert.Throws<System.Security.Cryptography.CryptographicException>(()=>QQKeyCapture.Inspect(executable));}
         finally {Directory.Delete(directory,true);}
     }
+    [Theory][InlineData(128)][InlineData(5120)][InlineData(8192)]
+    public void VerificationSnapshotDoesNotBlockClientReadWriteOrDatabaseRotation(int length) {
+        string directory=Path.Combine(AppContext.BaseDirectory,"fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        try {
+            string database=Path.Combine(directory,"message.db"),rotated=Path.Combine(directory,"previous.db");byte[] original=Enumerable.Range(0,length).Select(i=>(byte)(i%251)).ToArray();File.WriteAllBytes(database,original);
+            byte[] prefix=QQKeyCapture.ReadVerificationPrefix(database);
+            Assert.Equal(original[..Math.Min(length,5120)],prefix);
+            // A client that opens for writing with no sharing must not conflict with capture.
+            using(var client=new FileStream(database,FileMode.Open,FileAccess.ReadWrite,FileShare.None)){Assert.Equal(length,client.Length);}
+            File.Move(database,rotated);File.WriteAllBytes(database,original);
+            Assert.Equal(original,File.ReadAllBytes(rotated));Assert.Equal(original,File.ReadAllBytes(database));
+        }finally{Directory.Delete(directory,true);}
+    }
+
 }
