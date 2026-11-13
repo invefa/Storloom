@@ -6,7 +6,7 @@ public sealed partial class ChatVault {
     public ChatArchiveProtection ReadProtection(){
         string file=Path.Combine(store,"protection.enc");
         if(!File.Exists(file)){
-            if(JsonFiles.Read<Configuration>(Path.Combine(root,Marker)).Version==2)throw new InvalidOperationException("Choose protection rules before updating this legacy partial vault.");
+            if(configuration.Version==2||configuration.LegacyVersion==2)throw new InvalidOperationException("Choose protection rules before updating this legacy partial vault.");
             return new(!entries.Any(e=>e.Path.StartsWith("assets/",StringComparison.Ordinal)&&!committed.ContainsKey(e.Id)));
         }
         byte[] bytes=ReadEnvelope(file,key,"protection");try{return JsonSerializer.Deserialize<ChatArchiveProtection>(bytes)??throw new InvalidDataException("Invalid protection policy.");}finally{CryptographicOperations.ZeroMemory(bytes);}

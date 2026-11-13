@@ -9,14 +9,18 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
     internal void ClearSecret() => Password=null;
     internal bool IncludeMedia { get; private set; }=true;
     internal int Workers { get; private set; }=2;
+    internal ChatVaultKeyMode KeyMode {get;private set;}
     internal ChatProtectionSelection? Selection {get;private set;}
-    public VaultPasswordWindow(bool creating,bool encrypting,string? directory=null) : base(L.T(creating?"VaultCreate":"VaultUnlock"),520,creating?480:encrypting?390:260) {
+    public VaultPasswordWindow(bool creating,bool encrypting,string? directory=null,bool passwordChange=false) : base(L.T(passwordChange?"ReadingChangePassword":creating?"VaultCreate":"VaultUnlock"),520,creating?480:encrypting?390:260) {
         MinWidth=500;MinHeight=240;SizeToContent=SizeToContent.Height;MaxHeight=SystemParameters.WorkArea.Height-40;ResizeMode=ResizeMode.NoResize;
         Caption.ShowMaximize=Caption.ShowMinimize=false;
         var layout=View.Grid(View.Fill,View.Auto);layout.Margin=new Thickness(20);Body.Children.Add(layout);var stack=new StackPanel();var scroll=View.FormScroll(stack);scroll.MaxHeight=SystemParameters.WorkArea.Height-180;View.Add(layout,scroll,0);
-        stack.Children.Add(View.Text(L.T(creating?"VaultCreateHelp":"VaultUnlockHelp"),color:"Muted"));
-        stack.Children.Add(View.Field("VaultPassword",password));
-        if(creating)stack.Children.Add(View.Field("VaultConfirmPassword",confirmation));
+        var credentialHelp=View.Text(L.T(passwordChange?"ReadingPasswordChangeHelp":creating?"VaultEnvelopeHelp":"VaultUnlockHelp"),color:"Muted");stack.Children.Add(credentialHelp);
+        var keyMode=new ComboBox{Name="vault_key_mode",ItemsSource=new[]{L.T("VaultWrappedMode"),L.T("VaultDirectMode")},SelectedIndex=0};
+        if(creating&&!passwordChange){stack.Children.Add(View.Field("VaultKeyMode",keyMode));stack.Children.Add(new Expander{Header=L.T("VaultKeyDetails"),Content=View.Text(L.T("VaultKeyModeHelp"),color:"Muted"),Margin=new Thickness(0,4,0,10)});}
+        var credentialField=View.Field(creating?"VaultPassword":"VaultCredential",password);stack.Children.Add(credentialField);
+        var confirmationField=View.Field("VaultConfirmPassword",confirmation);if(creating)stack.Children.Add(confirmationField);
+        keyMode.SelectionChanged+=(_,_)=>{bool direct=keyMode.SelectedIndex==1;credentialField.Children.OfType<Label>().Single().Content=L.T(direct?"VaultDirectKey":"VaultPassword");confirmationField.Children.OfType<Label>().Single().Content=L.T(direct?"VaultConfirmKey":"VaultConfirmPassword");credentialHelp.Text=L.T(direct?"VaultDirectKeyHelp":"VaultEnvelopeHelp");password.Clear();confirmation.Clear();};
         var media=new CheckBox{Content=L.T("VaultIncludeMedia"),IsChecked=true,Margin=new Thickness(0,12,0,0)};
         var workers=WorkerRecommendation.Selector(2,true,"encryption",()=>directory);
         if(encrypting){stack.Children.Add(media);stack.Children.Add(new Expander{Header=L.T("TaskDetails"),Content=View.Text(L.T("VaultPartialHelp"),color:"Muted"),Margin=new Thickness(0,8,0,8)});stack.Children.Add(View.Field("VaultWorkers",workers));}
@@ -45,9 +49,10 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
         }
         var error=View.Text("",color:"Muted");stack.Children.Add(error);
         var row=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,14,0,0)};
-        var cancel=new Button{Content=L.T("Cancel"),IsCancel=true};cancel.Click+=(_,_)=>Close();row.Children.Add(cancel);
-        var okay=new Button{Content=L.T(encrypting?"VaultEncrypt":"VaultUnlock"),IsDefault=true};okay.Click+=(_,_)=>{
-            if(creating&&(password.Password.Length<8||password.Password!=confirmation.Password)){error.Text=L.T("VaultPasswordMismatch");return;}
+        var cancel=new Button{Content=L.T("Cancel"),IsCancel=true};cancel.Margin=new Thickness(0,0,8,0);cancel.Click+=(_,_)=>Close();row.Children.Add(cancel);
+        var okay=new Button{Content=L.T(passwordChange?"ReadingChangePassword":encrypting?"VaultEncrypt":creating?"Apply":"VaultUnlock"),IsDefault=true};okay.Click+=(_,_)=>{
+            KeyMode=keyMode.SelectedIndex==1?ChatVaultKeyMode.DirectKey:ChatVaultKeyMode.Password;
+            if(creating){try{ChatVault.ValidateCredential(password.Password,KeyMode);}catch(ArgumentException){error.Text=L.T(KeyMode==ChatVaultKeyMode.DirectKey?"VaultDirectKeyInvalid":"VaultPasswordMismatch");return;}if(password.Password!=confirmation.Password){error.Text=L.T(KeyMode==ChatVaultKeyMode.DirectKey?"VaultDirectKeyMismatch":"VaultPasswordMismatch");return;}}
             if(password.Password.Length==0)return;
             Selection=selection();Password=password.Password;IncludeMedia=media.IsChecked==true;Workers=workers.SelectedValue is int count&&count>0?count:WorkerRecommendation.For("encryption",directory);password.Clear();confirmation.Clear();DialogResult=true;
         };row.Children.Add(okay);View.Add(layout,row,1);Loaded+=(_,_)=>password.Focus();Closed+=(_,_)=>{password.Clear();confirmation.Clear();};

@@ -5,6 +5,8 @@ using System.Text.Json;
 
 namespace Storloom.Core.Chats;
 
+public enum ChatVaultKeyMode { Password, DirectKey }
+
 public sealed record ChatVaultProgress(int ProtectedFiles,int TotalFiles,long ProtectedBytes,long TotalBytes,bool Complete){public bool SelectionComplete{get;init;}public int SelectedFiles{get;init;}}
 
 /// <summary>Password-protected, resumable encryption of a completed derived reading copy.</summary>
@@ -12,7 +14,10 @@ public sealed partial class ChatVault : IDisposable {
     public const string Marker="vault.storloom.json";
     private const int Chunk=1024*1024, HeaderSize=52, Iterations=600000;
     private static readonly byte[] Magic="SLVAULT1"u8.ToArray();
-    private sealed record Configuration(int Version,string Salt,int Iterations);
+    private sealed record Configuration(int Version,string Salt,int Iterations,string? Wrapped=null,string? KeyId=null,string Mode="legacy",int? LegacyVersion=null);
+    private Configuration configuration=null!;
+    public ChatVaultKeyMode KeyMode=>configuration.Mode=="direct-key"?ChatVaultKeyMode.DirectKey:ChatVaultKeyMode.Password;
+    public bool UsesWrappedKey=>configuration.Version==3&&configuration.Mode=="password";
     private sealed record Entry(string Path,string Id,FileStamp Stamp,bool Selected=true,string? PublicFile=null,FileStamp? PublicStamp=null);
     private sealed record Commit(string Id,string Sha256);
     private readonly string root,store;
@@ -24,10 +29,11 @@ public sealed partial class ChatVault : IDisposable {
     private bool disposed;
     public static bool Exists(string directory)=>File.Exists(Path.Combine(directory,Marker));
     private ChatVault(string directory,byte[] secret,Entry[] plan){root=directory;store=Path.Combine(root,".vault");key=secret;entries=plan;paths=entries.ToDictionary(e=>e.Path,StringComparer.Ordinal);}
-    public static ChatVault Create(string directory,ReadOnlySpan<char> password,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null,ChatProtectionSelection? selection=null) => CreateCore(directory,password,cancellation,progress,selection,null,false);
-    internal static ChatVault CreateUpdated(string directory,ReadOnlySpan<char> password,ChatVault previous,CancellationToken cancellation,IProgress<ScanProgress>? progress,ChatProtectionSelection? selection,bool reuseProtectedMedia=false) => CreateCore(directory,password,cancellation,progress,selection,previous,reuseProtectedMedia);
-    private static ChatVault CreateCore(string directory,ReadOnlySpan<char> password,CancellationToken cancellation,IProgress<ScanProgress>? progress,ChatProtectionSelection? selection,ChatVault? previous,bool reuseProtectedMedia) {
-        if(password.Length<8)throw new ArgumentException("Use a password of at least 8 characters.");
+    public static ChatVault Create(string directory,ReadOnlySpan<char> password,CancellationToken cancellation=default,IProgress<ScanProgress>? progress=null,ChatProtectionSelection? selection=null,ChatVaultKeyMode keyMode=ChatVaultKeyMode.Password) => CreateCore(directory,password,cancellation,progress,selection,null,false,keyMode);
+    internal static ChatVault CreateUpdated(string directory,ReadOnlySpan<char> password,ChatVault previous,CancellationToken cancellation,IProgress<ScanProgress>? progress,ChatProtectionSelection? selection,bool reuseProtectedMedia=false) => CreateCore(directory,password,cancellation,progress,selection,previous,reuseProtectedMedia,previous.KeyMode);
+    private static ChatVault CreateCore(string directory,ReadOnlySpan<char> password,CancellationToken cancellation,IProgress<ScanProgress>? progress,ChatProtectionSelection? selection,ChatVault? previous,bool reuseProtectedMedia,ChatVaultKeyMode keyMode) {
+        ValidateCredential(password,keyMode);
+        if(previous!=null&&keyMode==ChatVaultKeyMode.DirectKey){byte[] supplied=Convert.FromHexString(password.ToString());try{if(!CryptographicOperations.FixedTimeEquals(supplied,previous.key))throw new CryptographicException("Vault update data key mismatch.");}finally{CryptographicOperations.ZeroMemory(supplied);}}
         directory=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(directory);
         if(Exists(directory)||Directory.Exists(Path.Combine(directory,".vault")))throw new IOException("An encryption task already exists.");
         var report=JsonFiles.Read<ChatExportResult>(Path.Combine(directory,"export-report.json"));
@@ -45,7 +51,7 @@ public sealed partial class ChatVault : IDisposable {
             if(clock.Elapsed.TotalSeconds-lastReport>=.5){progress?.Report(new("chat-encryption-plan",plan.Count,plannedBytes));lastReport=clock.Elapsed.TotalSeconds;}
         }
         progress?.Report(new("chat-encryption-derive",plan.Count,plannedBytes));
-        byte[] salt=previous==null?RandomNumberGenerator.GetBytes(32):Convert.FromBase64String(JsonFiles.Read<Configuration>(Path.Combine(previous.root,Marker)).Salt),secret=Rfc2898DeriveBytes.Pbkdf2(password,salt,Iterations,HashAlgorithmName.SHA256,32);
+        byte[] secret=previous!=null?previous.key.ToArray():keyMode==ChatVaultKeyMode.DirectKey?Convert.FromHexString(password.ToString()):RandomNumberGenerator.GetBytes(32);
         var vault=new ChatVault(directory,secret,plan.ToArray());
         try {
             progress?.Report(new("chat-encryption-save-plan",plan.Count,plannedBytes));
@@ -64,7 +70,8 @@ public sealed partial class ChatVault : IDisposable {
             byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(vault.entries);
             if(bytes.Length>256*1024*1024)throw new InvalidDataException("Too many files for this vault format.");
             try{WriteEnvelope(Path.Combine(vault.store,"plan.enc"),secret,bytes,"plan");}finally{CryptographicOperations.ZeroMemory(bytes);}
-            JsonFiles.Write(Path.Combine(directory,Marker),new Configuration(selection==null?1:2,Convert.ToBase64String(salt),Iterations));
+            vault.configuration=keyMode==ChatVaultKeyMode.DirectKey?new(3,"",0,KeyId:Guid.NewGuid().ToString("N"),Mode:"direct-key"):WrapKey(secret,password);
+            JsonFiles.Write(Path.Combine(directory,Marker),vault.configuration);
             return vault;
         }catch{
             vault.Dispose();
@@ -81,10 +88,8 @@ public sealed partial class ChatVault : IDisposable {
     public static ChatVault Open(string directory,ReadOnlySpan<char> password) {
         directory=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(directory);
         string marker=Path.Combine(directory,Marker);PathPolicy.AssertNoLinks(marker);
-        var config=JsonFiles.Read<Configuration>(marker);
-        if(config.Version is not (1 or 2)||config.Iterations!=Iterations)throw new InvalidDataException("Unsupported vault format.");
-        byte[] salt=Convert.FromBase64String(config.Salt);if(salt.Length!=32)throw new InvalidDataException("Invalid vault salt.");
-        byte[] secret=Rfc2898DeriveBytes.Pbkdf2(password,salt,config.Iterations,HashAlgorithmName.SHA256,32);
+        var config=ReadConfiguration(marker);
+        byte[] secret=UnlockKey(config,password);
         try {
             string store=Path.Combine(directory,".vault");PathPolicy.AssertNoLinks(store);
             byte[] bytes=ReadEnvelope(Path.Combine(store,"plan.enc"),secret,"plan");Entry[] plan;
@@ -92,7 +97,7 @@ public sealed partial class ChatVault : IDisposable {
             var ids=new HashSet<string>(StringComparer.Ordinal);
             foreach(var entry in plan){_=TransferService.Child(directory,entry.Path);if(!System.Text.RegularExpressions.Regex.IsMatch(entry.Id,"^[a-f0-9]{32}$")||!ids.Add(entry.Id)||entry.Stamp.Bytes<0)throw new InvalidDataException("Invalid vault entry.");}
             foreach(var entry in plan)if(entry.PublicFile!=null&&(!System.Text.RegularExpressions.Regex.IsMatch(entry.PublicFile,"^[a-f0-9]{32}\\.public$")||entry.PublicStamp==null))throw new InvalidDataException("Invalid public page entry.");
-            var vault=new ChatVault(directory,secret,plan);vault.LoadCommits();return vault;
+            var vault=new ChatVault(directory,secret,plan){configuration=config};vault.LoadCommits();return vault;
         }catch{CryptographicOperations.ZeroMemory(secret);throw;}
     }
     private static IEnumerable<string> EnumeratePlainFiles(string directory,string? excluded=null){

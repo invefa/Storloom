@@ -39,7 +39,7 @@ public sealed partial class ShellWindow {
             bool encrypted=ArchiveStore.NeedsPassword(entry.Directory);
             if(action=="password"&&!encrypted)throw new InvalidOperationException(L.T("StoreNotEncrypted"));
             if(encrypted){var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;secret=unlock.Password;unlock.ClearSecret();}
-            if(action=="password"){var dialog=new VaultPasswordWindow(true,false){Owner=this};if(dialog.ShowDialog()!=true)return;newSecret=dialog.Password;dialog.ClearSecret();if(!Confirm(L.T("StorePasswordConfirm")))return;}
+            if(action=="password"){var dialog=new VaultPasswordWindow(true,false,passwordChange:true){Owner=this};if(dialog.ShowDialog()!=true)return;newSecret=dialog.Password;dialog.ClearSecret();if(!Confirm(L.T("StorePasswordConfirm")))return;}
             if(action is "backup" or "export"){
                 if(action=="backup"){string parent=PickerHistory.Folder(this,null,"store-backup-parent");if(parent=="")return;target=Path.Combine(parent,entry.Name+"-backup");}
                 else{var dialog=new StoreExportWindow(dataRoot,entry.Name){Owner=this};if(dialog.ShowDialog()!=true)return;target=dialog.Destination;exportSecret=dialog.Password;exportWorkers=dialog.Workers;dialog.ClearSecret();}

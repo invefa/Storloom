@@ -11,7 +11,7 @@ public sealed record ChatArchiveProject(string Id,string Account,ChatPlatform Pl
     public static string Identity(ChatPlatform platform,string source)=>JsonFiles.Hash(new{platform,source=PathPolicy.Normalize(source).ToUpperInvariant()});
 }
 public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false){public bool VerifyBackupBeforeReading{get;init;}=true;public bool DirectReading{get;init;}}
-public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false,bool DirectReading=false);
+public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false,bool DirectReading=false){public ChatVaultKeyMode KeyMode{get;init;}}
 /// <summary>Write immutable generations. Only the caller's verified catalog checkpoint switches the visible reader.</summary>
 public static class ChatArchiveWorkflow {
     public static ChatArchiveProject Update(ChatArchiveProject project,string taskFile,byte[]? databaseKey,string? password,int workers,
@@ -44,7 +44,7 @@ public static class ChatArchiveWorkflow {
                 if(state.Phase is not ("backup" or "source" or "workspace"))throw new IOException("The retained update workspace is missing. The previous reading generation is unchanged.");
                 ChatArchiveProtection? initialSettings=request.Protection??(previous!=null?previous.ReadProtection():null);
                 ChatArchiveWorkspace.Create(state.Work,state.Secure);JsonFiles.Write(Path.Combine(state.Work,"owner.json"),new{project.Id,state.Generation,state.PreviousReading});
-                JsonFiles.Write(Path.Combine(state.Work,"policy.json"),new SavedPolicy(request.Mode??project.Protection,initialSettings??new(project.IncludeMedia),request.Rebuild,request.ProtectionOnly));
+                JsonFiles.Write(Path.Combine(state.Work,"policy.json"),new SavedPolicy(request.Mode??project.Protection,initialSettings??new(project.IncludeMedia),request.Rebuild,request.ProtectionOnly,request.KeyMode));
             }
             if(!state.BackupOnly)PathPolicy.AssertNoLinks(state.Work);
             if(state.Secure&&!state.BackupOnly){ChatArchiveWorkspace.AssertEncrypted(state.Work);VerifyWorkspacePassword(state.Work,password!);}
@@ -104,7 +104,7 @@ public static class ChatArchiveWorkflow {
                 if(policy.Mode!=ChatArchiveProtectionMode.None){
                     if(string.IsNullOrEmpty(password))throw new InvalidOperationException("Enter the archive password to protect the update.");
                     using var next=ChatVault.Exists(stage)?ChatVault.Open(stage,password.AsSpan()):previous!=null?
-                        ChatVault.CreateUpdated(stage,password.AsSpan(),previous,cancellation,progress,policy.Settings.Selection,sparseMedia):ChatVault.Create(stage,password.AsSpan(),cancellation,progress,policy.Settings.Selection);
+                        ChatVault.CreateUpdated(stage,password.AsSpan(),previous,cancellation,progress,policy.Settings.Selection,sparseMedia):ChatVault.Create(stage,password.AsSpan(),cancellation,progress,policy.Settings.Selection,policy.KeyMode);
                     var result=next.Encrypt(policy.Settings.IncludeMedia,encryptionWorkers,progress,cancellation);
                     if(policy.Settings.IncludeMedia?!result.SelectionComplete:!next.MetadataProtected)throw new IOException("Selected archive protection is incomplete.");
                 }
@@ -130,7 +130,7 @@ public static class ChatArchiveWorkflow {
         try{if(File.Exists(file)){var saved=JsonFiles.Read<WorkspaceAuthentication>(file);if(!CryptographicOperations.FixedTimeEquals(proof,Convert.FromBase64String(saved.Proof)))throw new CryptographicException("Archive workspace password mismatch.");}else JsonFiles.Write(file,new WorkspaceAuthentication(Convert.ToBase64String(salt),Convert.ToBase64String(proof)));}
         finally{CryptographicOperations.ZeroMemory(derived);CryptographicOperations.ZeroMemory(proof);}
     }
-    private sealed record SavedPolicy(ChatArchiveProtectionMode Mode,ChatArchiveProtection Settings,bool Rebuild,bool ProtectionOnly);
+    private sealed record SavedPolicy(ChatArchiveProtectionMode Mode,ChatArchiveProtection Settings,bool Rebuild,bool ProtectionOnly,ChatVaultKeyMode KeyMode=ChatVaultKeyMode.Password);
     private static void VerifyGeneration(string directory,ChatArchiveProtectionMode mode,string? password){
         string[] required={"messages.jsonl","archive-index.js","messages.html","reader.js","reader.css","export-report.json"};
         if(mode==ChatArchiveProtectionMode.None){if(required.Any(p=>!File.Exists(Path.Combine(directory,p))))throw new IOException("Reading generation is missing required files.");if(!File.Exists(Path.Combine(directory,"messages.jsonl"))||JsonFiles.Read<ChatExportResult>(Path.Combine(directory,"export-report.json")).CanResume)throw new IOException("Reading generation is incomplete.");}

@@ -61,7 +61,7 @@ public sealed partial class ShellWindow {
         RegisterCurrentArchive();var project=archiveProjects[ChatArchiveProject.Identity(Account().Platform,Account().Directory)];
         project=project with{VerifyBackupBeforeReading=verifyChatBackup};SaveArchive(project);
         pendingArchive=project;pendingArchiveRequest=new(UseExistingBackup:true);string? password=null;
-        try{if(encryptAfterExport){var dialog=new VaultPasswordWindow(true,true){Owner=this};if(dialog.ShowDialog()!=true)return;password=dialog.Password;dialog.ClearSecret();pendingArchiveRequest=new(Protection:new(dialog.IncludeMedia),Mode:ChatArchiveProtectionMode.All,UseExistingBackup:true);}
+        try{if(encryptAfterExport){var dialog=new VaultPasswordWindow(true,true){Owner=this};if(dialog.ShowDialog()!=true)return;password=dialog.Password;dialog.ClearSecret();pendingArchiveRequest=new(Protection:new(dialog.IncludeMedia),Mode:ChatArchiveProtectionMode.All,UseExistingBackup:true){KeyMode=dialog.KeyMode};}
             await StartArchiveUpdate(password);
         }finally{password=null;}
     }
@@ -110,11 +110,12 @@ public sealed partial class ShellWindow {
         if(direct&&project.TaskFile==null){
             var protect=new CheckBox{Content=L.T("EncryptAfterExport"),IsChecked=needsPassword,IsEnabled=!existingProtected,Margin=new Thickness(0,10,0,8)};stack.Children.Add(protect);
             archivePassword=View.SecretInput();archivePassword.Name="archive_unlock";archivePasswordConfirmation=existingProtected?null:View.SecretInput();
-            var passwordFields=View.Stack(View.Field("VaultPassword",archivePassword));
-            if(!existingProtected)passwordFields.Children.Add(View.Field("VaultConfirmPassword",archivePasswordConfirmation!));
+            var credentialField=View.Field(existingProtected?"VaultCredential":"VaultPassword",archivePassword);var confirmationField=View.Field("VaultConfirmPassword",archivePasswordConfirmation??View.SecretInput());var passwordFields=View.Stack(credentialField);
+            if(!existingProtected){var mode=new ComboBox{Name="archive_key_mode",ItemsSource=new[]{L.T("VaultWrappedMode"),L.T("VaultDirectMode")},SelectedIndex=(int)request.KeyMode,Margin=new Thickness(0,4,0,8)};passwordFields.Children.Insert(0,View.Field("VaultKeyMode",mode));mode.SelectionChanged+=(_,_)=>{bool raw=mode.SelectedIndex==1;pendingArchiveRequest=(pendingArchiveRequest??request) with{KeyMode=(ChatVaultKeyMode)mode.SelectedIndex};credentialField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultDirectKey":"VaultPassword");confirmationField.Children.OfType<Label>().Single().Content=L.T(raw?"VaultConfirmKey":"VaultConfirmPassword");archivePassword.Clear();archivePasswordConfirmation?.Clear();};mode.ToolTip=L.T("VaultKeyModeHelp");}
+            if(!existingProtected)passwordFields.Children.Add(confirmationField);
             passwordFields.Visibility=needsPassword?Visibility.Visible:Visibility.Collapsed;stack.Children.Add(passwordFields);
-            protect.Click+=(_,_)=>{bool encrypted=protect.IsChecked==true;pendingArchiveRequest=request with{Mode=encrypted?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None};passwordFields.Visibility=encrypted?Visibility.Visible:Visibility.Collapsed;if(!encrypted){archivePassword.Clear();archivePasswordConfirmation?.Clear();}};
-        }else if(needsPassword){archivePassword=View.SecretInput();archivePassword.Name="archive_unlock";stack.Children.Add(View.Field("VaultPassword",archivePassword));}
+            protect.Click+=(_,_)=>{bool encrypted=protect.IsChecked==true;pendingArchiveRequest=(pendingArchiveRequest??request) with{Mode=encrypted?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None};passwordFields.Visibility=encrypted?Visibility.Visible:Visibility.Collapsed;if(!encrypted){archivePassword.Clear();archivePasswordConfirmation?.Clear();}};
+        }else if(needsPassword){archivePassword=View.SecretInput();archivePassword.Name="archive_unlock";stack.Children.Add(View.Field("VaultCredential",archivePassword));}
         if(!direct&&!request.BackupOnly){
             var verify=new CheckBox{Content=L.T("VerifyBackupBeforeExport"),Name="archive_verify_before",Margin=new Thickness(0,10,0,8),ToolTip=L.T("VerifyBackupHelp")};
             verify.Click+=(_,_)=>Guard(()=>{var p=archiveProjects[project.Id];bool enabled=verify.IsChecked==true;if(PendingState(p) is {} task){if(!PathPolicy.Under(p.TaskFile!,Path.Combine(dataRoot,"archive-tasks")))throw new IOException("Unexpected task location.");PathPolicy.AssertNoLinks(p.TaskFile!);JsonFiles.Write(p.TaskFile!,task with{VerifyBackupBeforeReading=enabled});}p=p with{VerifyBackupBeforeReading=enabled};SaveArchive(p);pendingArchive=p;});
@@ -123,7 +124,7 @@ public sealed partial class ShellWindow {
         stack.Children.Add(View.Field("ChatWorkers",ChatWorkerSelector("export",()=>readingRootInput?.Text??(direct?project.ReadingRoot:project.BackupRoot))));
         stack.Children.Add(new Expander{Header=L.T("TaskDetails"),Margin=new Thickness(0,8,0,0),Content=View.Text(L.T(direct?"DirectReadingHelp":"ArchiveAccessHelp"),color:"Muted")});
         chatFooter.Children.Add(Button("GoBack",()=>{keyInput?.Clear();archivePassword?.Clear();chatStep=-1;RenderChatStage();}));
-        chatFooter.Children.Add(AsyncButton(project.TaskFile!=null?"ArchiveContinue":direct?"StartReadingTask":"ArchiveStart",async()=>{string? password=archivePassword?.Password;if(archivePasswordConfirmation?.IsVisible==true&&!string.IsNullOrEmpty(password)&&(password.Length<8||password!=archivePasswordConfirmation.Password))throw new InvalidOperationException(L.T("VaultPasswordMismatch"));archivePassword?.Clear();archivePasswordConfirmation?.Clear();await StartArchiveUpdate(password);password=null;},true));
+        chatFooter.Children.Add(AsyncButton(project.TaskFile!=null?"ArchiveContinue":direct?"StartReadingTask":"ArchiveStart",async()=>{string? password=archivePassword?.Password;if(archivePasswordConfirmation?.IsVisible==true&&!string.IsNullOrEmpty(password)){try{ChatVault.ValidateCredential(password,pendingArchiveRequest?.KeyMode??ChatVaultKeyMode.Password);}catch(ArgumentException){throw new InvalidOperationException(L.T(pendingArchiveRequest?.KeyMode==ChatVaultKeyMode.DirectKey?"VaultDirectKeyInvalid":"VaultPasswordMismatch"));}if(password!=archivePasswordConfirmation.Password)throw new InvalidOperationException(L.T(pendingArchiveRequest?.KeyMode==ChatVaultKeyMode.DirectKey?"VaultDirectKeyMismatch":"VaultPasswordMismatch"));}archivePassword?.Clear();archivePasswordConfirmation?.Clear();await StartArchiveUpdate(password);password=null;},true));
     }
     private async Task StartArchiveUpdate(string? password){
         var project=pendingArchive??throw new InvalidOperationException();var request=pendingArchiveRequest??new();
@@ -142,7 +143,7 @@ public sealed partial class ShellWindow {
         if(project.TaskFile!=null&&File.Exists(project.TaskFile))throw new InvalidOperationException(L.T("ArchiveFinishTaskFirst"));
         if(project.Reading==null)throw new InvalidOperationException(L.T("ArchiveReadingPending"));
         if(archivePreparing||operation!=null)return;archivePreparing=true;
-        string? password=null;JsonObject index;ChatArchiveProtection? current=null;
+        string? password=null;var keyMode=ChatVaultKeyMode.Password;JsonObject index;ChatArchiveProtection? current=null;
         try{
             if(ChatVault.Exists(project.Reading)){
                 var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;password=unlock.Password;unlock.ClearSecret();
@@ -150,9 +151,9 @@ public sealed partial class ShellWindow {
             }else{string raw=await File.ReadAllTextAsync(Path.Combine(project.Reading,"archive-index.js"));index=JsonNode.Parse(raw["window.archiveIndex=".Length..].TrimEnd(';'))!.AsObject();}
             if(current!=null)project=project with{ProtectionKnown=true,Protection=current.Selection==null?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.Selected,IncludeMedia=current.IncludeMedia};
             var settings=new ArchiveProtectionWindow(project,index,current){Owner=this};if(settings.ShowDialog()!=true)return;
-            if(settings.Mode!=ChatArchiveProtectionMode.None&&password==null){var create=new VaultPasswordWindow(true,false){Owner=this};if(create.ShowDialog()!=true)return;password=create.Password;create.ClearSecret();}
+            if(settings.Mode!=ChatArchiveProtectionMode.None&&password==null){var create=new VaultPasswordWindow(true,false){Owner=this};if(create.ShowDialog()!=true)return;password=create.Password;keyMode=create.KeyMode;create.ClearSecret();}
             if(string.IsNullOrWhiteSpace(project.ReadingRoot))project=project with{ReadingRoot=Path.GetDirectoryName(project.Reading)!};
-            pendingArchive=project;pendingArchiveRequest=new(Protection:settings.Settings,Mode:settings.Mode,UseExistingBackup:true,ProtectionOnly:true,DirectReading:true);
+            pendingArchive=project;pendingArchiveRequest=new(Protection:settings.Settings,Mode:settings.Mode,UseExistingBackup:true,ProtectionOnly:true,DirectReading:true){KeyMode=keyMode};
             if(!Confirm(L.T(settings.Mode==ChatArchiveProtectionMode.None?"ArchiveRemoveProtectionConfirm":"ArchiveProtectConfirm")))return;
             await StartArchiveUpdate(password);
         }finally{password=null;archivePreparing=false;}

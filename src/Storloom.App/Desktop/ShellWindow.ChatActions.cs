@@ -192,7 +192,7 @@ public sealed partial class ShellWindow {
                 operationIncomplete = !result.Complete;
                 foreach (var issue in result.Issues) operationView.AddLog(L.T("LogIssue",issue.RuleId,issue.Path,issue.Reason));
                 if(protection?.Password!=null && !result.CanResume){
-                    using var vault=await Task.Run(()=>ChatVault.Create(target,protection.Password.AsSpan(),token,progress),token);
+                    using var vault=await Task.Run(()=>ChatVault.Create(target,protection.Password.AsSpan(),token,progress,keyMode:protection.KeyMode),token);
                     protection.ClearSecret();
                     await Task.Run(()=>vault.Encrypt(protection.IncludeMedia,protection.Workers,progress,token),token);
                 }

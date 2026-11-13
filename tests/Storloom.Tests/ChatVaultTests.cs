@@ -93,4 +93,37 @@ public sealed class ChatVaultTests : IDisposable {
     }
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
     public void Dispose(){if(Directory.Exists(root))Directory.Delete(root,true);}
+    private Dictionary<string,string> CipherHashes()=>Directory.GetFiles(Path.Combine(root,".vault")).ToDictionary(p=>Path.GetFileName(p),p=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p))));
+    [Fact]public void PasswordChangesOnlyRewrapDataKeyAndRejectStaleWriters(){
+        byte[] plain=Add("messages.jsonl",8192),media=Add("assets/later.bin",128);
+        using(var initial=ChatVault.Create(root,Password)){Assert.True(initial.UsesWrappedKey);initial.Encrypt(false);}
+        var before=CipherHashes();using var stale=ChatVault.Open(root,Password);
+        using(var vault=ChatVault.Open(root,Password)){vault.ChangePassword("replacement-password");Assert.Equal(before,CipherHashes());Assert.Equal(plain,Read(vault.OpenRead("messages.jsonl")));}
+        Assert.ThrowsAny<CryptographicException>(()=>ChatVault.Open(root,Password));Assert.Throws<IOException>(()=>stale.ChangePassword("stale-writer-password"));
+        using(var vault=ChatVault.Open(root,"replacement-password")){Assert.True(vault.UsesWrappedKey);Assert.True(vault.Encrypt().Complete);Assert.Equal(media,Read(vault.OpenRead("assets/later.bin")));}
+    }
+    [Theory][InlineData(1)][InlineData(2)]public void LegacyReadersUpgradePasswordEnvelopeWithoutReencryptingContent(int version){
+        byte[] plain=Add("messages.jsonl",8192),salt=RandomNumberGenerator.GetBytes(32),legacy=Rfc2898DeriveBytes.Pbkdf2(Password,salt,600000,HashAlgorithmName.SHA256,32);
+        try{using(var vault=ChatVault.Create(root,Convert.ToHexString(legacy),keyMode:ChatVaultKeyMode.DirectKey)){vault.Encrypt();}
+            JsonFiles.Write(Path.Combine(root,ChatVault.Marker),new{Version=version,Salt=Convert.ToBase64String(salt),Iterations=600000});var before=CipherHashes();
+            using(var vault=ChatVault.Open(root,Password)){Assert.False(vault.UsesWrappedKey);vault.ChangePassword("upgraded-password");Assert.True(vault.UsesWrappedKey);}
+            Assert.Equal(before,CipherHashes());using var reopened=ChatVault.Open(root,"upgraded-password");Assert.Equal(plain,Read(reopened.OpenRead("messages.jsonl")));Assert.ThrowsAny<CryptographicException>(()=>ChatVault.Open(root,Password));
+        }finally{CryptographicOperations.ZeroMemory(legacy);}
+    }
+    [Fact]public void DirectKeysRemainDirectAndCannotBeChangedByPasswordRewrapping(){
+        byte[] plain=Add("messages.jsonl",8192);string direct=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        using(var vault=ChatVault.Create(root,direct,keyMode:ChatVaultKeyMode.DirectKey)){Assert.Equal(ChatVaultKeyMode.DirectKey,vault.KeyMode);vault.Encrypt();Assert.Throws<InvalidOperationException>(()=>vault.ChangePassword("next-password"));}
+        using var reopened=ChatVault.Open(root,direct.ToLowerInvariant());Assert.Equal(plain,Read(reopened.OpenRead("messages.jsonl")));Assert.ThrowsAny<CryptographicException>(()=>ChatVault.Open(root,new string('0',64)));Assert.Throws<ArgumentException>(()=>ChatVault.Open(root,"short"));
+    }
+    [Theory][InlineData("KeyId")][InlineData("Wrapped")][InlineData("Iterations")][InlineData("Mode")]
+    public void RejectsTamperedKeyEnvelopes(string field){
+        Add("messages.jsonl",128);using(var vault=ChatVault.Create(root,Password))vault.Encrypt();string marker=Path.Combine(root,ChatVault.Marker);var config=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(marker))!.AsObject();
+        config[char.ToLowerInvariant(field[0])+field[1..]]=field switch{"KeyId"=>Guid.NewGuid().ToString("N"),"Wrapped"=>Convert.ToBase64String(new byte[80]),"Iterations"=>System.Text.Json.Nodes.JsonValue.Create(1),_=>"direct-key"};File.WriteAllText(marker,config.ToJsonString());Assert.ThrowsAny<Exception>(()=>ChatVault.Open(root,Password));
+    }
+
+    [Fact]public void LegacyPartialRuleRequirementsSurviveEnvelopeUpgrade(){
+        Add("messages.jsonl",128);byte[] salt=RandomNumberGenerator.GetBytes(32),legacy=Rfc2898DeriveBytes.Pbkdf2(Password,salt,600000,HashAlgorithmName.SHA256,32);
+        try{using(var vault=ChatVault.Create(root,Convert.ToHexString(legacy),keyMode:ChatVaultKeyMode.DirectKey))vault.Encrypt();JsonFiles.Write(Path.Combine(root,ChatVault.Marker),new{Version=2,Salt=Convert.ToBase64String(salt),Iterations=600000});File.Delete(Path.Combine(root,".vault","protection.enc"));using var opened=ChatVault.Open(root,Password);Assert.Throws<InvalidOperationException>(()=>opened.ReadProtection());opened.ChangePassword("upgraded-partial-password");using var upgraded=ChatVault.Open(root,"upgraded-partial-password");Assert.Throws<InvalidOperationException>(()=>upgraded.ReadProtection());}finally{CryptographicOperations.ZeroMemory(legacy);}
+    }
+
 }

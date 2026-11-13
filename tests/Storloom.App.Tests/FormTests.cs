@@ -1336,7 +1336,7 @@ public sealed class FormTests {
     public void ProtectionPasswordDialogFitsContentAndAcceptsEightCharacters() => OnUi(()=>{
         L.SetLanguage("en");Theme.Apply(new AppPreferences{ReduceMotion=true});
         var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.VaultPasswordWindow")!;
-        var window=(Window)Activator.CreateInstance(type,new object?[]{true,true,null})!;window.ShowInTaskbar=false;
+        var window=(Window)Activator.CreateInstance(type,new object?[]{true,true,null,false})!;window.ShowInTaskbar=false;
         window.Loaded+=(_,_)=>window.Dispatcher.BeginInvoke(new Action(()=>{
             var passwords=Descendants(window).OfType<PasswordBox>().ToArray();Assert.Equal(2,passwords.Length);
             foreach(var password in passwords)password.Password="eight123";
@@ -1624,6 +1624,27 @@ public sealed class FormTests {
             var tabs=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections");tabs.SelectedIndex=1;Pump();var keyPicker=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="key_account_selector");var labels=keyPicker.Items.Cast<object>().Select(i=>(string)i.GetType().GetProperty("Label")!.GetValue(i)!).ToArray();Assert.Equal(3,labels.Distinct().Count());Assert.Contains(labels,t=>t.Contains(second.Source));
             var saved=JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json"));Assert.Equal(3,saved.Length);Assert.All(saved,p=>Assert.True(Directory.Exists(p.Source)));
         }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+
+    [Theory][InlineData(AppTheme.OneDark,"zh-CN")][InlineData(AppTheme.Light,"en")]
+    public void ReadingKeyModesHaveDistinctInputRulesAndPasswordChangesHideDirectMode(AppTheme theme,string locale)=>OnUi(()=>{
+        L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.VaultPasswordWindow")!;
+        var window=(Window)Activator.CreateInstance(type,new object?[]{true,true,null,false})!;window.ShowInTaskbar=false;
+        window.Loaded+=(_,_)=>window.Dispatcher.BeginInvoke(new Action(()=>{
+            var mode=Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="vault_key_mode");mode.SelectedIndex=1;Pump();Assert.Contains(Descendants(window).OfType<Label>(),l=>Equals(l.Content,L.T("VaultDirectKey")));
+            var inputs=Descendants(window).OfType<PasswordBox>().ToArray();foreach(var input in inputs)input.Password="eight123";
+            var accept=Descendants(window).OfType<Button>().Single(b=>Equals(b.Content,L.T("VaultEncrypt")));accept.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Assert.True(window.IsVisible);Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("VaultDirectKeyInvalid"));
+            foreach(var input in inputs)input.Password=new string('a',64);Capture(window,"reading-direct-key-"+theme);accept.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }));Assert.True(window.ShowDialog());Assert.Equal(ChatVaultKeyMode.DirectKey,type.GetProperty("KeyMode",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window));type.GetMethod("ClearSecret",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null);
+        var change=(Window)Activator.CreateInstance(type,new object?[]{true,false,null,true})!;change.ShowInTaskbar=false;try{change.Show();Pump();Assert.DoesNotContain(Descendants(change).OfType<ComboBox>(),c=>c.Name=="vault_key_mode");Assert.Contains(Descendants(change).OfType<Button>(),b=>Equals(b.Content,L.T("ReadingChangePassword")));Capture(change,"reading-password-change-"+theme);}finally{change.Close();}
+    });
+
+    [Theory][InlineData(ChatVaultKeyMode.Password)][InlineData(ChatVaultKeyMode.DirectKey)]
+    public void AccountProtectionOffersQuickPasswordChangesOnlyForPasswordCredentials(ChatVaultKeyMode mode)=>OnUi(()=>{
+        string fixture=Fixture(),source=Path.Combine(fixture,"account"),reading=Path.Combine(fixture,"reader"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);Directory.CreateDirectory(reading);File.WriteAllText(Path.Combine(reading,"messages.html"),"fixture");JsonFiles.Write(Path.Combine(reading,"export-report.json"),new ChatExportResult(reading,1,1,[],true));
+        string credential=mode==ChatVaultKeyMode.Password?"fixture-password":new string('a',64);using(var vault=ChatVault.Create(reading,credential,keyMode:mode))vault.Encrypt();
+        var project=new ChatArchiveProject(ChatArchiveProject.Identity(ChatPlatform.QQ,source),"Fixture account",ChatPlatform.QQ,source,Path.Combine(fixture,"backup")){Reading=reading,Protection=ChatArchiveProtectionMode.All};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Theme=AppTheme.OneDark,Language="zh-CN",ReduceMotion=true,LogAutoShow=false});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Width=900,Height=700};try{window.Show();window.Navigate("chats");Pump();var change=Descendants(window).OfType<Button>().Single(b=>b.Name=="archive_change_password");Assert.True(change.IsVisible);Assert.Equal(mode==ChatVaultKeyMode.Password,change.IsEnabled);Capture(window,"account-reading-key-mode-"+mode);}finally{window.Close();Directory.Delete(fixture,true);}
     });
 
 }

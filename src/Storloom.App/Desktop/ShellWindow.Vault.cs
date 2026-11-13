@@ -16,11 +16,21 @@ public sealed partial class ShellWindow {
         if(!Confirm(L.T("VaultEncryptConfirm",directory))){password.ClearSecret();return;}
         try{await RunPausable(async token=>{
             var progress=Progress();progress.Report(new("chat-encryption-open",0,0));
-            using var vault=await Task.Run(()=>creating?ChatVault.Create(directory,password.Password.AsSpan(),token,progress,password.Selection):ChatVault.Open(directory,password.Password.AsSpan()),token);
+            using var vault=await Task.Run(()=>creating?ChatVault.Create(directory,password.Password.AsSpan(),token,progress,password.Selection,password.KeyMode):ChatVault.Open(directory,password.Password.AsSpan()),token);
             password.ClearSecret();
             var result=await Task.Run(()=>vault.Encrypt(password.IncludeMedia,password.Workers,progress,token),token);
             status.Text=L.T(result.Complete?"VaultComplete":result.SelectionComplete?"VaultScopeComplete":"VaultPartial",result.ProtectedFiles,result.TotalFiles);
         });if(chatStep<0)RenderChatStage();}finally{password.ClearSecret();}
+    }
+    private async Task ChangeReadingPassword(string directory){
+        if(archiveProjects.Values.Any(p=>p.Reading==directory&&PendingState(p)!=null))throw new InvalidOperationException(L.T("HubFinishPending"));
+        var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;string? oldSecret=unlock.Password;unlock.ClearSecret();
+        try{
+            using var vault=await Task.Run(()=>ChatVault.Open(directory,oldSecret.AsSpan()));oldSecret=null;
+            if(vault.KeyMode==ChatVaultKeyMode.DirectKey)throw new InvalidOperationException(L.T("VaultDirectKeyFixed"));
+            var change=new VaultPasswordWindow(true,false,passwordChange:true){Owner=this};if(change.ShowDialog()!=true)return;string? next=change.Password;change.ClearSecret();
+            try{await Run(async token=>{token.ThrowIfCancellationRequested();await Task.Run(()=>vault.ChangePassword(next.AsSpan()),token);status.Text=L.T("ReadingPasswordChanged");operationView.AddLog(status.Text);});}finally{next=null;}
+        }finally{oldSecret=null;}
     }
     private async Task DecryptConnectedReader(string directory){
         if(!ChatVault.Exists(directory))return;var dialog=new VaultPasswordWindow(false,false){Owner=this};if(dialog.ShowDialog()!=true)return;string? password=dialog.Password;dialog.ClearSecret();

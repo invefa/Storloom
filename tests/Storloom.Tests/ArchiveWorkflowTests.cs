@@ -16,6 +16,14 @@ public sealed class ArchiveWorkflowTests:IDisposable {
 
 
 
+    [Theory][InlineData(ChatVaultKeyMode.Password)][InlineData(ChatVaultKeyMode.DirectKey)]
+    public void IncrementalProtectedReadersKeepTheDataKeyAfterPasswordWrappingChanges(ChatVaultKeyMode mode){
+        string credential=mode==ChatVaultKeyMode.DirectKey?Convert.ToHexString(RandomNumberGenerator.GetBytes(32)):Password;
+        var first=Update(Project(),credential,new(DirectReading:true,Mode:ChatArchiveProtectionMode.All){KeyMode=mode});
+        if(mode==ChatVaultKeyMode.Password){using var vault=ChatVault.Open(first.Reading!,credential);vault.ChangePassword("changed-fixture-password");credential="changed-fixture-password";}
+        Database(Path.Combine(first.Source,"message_0.db"),"INSERT INTO MSG VALUES(1,1700000003,'fixture','after key wrapping update');");
+        var second=Update(first,credential,new(DirectReading:true));using var current=ChatVault.Open(second.Reading!,credential);Assert.Equal(mode,current.KeyMode);using var text=new StreamReader(current.OpenRead("messages.jsonl"));Assert.Contains("after key wrapping update",text.ReadToEnd());Assert.True(ChatVault.Exists(first.Reading!));
+    }
     [Fact]public void IndependentProtectedReadingsKeepRawBackupAbsentAndRetainTheOldCiphertext(){
         const string password="fixture-independent-password";
         var first=Update(Project(),password,request:new(DirectReading:true,Mode:ChatArchiveProtectionMode.All));Assert.Null(first.Manifest);Assert.True(ChatVault.Exists(first.Reading!));
