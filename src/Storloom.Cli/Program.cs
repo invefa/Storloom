@@ -19,7 +19,7 @@ try {
             transfer-apply --plan PLAN.json --yes [--journal FOLDER]
             chat-discover [--root FOLDER]
             chat-export --platform QQ|WeChat (--root ACCOUNT | --backup MANIFEST.json)
-                        --destination FOLDER [--key-file PRIVATE_FILE] [--workers 1..8] [--local-resources] [--local-image-keys] [--skip-backup-verification] [--resume]
+                        --destination FOLDER [--key-file PRIVATE_FILE] [--workers 1..32] [--local-resources] [--local-image-keys] [--skip-backup-verification] [--resume]
             Common options: --language en|zh-CN, --journal FOLDER, --sets ID,ID.
             No key text is accepted in command-line arguments. Chat export never deletes its source.
             """);

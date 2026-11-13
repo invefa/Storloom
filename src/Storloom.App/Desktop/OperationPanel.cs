@@ -32,6 +32,7 @@ public sealed class OperationPanel : Grid {
     private readonly TextBlock state = View.Text(""), timing = View.Text("", color: "Muted");
     private readonly ProgressBar progress = new() { Name = "operation_progress", Height = 2, MinHeight = 2, Maximum = 1, Margin = new Thickness(0),VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false,Visibility=Visibility.Collapsed };
     private readonly Stopwatch clock = new();
+    private double lastPerformanceLog;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly Button collapse;
     private ScanProgress? latest;
@@ -46,7 +47,7 @@ public sealed class OperationPanel : Grid {
     private bool earlierLinesDropped;
     public OperationPanel() {
         PauseButton=View.IconButton("M 4,2 L 4,14 M 10,2 L 10,14","PauseOperation",()=>PauseRequested?.Invoke());PauseButton.Name="pause_operation";PauseButton.Visibility=Visibility.Collapsed;
-        CancelButton=View.IconButton("M 3,3 L 13,13 M 13,3 L 3,13","Cancel",()=>CancelRequested?.Invoke());CancelButton.Name="cancel_operation";CancelButton.Visibility=Visibility.Collapsed;
+        CancelButton=View.IconButton("M 3,3 L 13,13 M 13,3 L 3,13","StopOperation",()=>CancelRequested?.Invoke());CancelButton.Name="cancel_operation";CancelButton.Visibility=Visibility.Collapsed;
         Margin = new Thickness(10,0,8,0);ControlFeedback.SetEnabled(Log,false);Log.Visibility=Visibility.Collapsed;
         RowDefinitions.Add(new RowDefinition{Height=new GridLength(32)});RowDefinitions.Add(new RowDefinition{Height=new GridLength(0)});RowDefinitions.Add(new RowDefinition{Height=View.Fill});
         var row=View.Grid(View.Fill);row.ColumnDefinitions.Add(new ColumnDefinition{Width=View.Fill});row.ColumnDefinitions.Add(new ColumnDefinition{Width=View.Auto});row.ColumnDefinitions.Add(new ColumnDefinition{Width=View.Auto});
@@ -73,7 +74,7 @@ public sealed class OperationPanel : Grid {
         Log.PreviewMouseWheel += (_, _) => PauseFollowing();
         Log.PreviewMouseLeftButtonDown += (_, _) => PauseFollowing();
         Log.PreviewKeyDown += (_, e) => { if (e.Key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End) PauseFollowing(); };
-        timer.Tick += (_, _) => RefreshTiming(); Unloaded += (_, _) => timer.Stop();
+        timer.Tick += (_, _) => RefreshTiming(); Unloaded += (_, _) => timer.Stop();Loaded+=(_,_)=>{if(clock.IsRunning)timer.Start();};
         DebugToggle.Checked += (_, _) => { AddLog(L.T("DebugEnabled")); DebugLoggingChanged?.Invoke(true); };
         DebugToggle.Unchecked += (_, _) => { AddLog(L.T("DebugDisabled")); DebugLoggingChanged?.Invoke(false); };
     }
@@ -138,9 +139,17 @@ public sealed class OperationPanel : Grid {
     }
     private double lastHeartbeat;
     private bool paused;
+    private bool stopping;private double stopStarted,lastStopLog;
+    public void BeginStopping(){
+        if(stopping)return;stopping=true;timer.Start();stopStarted=lastStopLog=clock.Elapsed.TotalSeconds;
+        if(paused)SetPaused(false);
+        state.Text=L.T("OperationStopping");AddLog(state.Text);PauseButton.IsEnabled=CancelButton.IsEnabled=false;
+        progress.BeginAnimation(ProgressBar.ValueProperty,null);progress.IsIndeterminate=true;
+        RefreshTiming();
+    }
     public void SetPaused(bool value){paused=value;if(value)clock.Stop();else clock.Start();RefreshTiming();}
     public void Start() {
-        paused=false;lastHeartbeat=-2;seenPhases.Clear();
+        stopping=false;paused=false;lastHeartbeat=-2;lastPerformanceLog=0;PauseButton.IsEnabled=CancelButton.IsEnabled=true;seenPhases.Clear();
         latest = null;archiveStep=0; phase = detail = ""; phaseStart = 0; clock.Restart(); timer.Start();
         progress.BeginAnimation(ProgressBar.ValueProperty, null); progress.Value = 0;
         progress.Tag = Theme.ReduceMotion ? "reduced" : "animate";
@@ -150,6 +159,11 @@ public sealed class OperationPanel : Grid {
     }
     public void Report(ScanProgress value) {
         latest = value;
+        if(stopping){state.Text=L.T("OperationStopping")+" | "+Phase(value.RuleId);state.ToolTip=state.Text;return;}
+        if(value.Performance is {} metrics&&clock.Elapsed.TotalSeconds-lastPerformanceLog>=10){
+            lastPerformanceLog=clock.Elapsed.TotalSeconds;
+            AddLog(L.T("ArchivePerformance",metrics.Commits,metrics.PackSeconds,metrics.WriteSeconds,metrics.IndexSeconds,View.Size(metrics.PackBytes)));
+        }
         archiveStep=value.RuleId switch{"chat-source-lock"=>1,"archive-backup"=>1,"archive-workspace-plan" or "archive-workspace"=>2,"archive-reading"=>3,"archive-protect"=>4,"archive-publish"=>5,_=>archiveStep};
         if (phase != value.RuleId) { phase = value.RuleId; phaseStart = clock.Elapsed.TotalSeconds; phaseStartDone = value.TotalBytes is >0 ? value.Bytes : value.Files; if(seenPhases.Add(phase))AddLog(L.T(PhaseKey(phase))); if(DebugToggle.IsChecked==true)AddDiagnostic(new("phase." + phase, Bytes: value.Bytes, ElapsedSeconds: phaseStart)); }
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; if(DebugToggle.IsChecked==true)AddDebugDetail("file."+phase,detail); }
@@ -178,6 +192,7 @@ public sealed class OperationPanel : Grid {
     }
     private void RefreshTiming() {
         string elapsed = clock.Elapsed.ToString(@"hh\:mm\:ss");
+        if(stopping){double stopSeconds=clock.Elapsed.TotalSeconds-stopStarted;timing.Text=L.T("StopWaiting",TimeSpan.FromSeconds(stopSeconds).ToString(@"hh\:mm\:ss"));if(clock.Elapsed.TotalSeconds-lastStopLog>=5){lastStopLog=clock.Elapsed.TotalSeconds;AddLog(L.T("StopWaiting",TimeSpan.FromSeconds(stopSeconds).ToString(@"hh\:mm\:ss")));}return;}
         if(paused){timing.Text=L.T("PauseOperation")+" | "+L.T("ElapsedOnly",elapsed);return;}
         if (latest == null) { timing.Text = L.T("ElapsedOnly", elapsed); return; }
         double seconds = Math.Max(0.1, clock.Elapsed.TotalSeconds - phaseStart);
@@ -187,7 +202,7 @@ public sealed class OperationPanel : Grid {
         timing.Text = L.T("OperationTiming", elapsed, eta, latest.TotalBytes is >0 ? View.Size((long)(advanced / seconds)) + "/s" : $"{advanced / seconds:N0} /s");
     }
     public void Finish(string summary, bool complete) {
-        timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
+        stopping=false;timer.Stop(); clock.Stop(); progress.IsIndeterminate = false; progress.BeginAnimation(ProgressBar.ValueProperty, null);
         progress.Visibility = Visibility.Collapsed;
         if (complete) progress.Value = 1; state.Text = summary; timing.Text = L.T("ElapsedOnly", clock.Elapsed.ToString(@"hh\:mm\:ss")); AddLog(L.T(complete?"OperationCompletedLog":"OperationStoppedLog"));
         if(DebugToggle.IsChecked==true)AddDiagnostic(new(complete ? "operation.complete" : "operation.stopped", ElapsedSeconds: clock.Elapsed.TotalSeconds));
@@ -195,6 +210,8 @@ public sealed class OperationPanel : Grid {
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
+        "archive-query-publish"=>"PhaseQueryPublish",
+        "archive-workspace-retained"=>"PhaseWorkRetained",
         "archive-input-cleanup"=>"PhaseCompactCleanup","archive-query-copy"=>"PhaseCompactQueryCopy","archive-native-pack"=>"PhaseArchiveBackup","archive-native-restore"=>"PhaseCompactRestore","archive-repack-messages"=>"PhaseStoreMessages","archive-repack-files"=>"PhaseCompactRepack","archive-compact-unchanged"=>"PhaseCompactUnchanged",
         "archive-store-backup"=>"PhaseArchiveBackup","archive-query-replay"=>"PhaseStoreReplay","archive-migration-plan"=>"PhaseStorePlan","archive-migration-unlock"=>"PhaseStoreUnlock","archive-migration-messages"=>"PhaseStoreMessages","archive-migration-files"=>"PhaseStoreFiles","archive-reader-export"=>"PhaseStoreExport","archive-verify"=>"PhaseStoreVerify",
         "archive-workspace-plan"=>"PhaseArchiveWorkspacePlan","archive-backup"=>"PhaseArchiveBackup","archive-workspace"=>"PhaseArchiveWorkspace","archive-reading"=>"PhaseArchiveReading","archive-protect"=>"PhaseArchiveProtect","archive-publish"=>"PhaseArchivePublish","archive-reuse-encrypted"=>"PhaseArchiveReuse",

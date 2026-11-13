@@ -11,7 +11,8 @@ internal sealed class KeyPasswordWindow : ThemeWindow {
             if(password.Password.Length<8||(creating&&password.Password!=confirmation.Password)){error.Text=L.T("VaultPasswordMismatch");return;}
             Password=password.Password;password.Clear();confirmation.Clear();DialogResult=true;
         },true));buttons.HorizontalAlignment=HorizontalAlignment.Right;buttons.Margin=new Thickness(0,12,0,0);stack.Children.Add(buttons);
-        ((Button)buttons.Children[0]).IsCancel=true;((Button)buttons.Children[1]).IsDefault=true;
+        ((Button)buttons.Children[0]).IsCancel=true;((Button)buttons.Children[1]).IsDefault=true;var accept=(Button)buttons.Children[1];
+        void Validate(){accept.IsEnabled=password.Password.Length>=8&&(!creating||password.Password==confirmation.Password);accept.ToolTip=accept.IsEnabled?null:L.T("RequiredCredential");}password.PasswordChanged+=(_,_)=>Validate();confirmation.PasswordChanged+=(_,_)=>Validate();Validate();
         Closed+=(_,_)=>{password.Clear();confirmation.Clear();};Loaded+=(_,_)=>password.Focus();
     }
     internal void ClearSecret()=>Password=null;

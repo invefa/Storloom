@@ -296,7 +296,7 @@
   "ReaderNotice": "离线阅读版. 优先显示已有的联系人备注和昵称, 未识别的名称保留账号标识. 仅展示已识别的本地媒体",
   "ReaderRuntimeMissing": "内置预览需要 Microsoft Edge WebView2 Runtime. 也可以在浏览器中打开 messages.html",
   "OpenReaderArchive": "打开聊天阅读版...",
-  "ChatWorkersHelp": "备份和导出支持 1-8 个工作线程. 磁盘争用可能抵消并行收益, 建议从 2-4 个开始, 比较持续吞吐量后再调整.",
+  "ChatWorkersHelp": "备份和导出支持 1-32 个工作线程. 磁盘争用可能抵消并行收益, 建议从 2-4 个开始, 比较持续吞吐量后再调整.",
   "HideOperationLog": "收起日志",
   "ShowOperationLog": "展开日志",
   "ReadingCoverage": "联系人 {0} | 本地媒体 {1} | 不可用媒体 {2} | 未支持消息 {3}",
@@ -842,5 +842,18 @@
   "AccountAliasesHelp": "别名仅用于显示. 同一账号的来源共用账号别名, 来源别名单独保存. 原账号标识, 路径及密钥不变. 留空可恢复原显示名称.",
   "AccountAlias": "账号别名",
   "SourceAlias": "来源别名",
-  "AliasInvalid": "别名不能包含控制字符."
+  "AliasInvalid": "别名不能包含控制字符.",
+  "ChatWorkRoot": "工作目录",
+  "ChatWorkRootHelp": "可选. 建议选择 SSD, 存放数据库暂存和紧凑写入索引. 自动按 Storloom/账号标识分类. 留空使用输出位置. 中断任务沿用原工作目录. 受保护明文需要 EFS. 完成后的归档不依赖工作目录.",
+  "ArchivePerformance": "紧凑归档累计: {0:N0} 次提交 | 打包/压缩/加密: {1:F1}s | 数据包持久写入: {2:F1}s | 索引准备/SQL/IO: {3:F1}s | 数据包: {4}",
+  "RequiredFolder": "请为{0}选择完整目录路径.",
+  "RequiredCredential": "请填写有效的阅览密码或直接密钥, 并完成确认输入.",
+  "StopOperation": "停止任务",
+  "StopOperationHelp": "停止并保留已完成步骤和可用检查点. 暂停会保持任务打开; 停止会释放任务, 支持续传的任务可稍后继续.",
+  "OperationStopping": "正在停止任务. 等待当前步骤结束或回滚, 保留已完成步骤和检查点.",
+  "OperationStoppingShort": "正在停止...",
+  "StopWaiting": "仍在停止, 等待当前步骤退出: {0}.",
+  "TaskStopped": "任务已停止. 已完成步骤和可用检查点已保留.",
+  "PhaseQueryPublish": "正在复制并验证完成的查询索引",
+  "PhaseWorkRetained": "归档已完成, 正在占用的临时工作目录暂时保留"
 }

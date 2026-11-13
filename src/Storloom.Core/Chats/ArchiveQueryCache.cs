@@ -9,7 +9,16 @@ namespace Storloom.Core.Chats;
 internal sealed class ArchiveQueryCache:IDisposable {
     internal sealed record Message(string Id,string Conversation,long Timestamp,string Text,string Json);
     private readonly ArchiveSqlite index;
+    // Fresh projections can reject missing IDs without a random B-tree read per
+    // message. False positives only cause a normal lookup; rollback is harmless.
+    private readonly System.Collections.BitArray? freshIds;
+    internal int Workers{get;set;}=2;
+    private static (int A,int B) IdBits(string id){var hash=System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(id));return ((int)(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(hash)&0x3ffffff),(int)(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(hash.AsSpan(4))&0x3ffffff));}
+    private bool MayContain(string id){if(freshIds==null)return true;var (a,b)=IdBits(id);return freshIds[a]&&freshIds[b];}
+    private void Remember(string id){if(freshIds==null)return;var (a,b)=IdBits(id);freshIds[a]=freshIds[b]=true;}
     internal string DatabasePath{get;}
+    internal void EnableWriteAhead()=>index.EnableWriteAhead();
+    internal void Checkpoint()=>index.Checkpoint();
     internal ArchiveQueryCache(string directory,bool protectedArchive,byte[]? key=null){
         PathPolicy.AssertNoLinks(directory);if(protectedArchive&&key==null)throw new IOException("Protected archive query cache requires an encryption key.");
         string path=Path.Combine(directory,"query.db");DatabasePath=path;if(File.Exists(path))PathPolicy.AssertNoLinks(path);
@@ -27,6 +36,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
             // Caller-generated Unicode tokens allow single-character and mixed-script queries.
             // The index stores postings only; display data remains in current_messages.
             index.Execute("CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(tokens,content='',detail=none,columnsize=0)");
+            if(index.Query("SELECT 1 FROM current_messages LIMIT 1").Count==0)freshIds=new(1<<26);
         }catch{index.Dispose();throw;}
     }
     internal string? Applied=>index.Query("SELECT v FROM projection WHERE k='applied'").SingleOrDefault()?[0];
@@ -35,7 +45,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
     internal long MessageCount=>long.Parse(index.Query("SELECT count(*) FROM current_messages").Single()[0],CultureInfo.InvariantCulture);
     internal int AssetCount=>int.Parse(index.Query("SELECT count(*) FROM archive_files WHERE path>='assets/' AND path<'assets0'").Single()[0],CultureInfo.InvariantCulture);
     internal bool HasObject(string id)=>index.Query("SELECT 1 FROM archive_objects WHERE id=?",id).Count!=0;
-    internal Message? Find(string id)=>index.Query("SELECT body FROM current_messages WHERE id=?",id).Select(r=>Read(r[0])).SingleOrDefault();
+    internal Message? Find(string id)=>!MayContain(id)?null:index.Query("SELECT body FROM current_messages WHERE id=?",id).Select(r=>Read(r[0])).SingleOrDefault();
     internal IReadOnlyList<(string Key,long Count)> Conversations()=>index.Query("SELECT conversation,count(*) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture))).ToArray();
     internal IReadOnlyList<Message> PageAt(string conversation,int page,int size=300){
         if(page<0||size is <1 or >10000)throw new ArgumentOutOfRangeException(nameof(page));
@@ -78,19 +88,22 @@ internal sealed class ArchiveQueryCache:IDisposable {
             try{
                 batch=indexed==null?decode(log.Read(commit.Id).Payload):projection!(indexed);
                 Validate(batch);
+                var prepared=new (string Normalized,string Tokens,byte[] Body)[batch.Messages.Length];
+                Parallel.For(0,prepared.Length,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(Workers,1,32),CancellationToken=cancellation},n=>{var message=batch.Messages[n];prepared[n]=(Normalize(message.Text),Tokens(message.Text),Body(message));});
                 index.Execute("BEGIN");
                 try{
-                    foreach(var message in batch.Messages){
+                    for(int messageIndex=0;messageIndex<batch.Messages.Length;messageIndex++){
+                        var message=batch.Messages[messageIndex];var ready=prepared[messageIndex];
                         OperationPause.Check(cancellation);
                         if(string.IsNullOrEmpty(message.Id)||message.Text==null||message.Json==null||message.Conversation==null)throw new InvalidDataException("Invalid archive message.");
-                        var previous=index.Query("SELECT rowid,body FROM current_messages WHERE id=?",message.Id).SingleOrDefault();
+                        var previous=MayContain(message.Id)?index.Query("SELECT rowid,body FROM current_messages WHERE id=?",message.Id).SingleOrDefault():null;
+                        string row;
                         if(previous!=null){
                             index.Execute("INSERT INTO message_search(message_search,rowid,tokens) VALUES('delete',?,?)",previous[0],Tokens(Read(previous[1]).Text));
-                            index.ExecuteValues("UPDATE current_messages SET conversation=?,time=CAST(? AS INTEGER),text=?,body=? WHERE id=?",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),Normalize(message.Text),Body(message),message.Id);
-                        }else index.ExecuteValues("INSERT INTO current_messages VALUES(?,?,CAST(? AS INTEGER),?,?)",message.Id,message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),Normalize(message.Text),Body(message));
-                        string row=index.Query("SELECT rowid FROM current_messages WHERE id=?",message.Id).Single()[0];
-                        index.Execute("INSERT INTO message_search(rowid,tokens) VALUES(?,?)",row,Tokens(message.Text));
-                        index.Execute("DELETE FROM message_references WHERE message_id=?",message.Id);
+                            index.ExecuteValues("UPDATE current_messages SET conversation=?,time=CAST(? AS INTEGER),text=?,body=? WHERE id=?",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),ready.Normalized,ready.Body,message.Id);row=previous[0];
+                            index.Execute("DELETE FROM message_references WHERE message_id=?",message.Id);
+                        }else{index.ExecuteValues("INSERT INTO current_messages VALUES(?,?,CAST(? AS INTEGER),?,?)",message.Id,message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),ready.Normalized,ready.Body);row=index.LastInsertRowId.ToString(CultureInfo.InvariantCulture);Remember(message.Id);}
+                        index.Execute("INSERT INTO message_search(rowid,tokens) VALUES(?,?)",row,ready.Tokens);
                         using var raw=JsonDocument.Parse(message.Json);
                         if(raw.RootElement.ValueKind==JsonValueKind.Object){
                             void Reference(string property,string prefix){if(raw.RootElement.TryGetProperty(property,out var value)&&value.ValueKind==JsonValueKind.String&&value.GetString() is{Length:>0} reference&&reference!="0")index.Execute("INSERT OR IGNORE INTO message_references VALUES(?,?,?)",message.Conversation,prefix+reference,message.Id);}

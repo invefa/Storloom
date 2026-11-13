@@ -41,7 +41,7 @@ public sealed record ChatExportResult(string Directory, long Messages, int Datab
 }
 
 public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageConfiguration = false, bool downloadQQGroupAvatars = false, bool? defaultReaderDark = null) {
-    private readonly int parallelism = maximumParallelism is >= 1 and <= 8 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
+    private readonly int parallelism = maximumParallelism is >= 1 and <= 32 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     internal ChatExportResult ExportReadLockedSource(ChatSourceLease source,string destination,ChatPlatform platform,
         byte[]? secret,IProgress<ScanProgress>? progress,CancellationToken cancellation,Func<ChatMessage,ChatMessage?>? selectMessage=null,Func<string,bool>? includeDatabase=null,bool resume=false)=>
         ExportCore(source.Root,destination,platform,secret,progress,cancellation,false,null,accountName:Path.GetFileName(source.IdentityRoot),resume:resume,selectMessage:selectMessage,includeDatabase:includeDatabase,sourceProof:JsonFiles.Hash(new{Pipeline=1,Language=L.Language,LocalImages=useLocalImageConfiguration,SourceIdentity=source.IdentityRoot,Databases=source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}),sourceIdentityRoot:source.IdentityRoot);
@@ -245,7 +245,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                     if (selectMessage != null) message = selectMessage(message);
                     if (message != null) archive.Add(message);
                     if (assembled % 300 == 0) progress?.Report(new("chat-reader", (int)Math.Min(assembled, int.MaxValue), 0,
-                        TotalFiles: (int)Math.Min(messages, int.MaxValue), Detail: message?.Conversation));
+                        TotalFiles: (int)Math.Min(messages, int.MaxValue), Detail: message?.Conversation){Performance=compact?.Performance});
                 }
             }
             archive.Finish(progress);

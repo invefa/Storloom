@@ -59,7 +59,7 @@ public sealed partial class ShellWindow {
         materialTabs.Items.Add(new TabItem{Header=L.T("ReadingTaskHeading"),Content=scroll,Style=(Style)FindResource("SectionTab")});
         materialTabs.Items.Add(new TabItem{Header=L.T("RawBackupHeading"),Content=View.FormScroll(backupDetails),Style=(Style)FindResource("SectionTab")});
         var historyTab=new TabItem{Header=L.T("HubHistory"),Style=(Style)FindResource("SectionTab")};materialTabs.Items.Add(historyTab);
-        materialTabs.SelectionChanged+=(_,e)=>{if(ReferenceEquals(e.Source,materialTabs)&&materialTabs.SelectedItem==historyTab&&selectedHomeSource!=null)historyTab.Content=BuildAccountHistory(selectedHomeSource);};
+        materialTabs.SelectionChanged+=(_,e)=>{if(ReferenceEquals(e.Source,materialTabs)&&selectedHomeSource!=null)materialTabsBySource[selectedHomeSource.Id]=materialTabs.SelectedIndex;if(ReferenceEquals(e.Source,materialTabs)&&materialTabs.SelectedItem==historyTab&&selectedHomeSource!=null)historyTab.Content=BuildAccountHistory(selectedHomeSource);};
         var details=readingDetails;
         bool changingSource=false;
         picker.SelectionChanged+=(_,_)=>{if(picker.SelectedItem!=null)archiveTable.SelectedItem=picker.SelectedItem;};
@@ -108,7 +108,7 @@ public sealed partial class ShellWindow {
             var fresh=AsyncButton("CompactCreateFresh",()=>PrepareArchiveUpdate(project!,new(DirectReading:true){CreateCompact=true}));fresh.Visibility=project!=null&&readable&&!compactReader&&local?Visibility.Visible:Visibility.Collapsed;fresh.IsEnabled=!pending;fresh.ToolTip=L.T("CompactFreshHelp");
             var advancedActions=View.Row(format,packed,statistics,reorganize,fresh);advancedActions.Margin=new Thickness(0,8,0,0);
             var advanced=new Expander{Header=L.T("HubAdvanced"),Content=advancedActions,Margin=new Thickness(0,6,0,4),Visibility=readable?Visibility.Visible:Visibility.Collapsed};
-            readingDetails.Children.Add(advanced);if(materialTabs.SelectedItem==historyTab)historyTab.Content=BuildAccountHistory(item);
+            readingDetails.Children.Add(advanced);materialTabs.SelectedIndex=materialTabsBySource.GetValueOrDefault(item.Id);if(materialTabs.SelectedItem==historyTab)historyTab.Content=BuildAccountHistory(item);
         }
         sourcePicker.SelectionChanged+=(_,_)=>{if(!changingSource)Selection(false);};
         archiveTable.SelectionChanged+=(_,_)=>Selection();archiveTable.SelectedItem=groups.FirstOrDefault(g=>g.Sources!.Any(r=>r.Id==selectedArchiveId))??groups.FirstOrDefault();Selection();

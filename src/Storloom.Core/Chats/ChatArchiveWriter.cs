@@ -64,7 +64,7 @@ internal sealed class ChatArchiveWriter : IDisposable {
         this.avatars=avatars==null?new(StringComparer.Ordinal):new(avatars,StringComparer.Ordinal);
         this.downloadQQGroupAvatars=downloadQQGroupAvatars;
         this.voices = voices;
-        this.pageParallelism = pageParallelism is >= 1 and <= 8 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
+        this.pageParallelism = pageParallelism is >= 1 and <= 32 ? pageParallelism : throw new ArgumentOutOfRangeException(nameof(pageParallelism));
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination); work = PathPolicy.Normalize(work);
         this.source = source; this.destination = destination; this.work = work; this.contacts = contacts;
         this.verified = verified; this.cancellation = cancellation;

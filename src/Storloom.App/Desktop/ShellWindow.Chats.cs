@@ -54,7 +54,9 @@ public sealed partial class ShellWindow {
         RenderChatStage();
     }
     private void RenderChatStage() {
-        if(readingRootInput!=null&&pendingArchive!=null)pendingArchive=pendingArchive with{ReadingRoot=readingRootInput.Text};readingRootInput=null;
+        CaptureAccessDraft();
+        if(backupInput!=null&&rawDraftOwner!=null&&archiveProjects.TryGetValue(rawDraftOwner,out var rawProject)){var selected=selectedArchiveId;var saved=rawProject with{BackupRoot=backupInput.Text};SaveArchive(saved);if(pendingArchive?.Id==rawDraftOwner)pendingArchive=saved;selectedArchiveId=selected;}rawDraftOwner=null;
+        readingRootInput=null;
         archivePassword?.Clear();archivePasswordConfirmation?.Clear();archivePassword=null;archivePasswordConfirmation=null;
         chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null; chatUpdate = null;
         syncingChatSections=true;
@@ -113,7 +115,7 @@ public sealed partial class ShellWindow {
     }
     private void BuildRawBackup() {
         var account = Account();
-        string id=ChatArchiveProject.Identity(account.Platform,account.Directory);
+        string id=ChatArchiveProject.Identity(account.Platform,account.Directory);rawDraftOwner=id;
         if(!archiveProjects.ContainsKey(id))SaveArchive(ChatArchiveProject.Create(account.Account,account.Platform,account.Directory,preferences.BackupRoot));
         backupInput = View.Input(archiveProjects.GetValueOrDefault(id)?.BackupRoot??preferences.BackupRoot);
         backupInput.IsReadOnly=PendingState(archiveProjects[id])!=null||archiveProjects[id].BackupStorage==ChatStorageFormat.Compact&&archiveProjects[id].NativeArchive!=null;backupInput.ToolTip=backupInput.IsReadOnly?archiveProjects[id].NativeArchive:null;
@@ -123,9 +125,11 @@ public sealed partial class ShellWindow {
         var fields=View.Stack(View.Text(L.T("RawBackupHeading"),18),View.Text(L.T("RawBackupTaskHelp"),color:"Muted"),View.Field("AccountFolderLabel",View.Input(account.Directory,true)),View.Field("BackupTo",destination));
         fields.Children.Add(StorageSelector(archiveProjects[id],true,ChatWorkerSelector("backup",()=>backupInput.Text)));
         chatContent.Children.Add(View.FormScroll(fields));
-        var strategy=View.Stack(View.Text(L.T("RawBackupStrategyHelp"),color:"Muted"));compactNativeEncryption=null;if(archiveProjects[id].BackupStorage==ChatStorageFormat.Compact&&archiveProjects[id].NativeArchive==null&&PendingState(archiveProjects[id])==null){compactNativeEncryption=new CheckBox{Content=L.T("CompactNativeEncrypt"),Margin=new Thickness(0,8,0,0)};strategy.Children.Add(compactNativeEncryption);}
+        var strategy=View.Stack(WorkDirectoryField(archiveProjects[id]),View.Text(L.T("RawBackupStrategyHelp"),color:"Muted"));compactNativeEncryption=null;if(archiveProjects[id].BackupStorage==ChatStorageFormat.Compact&&archiveProjects[id].NativeArchive==null&&PendingState(archiveProjects[id])==null){compactNativeEncryption=new CheckBox{Content=L.T("CompactNativeEncrypt"),Margin=new Thickness(0,8,0,0)};strategy.Children.Add(compactNativeEncryption);}
         fields.Children.Add(new Expander{Header=L.T("RawBackupStrategy"),Content=strategy,Margin=new Thickness(0,8,0,0)});
-        chatFooter.Children.Add(AsyncButton("StartRawBackup",()=>archiveProjects[id].BackupStorage==ChatStorageFormat.Compact?StartCompactNative(archiveProjects[id]):verifiedBackups.TryGetValue(account.Directory,out var previous)&&File.Exists(previous)?IncrementalBackupChat():BackupChat(),true));
+        var backupStart=AsyncButton("StartRawBackup",()=>archiveProjects[id].BackupStorage==ChatStorageFormat.Compact?StartCompactNative(archiveProjects[id]):verifiedBackups.TryGetValue(account.Directory,out var previous)&&File.Exists(previous)?IncrementalBackupChat():BackupChat(),true);backupStart.Name="raw_backup_start";
+        var backupHint=View.Text("",12,"Muted");backupHint.Margin=new Thickness(0,8,0,0);fields.Children.Add(backupHint);
+        void ValidateBackup(){bool valid=ValidFolderText(backupInput.Text);backupStart.IsEnabled=valid;backupHint.Text=valid?"":L.T("RequiredFolder",L.T("BackupTo"));backupHint.Visibility=valid?Visibility.Collapsed:Visibility.Visible;}backupInput.TextChanged+=(_,_)=>ValidateBackup();ValidateBackup();chatFooter.Children.Add(backupStart);
         var choices=new ContextMenu();var options=Button("RawBackupOptions",()=>choices.IsOpen=true);options.ContextMenu=choices;choices.PlacementTarget=options;
         var full=new MenuItem{Header=L.T("FullBackupOnce")};full.Click+=async(_,_)=>{try{await BackupChat();}catch(Exception ex){Error(ex);}};choices.Items.Add(full);
         var choose=new MenuItem{Header=L.T("ChooseIncrementalBase")};choose.Click+=async(_,_)=>{try{await IncrementalBackupChat(true);}catch(Exception ex){Error(ex);}};choices.Items.Add(choose);options.Visibility=archiveProjects[id].BackupStorage==ChatStorageFormat.Compact?Visibility.Collapsed:Visibility.Visible;chatFooter.Children.Add(options);
@@ -181,7 +185,7 @@ public sealed partial class ShellWindow {
             chatStep = 3; readingDirectory = exportReport = null; SetCapturedKey(null); RenderChatStage();
         })); chatFooter.Children.Add(Button("GoBack", () => { chatStep = -1; RenderChatStage(); }));
     }
-    private int ChatWorkers(string task,string? path)=>preferences.ChatWorkersAutomatic?WorkerRecommendation.For(task,path):Math.Clamp(preferences.ChatParallelism,1,8);
+    private int ChatWorkers(string task,string? path)=>preferences.ChatWorkersAutomatic?WorkerRecommendation.For(task,path):Math.Clamp(preferences.ChatParallelism,1,32);
     private ComboBox ChatWorkerSelector(string task,Func<string?> path){var choice=WorkerRecommendation.Selector(preferences.ChatParallelism,preferences.ChatWorkersAutomatic,task,path);choice.SelectionChanged+=(_,_)=>{if(choice.Tag is not true&&choice.SelectedValue is int count)preferences=preferences with{ChatParallelism=count>0?count:preferences.ChatParallelism,ChatWorkersAutomatic=count==0};};return choice;}
     private void UpdateExportEnabled(bool encrypted) {
         chatNext.IsEnabled = !encrypted || capturedKey != null || (keyInput?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(keyInput.Password));

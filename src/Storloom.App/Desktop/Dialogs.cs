@@ -28,6 +28,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
         }
         taskGroup=true;
         var backup = FolderField("BackupTo", preferences.BackupRoot); var archive = FolderField("ArchiveRoot", preferences.ArchiveRoot);
+        var working=FolderField("ChatWorkRoot",preferences.ChatWorkRoot);working.ToolTip=L.T("ChatWorkRootHelp");
         Field("Chats", View.Button("ChatSettings",()=>{var dialog=new ChatSettingsWindow(chatPreferences){Owner=this};if(dialog.ShowDialog()==true)chatPreferences=dialog.Result;}));
         var workers = WorkerRecommendation.Selector(preferences.ChatParallelism,preferences.ChatWorkersAutomatic,"backup",()=>backup.Text); Field("ChatWorkers", workers);
         Field("", View.Text(L.T("ChatWorkersHelp"), color: "Muted"));
@@ -86,7 +87,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                 if (catalog.Rules.Count == 0) throw new InvalidDataException(L.T("NoRuleSets")); _ = new CleanupEngine(catalog, settings);
                 if (!string.IsNullOrWhiteSpace(custom.Text)) _ = Theme.ReadCustom(custom.Text);
                 Result = chatPreferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = themeValues[themes.SelectedIndex],
-                    BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatParallelism = workers.SelectedValue is int n&&n>0?n:preferences.ChatParallelism, ChatWorkersAutomatic=workers.SelectedValue is 0,
+                    BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatWorkRoot=working.Text.Trim(), ChatParallelism = workers.SelectedValue is int n&&n>0?n:preferences.ChatParallelism, ChatWorkersAutomatic=workers.SelectedValue is 0,
                     LogAutoShow=logAutoShow.IsChecked==true, ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, DebugLogging = debugLogging.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
                 foreach (var choice in choices.Where(c => pending.ContainsKey(c.Info.Id))) JsonFiles.Write(Path.Combine(customSets, choice.Info.File), pending[choice.Info.Id]);
                 JsonFiles.Write(Path.Combine(customSets, "sets.json"), new RuleSetIndex(1, choices.Where(c => c.Info.IsCustom).Select(c => c.Info).ToList()));

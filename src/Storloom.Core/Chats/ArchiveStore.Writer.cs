@@ -4,29 +4,34 @@ namespace Storloom.Core.Chats;
 
 internal sealed partial class ArchiveStore {
     private sealed record Projection(string? Head,string Directory);
-    private sealed record WriteTask(string? BaseHead,string Directory,string Source);
+    private sealed record WriteTask(string? BaseHead,string Directory,string Source,string? Workspace=null);
+    internal string? WriteWorkspace{get;set;}
     private static string ProjectionDirectory(string root,string? head){string marker=Path.Combine(root,"projection.json");if(File.Exists(marker)){PathPolicy.AssertNoLinks(marker);var entries=JsonFiles.Read<Projection[]>(marker);var match=entries.FirstOrDefault(e=>e.Head==head);if(match!=null){if(!System.Text.RegularExpressions.Regex.IsMatch(match.Directory,"^query/stage-[a-f0-9]{32}$"))throw new InvalidDataException("Invalid query projection path.");return TransferService.Child(root,match.Directory);}}return Path.Combine(root,"query");}
 
     // One bounded writer session; checkpoints and cache application share each commit.
     internal sealed class Writer:IDisposable {
-        private readonly ArchiveStore store;private readonly FileStream lease;private readonly CancellationToken cancellation;private readonly ArchiveCommitLog log;private ArchiveQueryCache query=null!;private readonly WriteTask task;private bool completed;
+        private readonly ArchiveStore store;private readonly FileStream lease;private readonly CancellationToken cancellation;private readonly ArchiveCommitLog log;private ArchiveQueryCache query=null!;private readonly WriteTask task;private bool completed;private readonly IProgress<ScanProgress>? progress;
         private readonly List<ArchiveQueryCache.Message> messages=[];private readonly List<ArchiveObject> objects=[];private readonly List<ArchiveFilePart> parts=[];private readonly List<ArchiveFileEntry> files=[];private readonly HashSet<string> pending=new(StringComparer.Ordinal);
         private readonly Dictionary<FileStamp,string> sourceAssets;private int buffered,messageCharacters;private bool disposed;
         internal ArchiveCommitLog Log=>log;internal ArchiveQueryCache Query=>query;
         internal long ChangedMessages{get;private set;}internal long ReusedFiles{get;private set;}internal long WrittenBytes{get;private set;}
+        internal ArchivePerformance Performance=>store.Performance;
         internal Writer(ArchiveStore store,CancellationToken cancellation,string source,IProgress<ScanProgress>? progress){
-            this.store=store;this.cancellation=cancellation;lease=store.Lease();log=new(store.root,".write-head");string taskPath=Path.Combine(store.root,".write-task.json");
+            this.store=store;this.cancellation=cancellation;this.progress=progress;lease=store.Lease();log=new(store.root,".write-head");string taskPath=Path.Combine(store.root,".write-task.json");
             try{if(store.Head!=store.log.Head)throw new IOException("Archive advanced; reopen it before updating.");store.query.Replay(store.log,store.Head,store.Decode,cancellation,projection:store.DecodeProjection);
                 if(File.Exists(taskPath)){PathPolicy.AssertNoLinks(taskPath);var retained=JsonFiles.Read<WriteTask>(taskPath);if(retained.BaseHead!=store.Head&&log.Head==store.Head&&ProjectionDirectory(store.root,store.Head)==TransferService.Child(store.root,retained.Directory))File.Delete(taskPath);}
                 if(File.Exists(taskPath)){task=JsonFiles.Read<WriteTask>(taskPath);if(task.BaseHead!=store.Head||task.Source!=source)throw new IOException("The unfinished compact task belongs to a different source snapshot. Keep the published snapshot and restart the task explicitly.");}
-                else{task=new(store.Head,"query/stage-"+Guid.NewGuid().ToString("N"),source);string headPath=Path.Combine(store.root,".write-head");if(File.Exists(headPath)){PathPolicy.AssertNoLinks(headPath);File.Delete(headPath);}if(store.Head!=null)log.PublishCopiedHead(null,store.Head);JsonFiles.Write(taskPath,task);}
-                if(!System.Text.RegularExpressions.Regex.IsMatch(task.Directory,"^query/stage-[a-f0-9]{32}$"))throw new InvalidDataException("Invalid writer query path.");string directory=TransferService.Child(store.root,task.Directory);Directory.CreateDirectory(directory);PathPolicy.AssertNoLinks(directory);string database=Path.Combine(directory,"query.db");
+                else{task=new(store.Head,"query/stage-"+Guid.NewGuid().ToString("N"),source,store.WriteWorkspace==null?null:PathPolicy.Normalize(store.WriteWorkspace));string headPath=Path.Combine(store.root,".write-head");if(File.Exists(headPath)){PathPolicy.AssertNoLinks(headPath);File.Delete(headPath);}if(store.Head!=null)log.PublishCopiedHead(null,store.Head);JsonFiles.Write(taskPath,task);}
+                if(!System.Text.RegularExpressions.Regex.IsMatch(task.Directory,"^query/stage-[a-f0-9]{32}$"))throw new InvalidDataException("Invalid writer query path.");
+                if(task.Workspace!=null&&(store.WriteWorkspace==null||task.Workspace!=PathPolicy.Normalize(store.WriteWorkspace)))throw new IOException("Continue this task using its original work directory.");
+                string directory=task.Workspace??TransferService.Child(store.root,task.Directory);PathPolicy.AssertNoLinks(Path.GetDirectoryName(directory)!);Directory.CreateDirectory(directory);PathPolicy.AssertNoLinks(directory);string database=Path.Combine(directory,"query.db");
                 if(!File.Exists(database)&&File.Exists(store.query.DatabasePath)){
+                    store.query.Checkpoint();
                     string temporary=database+".copy";if(File.Exists(temporary)){PathPolicy.AssertNoLinks(temporary);if(NativeFile.ReadStamp(temporary).Links!=1)throw new IOException("Shared index copy.");}
                     using(var input=new FileStream(store.query.DatabasePath,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))using(var output=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){byte[] buffer=new byte[1024*1024];long bytes=0;int count;progress?.Report(new("archive-query-copy",0,0,input.Length,1));while((count=input.Read(buffer))>0){OperationPause.Check(cancellation);output.Write(buffer,0,count);bytes+=count;progress?.Report(new("archive-query-copy",0,bytes,input.Length,1));}output.Flush(true);}File.Move(temporary,database,false);
                 }
                 byte[]? key=store.keys?.DomainKey("query/private");try{query=new(directory,store.keys!=null,key);}finally{if(key!=null)CryptographicOperations.ZeroMemory(key);}
-                query.Replay(log,log.Head,store.Decode,cancellation,projection:store.DecodeProjection);sourceAssets=[];
+                query.EnableWriteAhead();query.Replay(log,log.Head,store.Decode,cancellation,projection:store.DecodeProjection);sourceAssets=[];
             }catch{query?.Dispose();lease.Dispose();throw;}
         }
         internal Stream Open(string path){var file=query.FileEntry(path)??throw new FileNotFoundException(path);return new ChunkStream(file.Length,query.FileParts(file.Version),id=>store.ReadObject(id,query),()=>{});}
@@ -59,7 +64,18 @@ internal sealed partial class ArchiveStore {
         internal void Bytes(string name,byte[] bytes){if(query.FileEntry(name) is{} existing&&existing.Sha256==Convert.ToHexStringLower(SHA256.HashData(bytes))){ReusedFiles++;return;}using var input=new MemoryStream(bytes,false);Put(name,input);}
         internal void Flush(ArchiveImportCursor? cursor=null){if(messages.Count+objects.Count+parts.Count+files.Count==0&&cursor==null)return;OperationPause.Check(cancellation);store.CommitTo(new(1,messages.ToArray(),objects.ToArray(),parts.ToArray(),files.ToArray(),cursor),log,query,cancellation);messages.Clear();objects.Clear();parts.Clear();files.Clear();pending.Clear();buffered=0;messageCharacters=0;store.readerConversations=null;}
         internal void Complete(ArchiveImportCursor cursor){
-            Flush(cursor);OperationPause.Check(cancellation);string mapping=Path.Combine(store.root,"projection.json");var projections=new List<Projection>{new(log.Head,task.Directory)};
+            Flush(cursor);OperationPause.Check(cancellation);
+            if(task.Workspace!=null){
+                string source=query.DatabasePath,directory=TransferService.Child(store.root,task.Directory);Directory.CreateDirectory(directory);PathPolicy.AssertNoLinks(directory);string target=Path.Combine(directory,"query.db"),temporary=target+".copy";
+                query.Dispose();
+                // Published readers always use the archive-local projection. The external
+                // checkpoint remains available if copying or publication is interrupted.
+                foreach(string path in new[]{target,temporary})if(File.Exists(path)){PathPolicy.AssertNoLinks(path);if(NativeFile.ReadStamp(path).Links!=1)throw new IOException("Shared index publication file.");File.Delete(path);}
+                long copied=0,total=new FileInfo(source).Length*2;progress?.Report(new("archive-query-publish",0,0,total,1));ChatWorkspaceCopy.File(()=>File.OpenRead(source),target,temporary,cancellation,n=>{copied+=n;progress?.Report(new("archive-query-publish",0,copied,total,1));});
+                byte[]? key=store.keys?.DomainKey("query/private");try{query=new(directory,store.keys!=null,key);}finally{if(key!=null)CryptographicOperations.ZeroMemory(key);}
+                if(query.Applied!=log.Head)throw new IOException("Published query snapshot does not match its data.");
+            }
+            string mapping=Path.Combine(store.root,"projection.json");var projections=new List<Projection>{new(log.Head,task.Directory)};
             if(File.Exists(mapping))projections.AddRange(JsonFiles.Read<Projection[]>(mapping).Where(p=>p.Head!=log.Head));JsonFiles.Write(mapping,projections.Take(16).ToArray());
             var nextLease=LeaseQuery(Path.GetDirectoryName(query.DatabasePath)!);try{store.log.PublishCopiedHead(task.BaseHead,log.Head);}catch{nextLease.Dispose();throw;}
             lock(store.readGate){store.query.Dispose();store.queryLease?.Dispose();store.query=query;store.queryLease=nextLease;store.publishedHead=log.Head;completed=true;store.readerConversations=null;}File.Delete(Path.Combine(store.root,".write-task.json"));store.ReclaimQueryCaches(task.Directory);

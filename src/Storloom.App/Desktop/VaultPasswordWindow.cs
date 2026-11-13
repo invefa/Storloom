@@ -56,6 +56,8 @@ internal sealed class VaultPasswordWindow : ThemeWindow {
             if(creating){try{ChatVault.ValidateCredential(password.Password,KeyMode);}catch(ArgumentException){error.Text=L.T(KeyMode==ChatVaultKeyMode.DirectKey?"VaultDirectKeyInvalid":"VaultPasswordMismatch");return;}if(password.Password!=confirmation.Password){error.Text=L.T(KeyMode==ChatVaultKeyMode.DirectKey?"VaultDirectKeyMismatch":"VaultPasswordMismatch");return;}}
             if(password.Password.Length==0)return;
             Selection=selection();Password=password.Password;IncludeMedia=media.IsChecked==true;Workers=workers.SelectedValue is int count&&count>0?count:WorkerRecommendation.For("encryption",directory);password.Clear();confirmation.Clear();DialogResult=true;
-        };row.Children.Add(okay);View.Add(layout,row,1);Loaded+=(_,_)=>password.Focus();Closed+=(_,_)=>{password.Clear();confirmation.Clear();};
+        };
+        void Validate(){bool valid;try{if(creating)ChatVault.ValidateCredential(password.Password,keyMode.SelectedIndex==1?ChatVaultKeyMode.DirectKey:ChatVaultKeyMode.Password);valid=password.Password.Length>0&&(!creating||password.Password==confirmation.Password);}catch(ArgumentException){valid=false;}okay.IsEnabled=valid;okay.ToolTip=valid?null:L.T("RequiredCredential");}
+        password.PasswordChanged+=(_,_)=>Validate();confirmation.PasswordChanged+=(_,_)=>Validate();Validate();row.Children.Add(okay);View.Add(layout,row,1);Loaded+=(_,_)=>password.Focus();Closed+=(_,_)=>{password.Clear();confirmation.Clear();};
     }
 }

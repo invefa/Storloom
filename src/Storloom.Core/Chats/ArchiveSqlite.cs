@@ -36,6 +36,14 @@ internal sealed class ArchiveSqlite:IDisposable {
     }
     internal void Execute(string sql,params string[] values)=>Command(sql,values).ExecuteNonQuery();
     internal void ExecuteValues(string sql,params object[] values)=>Command(sql,values).ExecuteNonQuery();
+    internal long LastInsertRowId=>SQLitePCL.raw.sqlite3_last_insert_rowid(connection.Handle);
+    internal void EnableWriteAhead(){
+        // Applied only to the private write projection, never to source databases.
+        if(Query("PRAGMA journal_mode=WAL").Single()[0]!="wal")throw new IOException("Cannot enable archive query write-ahead logging.");
+        Execute("PRAGMA synchronous=FULL");Execute("PRAGMA wal_autocheckpoint=8192");
+        Execute(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes>=4L*1024*1024*1024?"PRAGMA cache_size=-262144":"PRAGMA cache_size=-65536");
+    }
+    internal void Checkpoint(){if(Query("PRAGMA wal_checkpoint(FULL)").Single()[0]!="0")throw new IOException("The archive query checkpoint is busy; no incomplete index copy was published.");}
     internal IReadOnlyList<string[]> Query(string sql,params string[] values){
         using var reader=Command(sql,values).ExecuteReader();var rows=new List<string[]>();
         while(reader.Read()){var row=new string[reader.FieldCount];for(int n=0;n<row.Length;n++)row[n]=reader.IsDBNull(n)?"":reader.GetValue(n) is byte[] blob?"!"+Convert.ToBase64String(blob):reader.GetValue(n).ToString()!;rows.Add(row);}return rows;

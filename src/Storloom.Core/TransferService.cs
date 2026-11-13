@@ -37,7 +37,7 @@ public sealed record TransferResult(string Destination, int VerifiedFiles, int R
 }
 
 public sealed class TransferService(int maximumParallelism=1) {
-    private readonly int workers=maximumParallelism is >=1 and <=8?maximumParallelism:throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
+    private readonly int workers=maximumParallelism is >=1 and <=32?maximumParallelism:throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     public TransferPlan Plan(string source, string destination, TransferMode mode = TransferMode.Copy,
         string[]? processes = null, CancellationToken cancellation = default,IProgress<ScanProgress>? progress=null) {
         source = PathPolicy.Normalize(source);

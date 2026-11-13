@@ -296,7 +296,7 @@
   "ReaderNotice": "Offline reading copy. Names use available contact metadata; IDs remain when names are unavailable. Only recognized local media is shown.",
   "ReaderRuntimeMissing": "The preview needs Microsoft Edge WebView2 Runtime. You can also open messages.html in your browser.",
   "OpenReaderArchive": "Open reading archive...",
-  "ChatWorkersHelp": "1-8 workers for backup and export. Disk contention can offset parallelism. Start at 2-4, compare sustained throughput, then adjust.",
+  "ChatWorkersHelp": "1-32 workers for backup and export. Disk contention can offset parallelism. Start at 2-4, compare sustained throughput, then adjust.",
   "HideOperationLog": "Hide log",
   "ShowOperationLog": "Show log",
   "ReadingCoverage": "Contacts {0} | Local media {1} | Unavailable media {2} | Unsupported messages {3}",
@@ -842,5 +842,18 @@
   "AccountAliasesHelp": "Aliases change display names only. The account ID, source paths, keys and archive identity stay the same. Leave a field blank to restore its original display name.",
   "AccountAlias": "Account alias",
   "SourceAlias": "Source alias",
-  "AliasInvalid": "Use an alias without control characters."
+  "AliasInvalid": "Use an alias without control characters.",
+  "ChatWorkRoot": "Work directory",
+  "ChatWorkRootHelp": "Optional. Choose a fast SSD for database spools and the compact write index. Files are grouped under Storloom/account identity. Empty uses the output location. Interrupted tasks keep their original work location. Protected plaintext requires EFS. The completed archive remains portable.",
+  "ArchivePerformance": "Compact totals: {0:N0} commits | pack/compress/encrypt: {1:F1}s | durable pack writes: {2:F1}s | index preparation/SQL/I/O: {3:F1}s | packs: {4}",
+  "RequiredFolder": "Choose a full path for {0}.",
+  "RequiredCredential": "Enter a valid reading password or direct key, and complete its confirmation.",
+  "StopOperation": "Stop task",
+  "StopOperationHelp": "Stop and retain completed steps and available resume checkpoints. Pause keeps the task open; Stop releases it so it can be continued later where supported.",
+  "OperationStopping": "Stopping the task. Waiting for the current step to finish or roll back; retaining completed steps and checkpoints.",
+  "OperationStoppingShort": "Stopping...",
+  "StopWaiting": "Still stopping; waiting for the current step: {0}.",
+  "TaskStopped": "Task stopped. Completed steps and available checkpoints have been retained.",
+  "PhaseQueryPublish": "Copying and verifying the completed query snapshot",
+  "PhaseWorkRetained": "The archive is complete; a busy temporary work directory was retained"
 }

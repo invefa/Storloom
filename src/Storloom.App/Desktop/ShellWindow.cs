@@ -15,6 +15,13 @@ public sealed partial class ShellWindow : ThemeWindow {
     private OperationPause? operationPause;
     private volatile bool debugEnabled;
     private bool operationIncomplete;
+    private Task stopNotification=Task.CompletedTask;
+    private void RequestOperationStop(){
+        if(operation==null||operation.IsCancellationRequested)return;
+        status.Text=L.T("OperationStopping");operationView.BeginStopping();
+        if(operationButton!=null){operationButton.Content=L.T("OperationStoppingShort");operationButton.IsEnabled=false;}
+        stopNotification=operation.CancelAsync();
+    }
     private bool windowClosed;
     private byte[]? capturedKey;
     private readonly Dictionary<string, Grid> pages = [];
@@ -47,7 +54,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (File.Exists(backups)) foreach (var pair in JsonFiles.Read<Dictionary<string, string>>(backups)) verifiedBackups[pair.Key] = pair.Value;
         L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
         WindowGeometry.Attach(this,dataRoot,"main",640,480);
-        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;tray?.Dispose();};
+        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;accessDrafts.Clear();tray?.Dispose();};
         if (preferences.CloseToTray) EnsureTray();
         InputBindings.Add(new KeyBinding(new ActionCommand(() => operationView.ToggleFollowing()), new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new ActionCommand(() => ShowHelp()), new KeyGesture(Key.F1)));
@@ -122,7 +129,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             operationView.SetPaused(operationPause.IsPaused);
             operationView.AddLog(L.T(operationPause.IsPaused?"OperationPauseHelp":"OperationResumed"));
         };
-        operationView.CancelRequested += ()=>operation?.Cancel();
+        operationView.CancelRequested += RequestOperationStop;
         operationView.ExportRequested += () => Guard(ExportOperationLog);
         operationView.ExpansionChanged += expanded => {
             double target = expanded ? ExpandedLogHeight() : 32;
@@ -131,7 +138,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         };
         logSplitter.IsVisibleChanged += (_, _) => { if (logSplitter.IsVisible) logRow.MinHeight = 32; };
         // The persistent log/status panel is the sole status surface, including at startup.
-        statusFooter=new DockPanel{Visibility=Visibility.Collapsed};cancel=Button("Cancel",()=>operation?.Cancel());cancel.Visibility=Visibility.Collapsed;
+        statusFooter=new DockPanel{Visibility=Visibility.Collapsed};cancel=Button("StopOperation",RequestOperationStop);cancel.Visibility=Visibility.Collapsed;
         status=operationView.StatusText;status.Text=L.T("CatalogSummary",engine.Catalog.Rules.Count);
         operationView.WrapToggle.IsChecked=preferences.LogWrap;operationView.AutoShowToggle.IsChecked=preferences.LogAutoShow;operationView.AutoCollapseToggle.IsChecked=preferences.LogAutoCollapse;
         operationView.OptionsChanged+=()=>{preferences=preferences with{LogWrap=operationView.WrapToggle.IsChecked==true,LogAutoShow=operationView.AutoShowToggle.IsChecked==true,LogAutoCollapse=operationView.AutoCollapseToggle.IsChecked==true};JsonFiles.Write(Path.Combine(dataRoot,"preferences.json"),preferences);};
@@ -221,7 +228,7 @@ public sealed partial class ShellWindow : ThemeWindow {
     private Button AsyncButton(string key, Func<Task> action, bool primary = false) {
         var button = View.Button(key, () => { }, primary);
         button.Click += async (_, _) => {
-            if (operation != null) { if (operationButton == button) operation.Cancel(); return; }
+            if (operation != null) { if (operationButton == button) RequestOperationStop(); return; }
             operationButton = button;
             try { await action(); } catch (Exception ex) { if(!windowClosed)Error(ex); } finally { operationButton = null; }
         }; return button;
@@ -251,20 +258,20 @@ public sealed partial class ShellWindow : ThemeWindow {
         var disabled = Controls(pageHost).Where(c => c != operationButton && c.IsEnabled && (c is System.Windows.Controls.Button or TextBox or ComboBox or CheckBox or PasswordBox or DataGrid || c is TabItem{IsSelected:false})).ToArray();
         foreach (var control in disabled) control.IsEnabled = false;
         object? previousContent = operationButton?.Content;
-        if (operationButton != null) operationButton.Content = L.T("Cancel");
+        if (operationButton != null) operationButton.Content = L.T("StopOperation");
         operationView.Visibility = Visibility.Visible; logDivider.Visibility = Visibility.Visible;
         if(operationView.AutoShowToggle.IsChecked==true&&!operationView.Expanded)operationView.ToggleExpanded();
         AnimateLog(operationView.Expanded ? ExpandedLogHeight() : 32);
-        operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14",12);operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;
+        stopNotification=Task.CompletedTask;operationView.Start(); operationView.PauseButton.Content=View.Icon("M 4,2 L 4,14 M 10,2 L 10,14",12);operationView.PauseButton.ToolTip=L.T("PauseOperation");operationView.PauseButton.Visibility=pausable?Visibility.Visible:Visibility.Collapsed; cancel.Visibility=Visibility.Collapsed;operationView.CancelButton.Visibility=Visibility.Visible;operationView.CancelButton.ToolTip=L.T("StopOperationHelp");
         statusFooter.Visibility=Visibility.Collapsed;
         status.Text = L.T("OperationStarting");if(debugEnabled)operationView.AddDebugDetail("task.options",$"worker_mode: {(preferences.ChatWorkersAutomatic?"auto":"manual")} | manual_workers: {preferences.ChatParallelism} | page: {currentPage} | auto_open_log: {preferences.LogAutoShow}"); bool complete = false;
-        try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete; }
-        catch (OperationCanceledException) { status.Text = L.T("Cancelled"); if(debugEnabled)operationView.AddDiagnostic(new("operation.cancelled")); }
+        try { await work(source.Token); complete = !source.IsCancellationRequested && !operationIncomplete;if(source.IsCancellationRequested)status.Text=L.T("TaskStopped"); }
+        catch (OperationCanceledException) { status.Text = L.T("TaskStopped"); if(debugEnabled)operationView.AddDiagnostic(new("operation.stopped")); }
         catch (Exception ex) { Error(ex); }
-        finally { operationPause=null;operationView.PauseButton.Visibility=operationView.CancelButton.Visibility=Visibility.Collapsed; operation = null; navigation.IsEnabled = menu.IsEnabled = true;
+        finally { try{await stopNotification;}catch(Exception ex){operationView.AddException(ex);}operationPause=null;operationView.PauseButton.Visibility=operationView.CancelButton.Visibility=Visibility.Collapsed; operation = null; navigation.IsEnabled = menu.IsEnabled = true;
             foreach (var control in disabled) control.IsEnabled = true;
             if (operationButton != null) { operationButton.Content = previousContent; operationButton.IsEnabled = previousEnabled; }
-            cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed; operationView.Finish(status.Text, complete); }
+            cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed;if(source.IsCancellationRequested)operationView.AddLog(status.Text); operationView.Finish(status.Text, complete); }
         if (exitAfterOperation) _ = Dispatcher.BeginInvoke(new Action(Close));
     }
     private static IEnumerable<Control> Controls(DependencyObject root) {
@@ -310,7 +317,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom archive|messages.html;vault.storloom.json;archive.json" };
         if (PickerHistory.Show(dialog,this,"reader-open") == true) new ChatReaderWindow(Path.GetDirectoryName(dialog.FileName)!, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog();
     }
-    private void SetCapturedKey(byte[]? key) { if (capturedKey != null) CryptographicOperations.ZeroMemory(capturedKey); capturedKey = key; }
+    private void SetCapturedKey(byte[]? key) { if (capturedKey != null) CryptographicOperations.ZeroMemory(capturedKey); capturedKey = key;if(key!=null){keyInput?.Clear();if(activeChat!=null){string id=Storloom.Core.Chats.ChatArchiveProject.Identity(activeChat.Platform,activeChat.Directory);if(accessDrafts.TryGetValue(id,out var draft))accessDrafts[id]=draft with{DatabaseKey=null};}} }
     private static void OpenFolder(string path) { Directory.CreateDirectory(path); OpenFile(path); }
     private static void OpenFile(string path) => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
 }

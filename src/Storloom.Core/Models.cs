@@ -60,7 +60,10 @@ public sealed record FileStamp(
 public sealed record Candidate(string RuleId, string Root, string Path, FileStamp Stamp);
 public sealed record ScanIssue(string RuleId, string Path, string Reason);
 public sealed record ScanProgress(string RuleId, int Files, long Bytes,
-    long? TotalBytes = null, int? TotalFiles = null, string? Detail = null, long? SourceBytes = null);
+    long? TotalBytes = null, int? TotalFiles = null, string? Detail = null, long? SourceBytes = null){
+    public ArchivePerformance? Performance{get;init;}
+}
+public sealed record ArchivePerformance(long Commits,double PackSeconds,double WriteSeconds,double IndexSeconds,long PackBytes);
 public sealed record CleanupPlan {
     public int Version { get; init; } = 1;
     public Guid Id { get; init; } = Guid.NewGuid();

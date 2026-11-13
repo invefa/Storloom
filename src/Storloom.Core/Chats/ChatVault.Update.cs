@@ -21,7 +21,7 @@ public sealed partial class ChatVault {
         long total=checked(selected.Sum(e=>e.Stamp.Bytes)*2),bytes=0;int done=0;var reportGate=new object();
         void Report(string? detail=null){lock(reportGate)progress?.Report(new("archive-workspace",Volatile.Read(ref done),Interlocked.Read(ref bytes),total,selected.Length,detail));}
         string temporaryRoot=Path.Combine(Path.GetDirectoryName(directory)!,"restore");Directory.CreateDirectory(temporaryRoot);PathPolicy.AssertNoLinks(temporaryRoot);Report();
-        Parallel.ForEach(selected,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},entry=>{
+        Parallel.ForEach(selected,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,32),CancellationToken=cancellation},entry=>{
             OperationPause.Check(cancellation);string target=TransferService.Child(directory,entry.Path);Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             ChatWorkspaceCopy.File(()=>OpenRead(entry.Path),target,Path.Combine(temporaryRoot,entry.Id+".part"),cancellation,count=>{Interlocked.Add(ref bytes,count);if(entry.Stamp.Bytes>=1024*1024)Report();});
             Interlocked.Increment(ref done);Report(entry.Path);

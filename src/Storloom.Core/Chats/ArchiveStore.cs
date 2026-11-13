@@ -16,6 +16,7 @@ internal sealed partial class ArchiveStore:IDisposable {
     private bool disposed;
     private readonly int formatVersion;
     internal int Workers {get;set;}=2;
+    internal ArchivePerformance Performance{get;private set;}=new(0,0,0,0,0);
     internal string Id{get;}
     private string? publishedHead;
     internal string? Head=>publishedHead;
@@ -56,11 +57,14 @@ internal sealed partial class ArchiveStore:IDisposable {
     private string ObjectId(ReadOnlySpan<byte> bytes)=>Convert.ToHexStringLower(objectKey==null?SHA256.HashData(bytes):HMACSHA256.HashData(objectKey,bytes));
     private void Commit(ArchiveDelta delta)=>CommitTo(delta,log,query);
     private void CommitTo(ArchiveDelta delta,ArchiveCommitLog target,ArchiveQueryCache projection,CancellationToken cancellation=default){
+        long started=System.Diagnostics.Stopwatch.GetTimestamp();
         projection.Validate(delta);
         byte[] plain=formatVersion>=3?[]:JsonSerializer.SerializeToUtf8Bytes(delta);
         try{
             byte[] encoded=formatVersion>=3?ArchivePackCodec.Encode(delta,ProtectRecord,Workers):keys==null?plain:keys.Protect(plain,"data/private");
-            string head=target.Append(encoded,projection.Applied);projection.Replay(target,head,Decode,cancellation,projection:DecodeProjection);if(ReferenceEquals(target,log))publishedHead=head;
+            double pack=System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalSeconds;long written=System.Diagnostics.Stopwatch.GetTimestamp();
+            string head=target.Append(encoded,projection.Applied);double write=System.Diagnostics.Stopwatch.GetElapsedTime(written).TotalSeconds;long indexed=System.Diagnostics.Stopwatch.GetTimestamp();projection.Workers=Workers;projection.Replay(target,head,Decode,cancellation,projection:DecodeProjection);double indexTime=System.Diagnostics.Stopwatch.GetElapsedTime(indexed).TotalSeconds;
+            var previous=Performance;Performance=new(previous.Commits+1,previous.PackSeconds+pack,previous.WriteSeconds+write,previous.IndexSeconds+indexTime,previous.PackBytes+encoded.LongLength);if(ReferenceEquals(target,log))publishedHead=head;
         }finally{CryptographicOperations.ZeroMemory(plain);foreach(var item in delta.Objects)CryptographicOperations.ZeroMemory(item.Bytes);}
     }
     internal int Upsert(IEnumerable<ArchiveQueryCache.Message> messages,CancellationToken cancellation=default){

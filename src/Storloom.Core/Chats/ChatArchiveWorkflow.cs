@@ -14,13 +14,13 @@ public sealed record ChatArchiveProject(string Id,string Account,ChatPlatform Pl
     // Explicit factory keeps new defaults separate from old serialized projects without storage fields.
     public static ChatArchiveProject Create(string account,ChatPlatform platform,string source,string backupRoot)=>new(Identity(platform,source),account,platform,source,backupRoot){ReadingStorage=ChatStorageFormat.Compact,BackupStorage=ChatStorageFormat.Compact};
 }
-public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false){public ChatVaultKeyMode KeyMode{get;init;}public bool VerifyBackupBeforeReading{get;init;}=true;public bool CreateCompact{get;init;}public bool Rebuild{get;init;}public bool DirectReading{get;init;}public string? SourceSnapshot{get;init;}}
-public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false,bool DirectReading=false){public bool CreateCompact{get;init;}public ChatVaultKeyMode KeyMode{get;init;}public string? SourceSnapshot{get;init;}}
+public sealed record ChatArchiveTask(int Version,string ProjectId,string Work,string Generation,string? PreviousReading,string? Manifest,string Phase,bool Secure,bool BackupOnly=false,bool ProtectionOnly=false){public string? WorkspaceRoot{get;init;}public ChatVaultKeyMode KeyMode{get;init;}public bool VerifyBackupBeforeReading{get;init;}=true;public bool CreateCompact{get;init;}public bool Rebuild{get;init;}public bool DirectReading{get;init;}public string? SourceSnapshot{get;init;}}
+public sealed record ChatArchiveUpdateRequest(bool BackupOnly=false,bool Rebuild=false,ChatArchiveProtection? Protection=null,ChatArchiveProtectionMode? Mode=null,bool UseExistingBackup=false,bool ProtectionOnly=false,bool DirectReading=false){public string? WorkspaceRoot{get;init;}public bool CreateCompact{get;init;}public ChatVaultKeyMode KeyMode{get;init;}public string? SourceSnapshot{get;init;}}
 /// <summary>Write immutable generations. Only the caller's verified catalog checkpoint switches the visible reader.</summary>
 public static class ChatArchiveWorkflow {
     public static ChatArchiveProject Update(ChatArchiveProject project,string taskFile,byte[]? databaseKey,string? password,int workers,
         Action<ChatArchiveProject> checkpoint,ChatArchiveUpdateRequest? request=null,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default,bool? defaultDark=null,Func<string,int>? selectWorkers=null,bool checkRunningClients=true,bool downloadGroupAvatars=false){
-        request??=new();if(string.IsNullOrEmpty(project.Account)||project.Account is "." or ".."||Path.GetFileName(project.Account)!=project.Account||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source))throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,8);if(project.BackupStorage==ChatStorageFormat.Compact&&request.BackupOnly)return CompactArchiveWorkflow.Backup(project,taskFile,password,workers,checkpoint,progress,cancellation,checkRunningClients,request.KeyMode);if((project.ReadingStorage==ChatStorageFormat.Compact||request.CreateCompact||File.Exists(taskFile)&&JsonFiles.Read<ChatArchiveTask>(taskFile).CreateCompact)&&!request.BackupOnly)return CompactArchiveWorkflow.Read(project,taskFile,databaseKey,password,workers,checkpoint,request,progress,cancellation,defaultDark,checkRunningClients,downloadGroupAvatars);if(!System.Text.RegularExpressions.Regex.IsMatch(project.Id,"^[a-f0-9]{64}$",System.Text.RegularExpressions.RegexOptions.IgnoreCase)||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source)||string.IsNullOrEmpty(project.Account)||Path.GetFileName(project.Account)!=project.Account)throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,8);int backupWorkers=Math.Clamp(selectWorkers?.Invoke("backup")??workers,1,8),encryptionWorkers=Math.Clamp(selectWorkers?.Invoke("encryption")??workers,1,8);bool backupTask=request.BackupOnly;if(File.Exists(taskFile)){PathPolicy.AssertNoLinks(taskFile);backupTask=JsonFiles.Read<ChatArchiveTask>(taskFile).BackupOnly;}string outputRoot=!backupTask&&!string.IsNullOrWhiteSpace(project.ReadingRoot)?project.ReadingRoot:project.BackupRoot;string accountRoot=Path.Combine(PathPolicy.Normalize(outputRoot),project.Platform.ToString(),project.Account);
+        request??=new();if(string.IsNullOrEmpty(project.Account)||project.Account is "." or ".."||Path.GetFileName(project.Account)!=project.Account||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source))throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,32);if(project.BackupStorage==ChatStorageFormat.Compact&&request.BackupOnly)return CompactArchiveWorkflow.Backup(project,taskFile,password,workers,checkpoint,progress,cancellation,checkRunningClients,request.KeyMode,request.WorkspaceRoot);if((project.ReadingStorage==ChatStorageFormat.Compact||request.CreateCompact||File.Exists(taskFile)&&JsonFiles.Read<ChatArchiveTask>(taskFile).CreateCompact)&&!request.BackupOnly)return CompactArchiveWorkflow.Read(project,taskFile,databaseKey,password,workers,checkpoint,request,progress,cancellation,defaultDark,checkRunningClients,downloadGroupAvatars);if(!System.Text.RegularExpressions.Regex.IsMatch(project.Id,"^[a-f0-9]{64}$",System.Text.RegularExpressions.RegexOptions.IgnoreCase)||project.Id!=ChatArchiveProject.Identity(project.Platform,project.Source)||string.IsNullOrEmpty(project.Account)||Path.GetFileName(project.Account)!=project.Account)throw new InvalidDataException("Invalid archive identity.");workers=Math.Clamp(workers,1,32);int backupWorkers=Math.Clamp(selectWorkers?.Invoke("backup")??workers,1,32),encryptionWorkers=Math.Clamp(selectWorkers?.Invoke("encryption")??workers,1,32);bool backupTask=request.BackupOnly;if(File.Exists(taskFile)){PathPolicy.AssertNoLinks(taskFile);backupTask=JsonFiles.Read<ChatArchiveTask>(taskFile).BackupOnly;}string outputRoot=!backupTask&&!string.IsNullOrWhiteSpace(project.ReadingRoot)?project.ReadingRoot:project.BackupRoot;string accountRoot=Path.Combine(PathPolicy.Normalize(outputRoot),project.Platform.ToString(),project.Account);
         if(PathPolicy.Under(accountRoot,project.Source)||PathPolicy.Under(project.Source,accountRoot)||accountRoot.Equals(project.Source,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Archive backup and source must be separate directories.");CreateDirectorySafe(accountRoot);PathPolicy.AssertNoLinks(Path.GetDirectoryName(Path.GetFullPath(taskFile))!);
         string lockPath=Path.Combine(accountRoot,".archive-project-"+project.Id+".lock");PathPolicy.AssertNoLinks(accountRoot);
         if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);
@@ -28,13 +28,14 @@ public static class ChatArchiveWorkflow {
         ChatArchiveTask state;
         if(File.Exists(taskFile)){
             PathPolicy.AssertNoLinks(taskFile);state=JsonFiles.Read<ChatArchiveTask>(taskFile);
-            if(state.Version!=1||state.ProjectId!=project.Id||!PathPolicy.Under(state.Work,accountRoot)||!PathPolicy.Under(state.Generation,accountRoot)||Path.GetDirectoryName(state.Generation)!=accountRoot||Path.GetDirectoryName(state.Work)!=accountRoot)throw new InvalidDataException("Archive task identity or workspace boundary changed.");
+            AssertWorkspaceBase(project,state.WorkspaceRoot);
+            if(state.Version!=1||state.ProjectId!=project.Id||!PathPolicy.Under(state.Work,state.WorkspaceRoot??accountRoot)||!PathPolicy.Under(state.Generation,accountRoot)||Path.GetDirectoryName(state.Generation)!=accountRoot||Path.GetDirectoryName(state.Work)!=(state.WorkspaceRoot??accountRoot))throw new InvalidDataException("Archive task identity or workspace boundary changed.");
             string workName=Path.GetFileName(state.Work);if(!workName.StartsWith(".archive-work-",StringComparison.Ordinal)||!Guid.TryParseExact(workName[14..],"N",out var generation)||state.Generation!=Path.Combine(accountRoot,"reading-"+generation.ToString("N")))throw new InvalidDataException("Archive generation identity changed.");
             if(state.PreviousReading!=project.Reading&&state.Phase!="published")throw new InvalidDataException("Archive task no longer matches the current reader.");
         }else{
             bool secure=!request.BackupOnly&&(project.Protection!=ChatArchiveProtectionMode.None||project.Reading!=null&&ChatVault.Exists(project.Reading)||request.Mode is ChatArchiveProtectionMode.All or ChatArchiveProtectionMode.Selected);
-            string id=Guid.NewGuid().ToString("N"),work=Path.Combine(accountRoot,".archive-work-"+id),generation=Path.Combine(accountRoot,"reading-"+id);
-            state=new(1,project.Id,work,generation,project.Reading,project.Manifest,request.DirectReading?(request.ProtectionOnly?"workspace":"source"):request.UseExistingBackup&&project.Manifest!=null?"workspace":"backup",secure,request.BackupOnly,request.ProtectionOnly){VerifyBackupBeforeReading=project.VerifyBackupBeforeReading,DirectReading=request.DirectReading,SourceSnapshot=request.SourceSnapshot};
+            string workRoot=WorkspaceBase(project,request.WorkspaceRoot,accountRoot);string id=Guid.NewGuid().ToString("N"),work=Path.Combine(workRoot,".archive-work-"+id),generation=Path.Combine(accountRoot,"reading-"+id);
+            state=new(1,project.Id,work,generation,project.Reading,project.Manifest,request.DirectReading?(request.ProtectionOnly?"workspace":"source"):request.UseExistingBackup&&project.Manifest!=null?"workspace":"backup",secure,request.BackupOnly,request.ProtectionOnly){WorkspaceRoot=workRoot==accountRoot?null:workRoot,VerifyBackupBeforeReading=project.VerifyBackupBeforeReading,DirectReading=request.DirectReading,SourceSnapshot=request.SourceSnapshot};
             JsonFiles.Write(taskFile,state);project=project with{TaskFile=taskFile};checkpoint(project);
         }
         void Save(string phase){state=state with{Phase=phase};JsonFiles.Write(taskFile,state);}
@@ -116,15 +117,34 @@ public static class ChatArchiveWorkflow {
             }
             if(state.Phase=="publish"){
                 progress?.Report(new("archive-publish",0,0));OperationPause.Check(cancellation);
-                if(!Directory.Exists(state.Generation)){VerifyGeneration(stage,policy.Mode,password);ChatArchiveWorkspace.PreparePublication(stage,state.Secure,cancellation);DirectoryPublication.Move(stage,state.Generation,cancellation);}
+                if(!Directory.Exists(state.Generation)){
+                    VerifyGeneration(stage,policy.Mode,password);
+                    if(state.WorkspaceRoot==null){ChatArchiveWorkspace.PreparePublication(stage,state.Secure,cancellation);DirectoryPublication.Move(stage,state.Generation,cancellation);}
+                    else{string candidate=Path.Combine(accountRoot,".publish-"+Path.GetFileName(state.Generation));if(!Directory.Exists(candidate))ChatArchiveWorkspace.Create(candidate,state.Secure);if(state.Secure)ChatArchiveWorkspace.AssertEncrypted(candidate);CopyPlain(stage,candidate,workers,progress,cancellation);VerifyGeneration(candidate,policy.Mode,password);ChatArchiveWorkspace.PreparePublication(candidate,state.Secure,cancellation);DirectoryPublication.Move(candidate,state.Generation,cancellation);}
+                }
                 // A crash after the directory move is recovered by committing this same generation.
                 Save("published");
             }
             if(state.Phase!="published")throw new InvalidDataException("Unknown archive task phase.");
             VerifyGeneration(state.Generation,policy.Mode,password);
             project=project with{Manifest=state.DirectReading?project.Manifest:state.Manifest,Reading=state.Generation,ReadableAt=DateTimeOffset.UtcNow,TaskFile=null,Protection=policy.Settings.Selection!=null&&policy.Mode!=ChatArchiveProtectionMode.None?ChatArchiveProtectionMode.Selected:policy.Mode,IncludeMedia=policy.Settings.IncludeMedia,ProtectionKnown=true};checkpoint(project);
-            File.Delete(taskFile);return project;
+            File.Delete(taskFile);
+            if(state.WorkspaceRoot!=null&&Directory.Exists(state.Work)&&Path.GetDirectoryName(state.Work)==state.WorkspaceRoot){
+                try{foreach(string path in Directory.EnumerateFileSystemEntries(state.Work,"*",SearchOption.AllDirectories))PathPolicy.AssertNoLinks(path);Directory.Delete(state.Work,true);}
+                catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){progress?.Report(new("archive-workspace-retained",0,0));}
+            }
+            return project;
         }finally{sourceLease?.Dispose();previous?.Dispose();}
+    }
+    internal static string WorkspaceBase(ChatArchiveProject project,string? selected,string fallback){
+        if(string.IsNullOrWhiteSpace(selected))return fallback;
+        string root=PathPolicy.Normalize(selected);if(root.Equals(project.Source,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(root,project.Source)||PathPolicy.Under(project.Source,root))throw new IOException("Workspace and source must be separate directories.");
+        CreateDirectorySafe(root);string directory=Path.Combine(root,"Storloom",project.Id);CreateDirectorySafe(directory);return directory;
+    }
+    internal static void AssertWorkspaceBase(ChatArchiveProject project,string? directory){
+        if(directory==null)return;
+        if(!Path.IsPathFullyQualified(directory)||Path.GetFileName(directory)!=project.Id||!string.Equals(Path.GetFileName(Path.GetDirectoryName(directory)),"Storloom",StringComparison.OrdinalIgnoreCase)||directory.Equals(project.Source,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(directory,project.Source)||PathPolicy.Under(project.Source,directory))throw new InvalidDataException("Invalid retained archive work directory.");
+        PathPolicy.AssertNoLinks(directory);
     }
     private static void CreateDirectorySafe(string path){string? existing=path;while(existing!=null&&!Directory.Exists(existing)&&!File.Exists(existing))existing=Path.GetDirectoryName(existing);if(existing==null)throw new IOException("Missing archive volume.");PathPolicy.AssertNoLinks(existing);Directory.CreateDirectory(path);PathPolicy.AssertNoLinks(path);}
     private sealed record WorkspaceAuthentication(string Salt,string Proof);
@@ -151,11 +171,11 @@ public static class ChatArchiveWorkflow {
             long length=new FileInfo(file).Length;files.Add((file,relative,length));total=checked(total+length*2);
             if(files.Count==1||files.Count%256==0)progress?.Report(new("archive-workspace-plan",files.Count,total/2,Detail:relative));
         }
-        string copyRoot=Path.Combine(Path.GetDirectoryName(destination)!,"restore");Directory.CreateDirectory(copyRoot);PathPolicy.AssertNoLinks(copyRoot);
+        string copyRoot=Path.Combine(Path.GetDirectoryName(destination)!,".copy-"+JsonFiles.Hash(Path.GetFileName(destination))[..16]);Directory.CreateDirectory(copyRoot);PathPolicy.AssertNoLinks(copyRoot);
         int done=0;long bytes=0;var reportGate=new object();
         void Report(string? detail=null){lock(reportGate)progress?.Report(new("archive-workspace",Volatile.Read(ref done),Interlocked.Read(ref bytes),total,files.Count,detail));}
         Report();
-        Parallel.ForEach(files,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},file=>{
+        Parallel.ForEach(files,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,32),CancellationToken=cancellation},file=>{
             OperationPause.Check(cancellation);PathPolicy.AssertNoLinks(file.Path);var before=NativeFile.ReadStamp(file.Path);if(before.Bytes!=file.Length)throw new IOException("Reading source changed before copying.");
             string target=TransferService.Child(destination,file.Relative);Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             ChatWorkspaceCopy.File(()=>System.IO.File.OpenRead(file.Path),target,Path.Combine(copyRoot,JsonFiles.Hash(file.Relative)+".part"),cancellation,count=>{Interlocked.Add(ref bytes,count);if(file.Length>=1024*1024)Report();});

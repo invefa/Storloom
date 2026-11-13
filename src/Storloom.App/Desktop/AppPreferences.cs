@@ -9,6 +9,7 @@ public sealed record AppPreferences {
     public bool ChatWorkersAutomatic {get;init;}=true;
     public string BackupRoot { get; init; } = "";
     public string ArchiveRoot { get; init; } = "";
+    public string ChatWorkRoot{get;init;}="";
     public string[] ChatSearchRoots { get; init; } = [];
     public bool ChatAutoDiscover { get; init; } = true;
     public string? QQExecutable { get; init; }
