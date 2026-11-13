@@ -13,7 +13,8 @@ internal sealed class ArchiveSqlite:IDisposable {
             PathPolicy.AssertNoLinks(file);if(NativeFile.ReadStamp(file).Links!=1)throw new IOException("Shared query cache files cannot be modified.");
         }
         SQLitePCL.Batteries_V2.Init();
-        connection=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=SqliteOpenMode.ReadWriteCreate,Pooling=false}.ToString());
+        // Preserve the encryption shim while allowing index and journal paths beyond MAX_PATH.
+        connection=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=NativeFile.ExtendedPath(path),Vfs="multipleciphers-win32-longpath",Mode=SqliteOpenMode.ReadWriteCreate,Pooling=false}.ToString());
         try{
             connection.Open();
             if(key!=null&&SQLitePCL.raw.sqlite3_key(connection.Handle,key)!=SQLitePCL.raw.SQLITE_OK)throw new IOException("Cannot initialize encrypted archive query cache.");
