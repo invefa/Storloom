@@ -246,3 +246,5 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***********************************************************************/
 
 WeChat emoticon cache derivation and WXGF conversion research: https://github.com/yanyanbabyi/Wechat-Emoticon-Parser-fix . Storloom implements local AES-CBC decoding in C# and does not bundle the Python exporter or Tencent resources.
+
+Independent HTML runtime: SQLite3 Multiple Ciphers 2.7.0 / SQLite 3.54.1 official WASM bundle, Emscripten glue and Brotli-wasm 3.0.1. Sources, checksums and complete transitive notices are retained in src/Storloom.Core/Chats/Reader/Standalone/Vendor. The generated HTML embeds these notices for offline redistribution. No CDN runtime dependency is used.

@@ -137,6 +137,29 @@ public sealed class CompactArchiveTests:IDisposable {
         }
         using var copy=new ArchiveSqlite(Path.Combine(directory,"standalone.db"),key);Assert.Equal(marker,copy.Query("SELECT value FROM fixture").Single()[0]);
     }
+    [Theory][InlineData(false)][InlineData(true)]public void StandaloneSnapshotsTrackIncrementalCommitsAndKeepProtectedMetadataPrivate(bool encrypted){
+        string archive=Path.Combine(root,"browser"),password=encrypted?"fixture-password":"";using var store=ArchiveStore.Create(archive,password);string proof=new string('a',64);
+        void Add(string text){using var writer=store.BeginWrite(source:proof);writer.Add(new("Fixture","room","sender",1,1,text){Id="one",ConversationName="private conversation marker"});writer.Complete(new(proof,"complete",0,0,1,0,0));}
+        Add("private browser payload");string entry=store.EnableStandalone();Assert.True(File.Exists(entry));Assert.Contains("connect-src 'none'",File.ReadAllText(entry));Assert.DoesNotContain("private browser payload",File.ReadAllText(entry));
+        using(var roots=JsonDocument.Parse(File.ReadAllText(Path.Combine(archive,"browser","roots.json"))))Assert.Equal(store.Head,roots.RootElement.GetProperty("roots")[0].GetProperty("head").GetString());
+        string copy=Path.Combine(root,"browser-copy");store.BackupTo(copy);Assert.True(File.Exists(Path.Combine(copy,ArchiveStore.StandaloneEntry)));using(var copied=ArchiveStore.Open(copy,password))Assert.Single(copied.Search("private browser"));
+        string prior=store.Head!;Add("changed browser payload");Assert.NotEqual(prior,store.Head);using(var roots=JsonDocument.Parse(File.ReadAllText(Path.Combine(archive,"browser","roots.json"))))Assert.Equal(store.Head,roots.RootElement.GetProperty("roots")[0].GetProperty("head").GetString());
+        using var metadata=JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(store.ReaderIndex())["window.archiveIndex=".Length..].TrimEnd(';'));Assert.Equal(1,metadata.RootElement.GetProperty("conversations")[0].GetProperty("count").GetInt32());Assert.Equal("private conversation marker",metadata.RootElement.GetProperty("conversations")[0].GetProperty("name").GetString());
+        if(encrypted)foreach(string file in Directory.GetFiles(Path.Combine(archive,"browser")))Assert.True(File.ReadAllBytes(file).AsSpan().IndexOf("private conversation marker"u8)<0);
+        using var reorganized=ArchiveStore.Create(Path.Combine(root,"reorganized"),password);store.RepackTo(reorganized);Assert.True(File.Exists(Path.Combine(reorganized.DirectoryPath,ArchiveStore.StandaloneEntry)));reorganized.Verify();
+    }
+    [Fact]public void BrowserBackupSupportsTheOriginalQueryDirectory(){
+        string archive=Path.Combine(root,"browser-base-query");using var store=ArchiveStore.Create(archive);
+        store.Upsert([new("one","Fixture/room",1,"base query browser fixture","{}")]);store.EnableStandalone();string backup=Path.Combine(root,"browser-base-copy");store.BackupTo(backup);
+        using var copied=ArchiveStore.Open(backup);Assert.Single(copied.Search("base query"));Assert.True(File.Exists(Path.Combine(backup,ArchiveStore.StandaloneEntry)));
+    }
+    [Fact]public void BrowserSnapshotCancellationNeverAdvancesPublishedHeadAndResumeRepairsItsRoot(){
+        string archive=Path.Combine(root,"browser");using var store=ArchiveStore.Create(archive);string proof=new string('a',64);
+        using(var writer=store.BeginWrite(source:proof)){writer.Add(new("Fixture","room","sender",1,1,"published"){Id="one"});writer.Complete(new(proof,"complete",0,0,1,0,0));}store.EnableStandalone();string prior=store.Head!;using var stop=new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(()=>{using var writer=store.BeginWrite(stop.Token,proof,new Callback(p=>{if(p.RuleId=="browser-publish")stop.Cancel();}));writer.Add(new("Fixture","room","sender",2,1,"pending"){Id="two"});writer.Complete(new(proof,"complete",0,0,2,0,0));});Assert.Equal(prior,store.Head);
+        using(var visible=ArchiveStore.Open(archive)){Assert.Single(visible.Page("Fixture/room",100));}
+        using(var writer=store.BeginWrite(source:proof))writer.Complete(new(proof,"complete",0,0,2,0,0));Assert.Equal(2,store.Page("Fixture/room",100).Count);using var roots=JsonDocument.Parse(File.ReadAllText(Path.Combine(archive,"browser","roots.json")));Assert.Equal(store.Head,roots.RootElement.GetProperty("roots")[0].GetProperty("head").GetString());
+    }
     private static void Sql(string path,string sql){if(sqlite3_open_v2(path,out nint handle,6,0)!=0)throw new Exception("fixture open");try{if(sqlite3_exec(handle,sql,0,0,0)!=0)throw new Exception("fixture SQL");}finally{sqlite3_close_v2(handle);}}
     [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)]string path,out nint handle,int flags,nint vfs);
     [DllImport("winsqlite3.dll",CallingConvention=CallingConvention.Cdecl)]private static extern int sqlite3_exec(nint handle,[MarshalAs(UnmanagedType.LPUTF8Str)]string sql,nint callback,nint state,nint error);

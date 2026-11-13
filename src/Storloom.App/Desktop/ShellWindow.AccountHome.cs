@@ -80,13 +80,11 @@ public sealed partial class ShellWindow {
             var export=AsyncButton("StoreExportReader",()=>RunStoreAction("export",item.Store??new StoreEntry("",item.Reader!,"",true)));export.Visibility=compactReader||item.Store!=null&&project==null?Visibility.Visible:Visibility.Collapsed;
             update.Visibility=readable?Visibility.Visible:Visibility.Collapsed;
             Section("ReadingTaskHeading",readable?item.Reading+(compactReader?" / "+L.T("StorageCompact"):""):L.T("ArchiveReadingPending"),open,update,fromBackup,export);
+            if(compactReader){var browser=AsyncButton("StandaloneEnable",()=>EnableBrowserReading(item.Reader!));browser.Name="archive_browser_enable";browser.IsEnabled=!pending;browser.ToolTip=L.T("StandaloneEnableHelp");details.Children.Add(View.Row(browser));}
             var protect=AsyncButton(encrypted?"HubAdjustProtection":"HubEncrypt",async()=>{if(project!=null)await ConfigureArchiveProtection(project);else if(item.Store!=null)await RunStoreAction("password",item.Store);else await ProtectConnectedReader(item.Reader!);});protect.Name="archive_protection";if(compactReader&&encrypted)protect.Visibility=Visibility.Collapsed;protect.IsEnabled=readable&&!pending&&(project!=null||item.Store==null||encrypted);
             if(item.Store!=null&&project==null)protect.Content=L.T("StoreChangePassword");
             var decrypt=AsyncButton("HubDecrypt",async()=>{if(project!=null)await RemoveArchiveProtection(project);else await DecryptConnectedReader(item.Reader!);});decrypt.Name="archive_decrypt";decrypt.IsEnabled=readable&&encrypted&&!pending&&(project!=null||item.Store==null);
-            if(project!=null&&project.Reading==null){
-
-                var preset=new CheckBox{Content=L.T("HubEncryptWhenCreated"),IsChecked=project.Protection!=ChatArchiveProtectionMode.None,Margin=new Thickness(0,0,0,10),IsEnabled=!pending};preset.Click+=(_,_)=>Guard(()=>{SaveArchive(project with{Protection=preset.IsChecked==true?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None});chatStep=-1;RenderChatStage();});preset.ToolTip=L.T("HubProtectionPresetHelp");details.Children.Add(preset);
-            }else {
+            if(project==null||project.Reading!=null){
                 var change=AsyncButton("ReadingChangePassword",()=>ChangeReadingPassword(item.Reader!));change.Name="archive_change_password";change.IsEnabled=readable&&encrypted&&!pending&&!directKey;change.ToolTip=L.T(directKey?"VaultDirectKeyFixed":"ReadingPasswordChangeHelp");
                 change.Visibility=encrypted&&(project!=null||item.Store==null)?Visibility.Visible:Visibility.Collapsed;
                 Section("HubReadingProtection",project!=null?new ArchiveRow(project).Protection:L.T(encrypted?"ArchiveProtectionAll":"ArchiveProtectionNone"),protect,decrypt,change);

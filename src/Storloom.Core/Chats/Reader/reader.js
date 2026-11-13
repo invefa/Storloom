@@ -1,7 +1,15 @@
 "use strict";
 (() => {
  const index = window.archiveIndex, labels = {...window.readerCatalogs?.[index.language], ...index.labels}, $ = id => document.getElementById(id);
- const archiveBase = window.archiveContentBase || '';
+ const archiveBase = window.archiveContentBase || '', transport=window.archiveTransport;
+ const observedAssets=new Map(),assetObserver=transport?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){assetObserver.unobserve(entry.target);const load=observedAssets.get(entry.target);observedAssets.delete(entry.target);load?.();}}):null;
+ function loadAsset(node,path,immediate=false){
+  if(!transport){node.src=archiveBase+path;return Promise.resolve();}
+  const load=()=>transport.asset(path).then(url=>{node.src=url;}).catch(error=>{if(error.message==='StandaloneLargeMedia'){const button=element('button',label('StandaloneLargeMedia'),'placeholder');button.onclick=()=>transport.save(path,node.dataset.name||path.split('/').at(-1));node.replaceWith(button);}else{node.dispatchEvent(new Event('error'));transport.error(error);}});
+  for(const target of observedAssets.keys())if(!target.isConnected){assetObserver.unobserve(target);observedAssets.delete(target);}
+  if(immediate||node.tagName!=='IMG')return load();
+  queueMicrotask(()=>{if(node.isConnected){observedAssets.set(node,load);assetObserver.observe(node);}else load();});return Promise.resolve();
+ }
  let current = null, page = 0, messages = [], request = 0, pendingJump = null;
  const referenceMaps = new Map(), referenceLoads = new Map();
  const label = key => labels[key] || key;
@@ -16,7 +24,7 @@
   details.append(summary);const panel=element('div','','identity-panel');details.append(panel);
   panel.append(element('strong',label('ReaderIdentity')));
   const portraitPath=current.Avatar||index.avatars?.[m.Conversation+'/'+m.Sender]||index.avatars?.[m.Sender];
-  if(portraitPath&&safeAsset(portraitPath)){const portrait=element('img','','identity-portrait');portrait.src=archiveBase+portraitPath;portrait.alt=nameOf(m);portrait.tabIndex=0;portrait.setAttribute('role','button');portrait.title=label('ReaderPreviewImage');portrait.onclick=()=>openImage(portraitPath,nameOf(m));portrait.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();portrait.click();}};panel.append(portrait);if(!current.Avatar)panel.append(element('small',label('ReaderSupplementedAvatar')));}
+  if(portraitPath&&safeAsset(portraitPath)){const portrait=element('img','','identity-portrait');loadAsset(portrait,portraitPath);portrait.alt=nameOf(m);portrait.tabIndex=0;portrait.setAttribute('role','button');portrait.title=label('ReaderPreviewImage');portrait.onclick=()=>openImage(portraitPath,nameOf(m));portrait.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();portrait.click();}};panel.append(portrait);if(!current.Avatar)panel.append(element('small',label('ReaderSupplementedAvatar')));}
 
   const rows=[['ReaderPlatform',m.Platform],['ReaderConversation',m.ConversationName||m.Conversation],['ReaderAccount',m.Sender],['ReaderNickname',current.Nickname],['ReaderFriendRemark',current.FriendRemark],['ReaderGroupCard',current.GroupCard]];
   if(current.RecordedName)rows.push(['ReaderRecordedName',current.RecordedName]);
@@ -25,7 +33,7 @@
   const versions=(identityHistory.get(m.Sender)||[]).filter(p=>!p.Conversation||p.Conversation===m.Conversation);
   if(versions.length){panel.append(element('strong',label('ReaderIdentityHistory')));const list=element('div','','identity-history');panel.append(list);
    for(const version of versions){const item=element('div','','identity-version');
-    if(version.Avatar&&safeAsset(version.Avatar)){const img=element('img');img.src=archiveBase+version.Avatar;img.alt=label('ReaderPreviewImage');img.tabIndex=0;img.setAttribute('role','button');img.onclick=()=>openImage(version.Avatar,nameOf(m));img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();img.click();}};item.append(img);}
+    if(version.Avatar&&safeAsset(version.Avatar)){const img=element('img');loadAsset(img,version.Avatar);img.alt=label('ReaderPreviewImage');img.tabIndex=0;img.setAttribute('role','button');img.onclick=()=>openImage(version.Avatar,nameOf(m));img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();img.click();}};item.append(img);}
     const values=[['ReaderNickname',version.Nickname],['ReaderFriendRemark',version.FriendRemark],['ReaderGroupCard',version.GroupCard],['ReaderRecordedName',version.RecordedName]].filter(([,v])=>v).map(([k,v])=>label(k)+': '+v);
     item.append(element('span',values.join(' · ')||label('ReaderNotRecorded')));
     if(version.ObservedAt)item.append(element('small',label('ReaderObservedAt')+': '+new Date(version.ObservedAt).toLocaleString()));
@@ -105,7 +113,7 @@
   for (const chat of index.conversations) {
    if (!chat.name.toLocaleLowerCase().includes(term)) continue;
    const button = element('button'); button.title = chat.name; button.classList.toggle('active', current?.id === chat.id);
-   const avatarPath=index.conversationAvatars?.[chat.id];if(avatarPath&&safeAsset(avatarPath)){button.classList.add('has-avatar');const img=element('img');img.src=archiveBase+avatarPath;img.alt='';img.onerror=()=>{img.remove();button.classList.remove('has-avatar');};button.append(img);}
+   const avatarPath=index.conversationAvatars?.[chat.id];if(avatarPath&&safeAsset(avatarPath)){button.classList.add('has-avatar');const img=element('img');loadAsset(img,avatarPath);img.alt='';img.onerror=()=>{img.remove();button.classList.remove('has-avatar');};button.append(img);}
    button.append(element('strong', chat.name), element('small', chat.count + ' ' + labels.ReaderMessages));
    button.onclick = () => { stopSearch();archiveResults=null;archiveSearch=null; leaveContext();current = chat; page = readerPrefs.autoLast?Math.max(0,pageCount(chat)-1):0; $('message-search').value = ''; list(); load(); };
    fragment.append(button);
@@ -122,6 +130,7 @@
   text('page', (page + 1) + ' / ' + pageCount(current));
   messages = []; $('messages').replaceChildren();
   if(pageSize!==physicalSize){const chat=current,n=page;logicalPage(chat,n).then(items=>{if(request===id)acceptPage(chat.id,n,items);}).catch(error=>{if(request===id&&error.message!=='cancelled')text('notice',labels.ReaderMissingMedia);});return;}
+  if(transport){const chat=current,n=page;transport.page(chat.id,n).then(items=>{if(request===id)acceptPage(chat.id,n,items);}).catch(error=>{if(request===id){text('notice',label('ReaderSearchFailed'));transport.error(error);}});return;}
   const script = element('script'); script.src = archiveBase + 'conversations/' + current.id + '-' + page + '.js';
   script.onload = () => script.remove();
   script.onerror = () => { script.remove(); if (request === id) text('notice', labels.ReaderMissingMedia); };
@@ -187,7 +196,7 @@
   const sourceRow=block?.closest('.message')?.resultRow;const conversation = sourceRow?.conversation||current.id;
   const local = (sourceRow?[sourceRow.message]:messages).find(m => m.ServerId === reference || ('seq:' + m.Sequence) === reference);
   if (local) { if(sourceRow)resultContext({...sourceRow,message:local},block);else showContext(local.Id,page,block); return; }
-  let map = index.nativeStore&&window.chrome?.webview?{[reference]:await storeRequest('store-reference',{conversation,reference}).catch(()=>null)}:referenceMaps.get(conversation);
+  let map = transport?{[reference]:await transport.reference(conversation,reference).catch(()=>null)}:index.nativeStore&&window.chrome?.webview?{[reference]:await storeRequest('store-reference',{conversation,reference}).catch(()=>null)}:referenceMaps.get(conversation);
   if (!map) map = await new Promise(resolve => {
    if (referenceLoads.has(conversation)) { resolve(null); return; }
    referenceLoads.set(conversation, resolve);
@@ -218,9 +227,9 @@
   const prefix = senderPrefix(m); return prefix && value.startsWith(prefix[0]) ? value.slice(prefix[0].length) : value;
  }
  function renderMedia(media, kind) {
-  if(media.Kind==='file'){const link=element('a',label('ReaderSaveFile'),'file-download');link.href=archiveBase+media.Path;link.download=media.Name||'file';link.onclick=e=>{if(hostAction({action:'save-file',path:media.Path,name:media.Name}))e.preventDefault();};return link;}
+  if(media.Kind==='file'){const link=element('a',label('ReaderSaveFile'),'file-download');link.href=transport?'#':archiveBase+media.Path;link.download=media.Name||'file';link.onclick=e=>{if(hostAction({action:'save-file',path:media.Path,name:media.Name}))e.preventDefault();};return link;}
   const node = element(media.Kind === 'video' ? 'video' : media.Kind === 'audio' ? 'audio' : 'img');
-  node.src = archiveBase + media.Path;
+  node.dataset.asset=media.Path;node.dataset.name=media.Name||'';loadAsset(node,media.Path);
   function fit(width, height) { if (width > 0 && height > 0) node.width = Math.max(1, Math.round(Math.min(width, 560, width * 420 / height)));if(pinBottom)requestAnimationFrame(scrollBottom); }
   if (node.tagName === 'IMG') { node.alt = media.Name; node.loading = 'lazy'; node.onload = () => fit(node.naturalWidth, node.naturalHeight); }
   else { node.controls = true; node.preload = 'none'; if (node.tagName === 'VIDEO') node.onloadedmetadata = () => fit(node.videoWidth,node.videoHeight); }
@@ -238,7 +247,7 @@
  const pageLoads=new Map(),storeRequests=new Map();let searching=0,storeRequestId=0;
  function stopSearch(){searching++;for(const pending of pageLoads.values())pending.cancel?.();pageLoads.clear();for(const pending of storeRequests.values())pending.reject(Error('cancelled'));storeRequests.clear();$('stop-search').hidden=true;$('find-page').disabled=$('find-previous').disabled=false;}
  window.chrome?.webview?.addEventListener('message',e=>{if(!['store-search-result','store-reference-result'].includes(e.data?.action))return;const pending=storeRequests.get(e.data.requestId);if(!pending)return;storeRequests.delete(e.data.requestId);e.data.error?pending.reject(Error('search')):pending.resolve(e.data.result);});
- function storeRequest(action,args){return new Promise((resolve,reject)=>{const requestId=++storeRequestId,timer=setTimeout(()=>{storeRequests.delete(requestId);reject(Error('timeout'));},30000),finish=callback=>value=>{clearTimeout(timer);callback(value);};storeRequests.set(requestId,{resolve:finish(resolve),reject:finish(reject)});window.chrome.webview.postMessage({action,requestId,...args});});}
+ function storeRequest(action,args){if(transport)return action==='store-search'?transport.search(args.text,args.cursor,args.reverse):transport.reference(args.conversation,args.reference);return new Promise((resolve,reject)=>{const requestId=++storeRequestId,timer=setTimeout(()=>{storeRequests.delete(requestId);reject(Error('timeout'));},30000),finish=callback=>value=>{clearTimeout(timer);callback(value);};storeRequests.set(requestId,{resolve:finish(resolve),reject:finish(reject)});window.chrome.webview.postMessage({action,requestId,...args});});}
  function indexedSearch(text,cursor,reverse){return storeRequest('store-search',{text,cursor,reverse});}
  const derivedParts=new WeakMap();
  function effectiveParts(m){if(!derivedParts.has(m))derivedParts.set(m,deriveParts(m));return derivedParts.get(m);}
@@ -276,6 +285,7 @@
   return (!from||localDate>=from)&&(!to||localDate<=to);
  }
  function readPage(conversation,n){
+  if(transport)return transport.page(conversation,n);
   const key=conversation+':'+n,existing=pageLoads.get(key);if(existing)return existing.promise;
   let callback;const promise=new Promise((resolve,reject)=>{const script=element('script');
    const cleanup=()=>{clearTimeout(timer);if(pageLoads.get(key)===callback)pageLoads.delete(key);script.remove();};
@@ -297,7 +307,7 @@
   finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;}}
  }
  async function searchArchive(batch,direction=archiveSearch?.direction||1){
-  if(index.nativeStore&&window.chrome?.webview&&$('message-search').value&&!$('kind-filter').value&&!$('sender-filter').value&&!$('date-from').value&&!$('date-to').value&&!$('self-filter').checked)return searchStore(batch,direction);
+  if(index.nativeStore&&(transport||window.chrome?.webview)&&$('message-search').value&&!$('kind-filter').value&&!$('sender-filter').value&&!$('date-from').value&&!$('date-to').value&&!$('self-filter').checked)return searchStore(batch,direction);
   stopSearch();leaveContext();const generation=searching;
   const fingerprint=JSON.stringify(readFilters())+':'+direction;
   if(!archiveSearch||archiveSearch.fingerprint!==fingerprint){const c=direction>0?0:index.conversations.length-1;
@@ -343,7 +353,7 @@
  function emojiPath(platform,key){if(!key)return null;const name=String(key).trim().replace(/^\//,'').replace(/^\[(.*)\]$/,'$1');return emojis[platform+':'+key]||emojis[platform+':'+name]||emojis[platform+':/'+name]||emojis[platform+':['+name+']'];}
  const emojiPatterns={};
  for(const platform of ['QQ','WeChat']){const tokens=new Set();for(const key of Object.keys(emojis).filter(k=>k.startsWith(platform+':'))){let token=key.slice(platform.length+1);if(!token.startsWith('/')&&!token.startsWith('['))continue;const name=token.replace(/^\//,'').replace(/^\[(.*)\]$/,'$1');tokens.add('['+name+']');tokens.add('/'+name);}const escaped=Array.from(tokens).sort((a,b)=>b.length-a.length).map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));emojiPatterns[platform]=escaped.length?new RegExp(escaped.join('|'),'g'):null;}
- function inlineEmoji(platform,key,title){const path=emojiPath(platform,key);if(!path||!safeAsset(path))return element('span',title||'['+label('ReaderKind_sticker')+']','inline-face');const img=element('img','','inline-face');img.src=archiveBase+path;img.alt=title||key;img.title=title||key;img.onerror=()=>img.replaceWith(element('span',img.alt,'inline-face'));return img;}
+ function inlineEmoji(platform,key,title){const path=emojiPath(platform,key);if(!path||!safeAsset(path))return element('span',title||'['+label('ReaderKind_sticker')+']','inline-face');const img=element('img','','inline-face');loadAsset(img,path);img.alt=title||key;img.title=title||key;img.onerror=()=>img.replaceWith(element('span',img.alt,'inline-face'));return img;}
  function textWithEmoji(node,value,platform){const pattern=emojiPatterns[platform];if(!pattern){node.textContent=value;return;}let at=0;for(const match of value.matchAll(pattern)){node.append(document.createTextNode(value.slice(at,match.index)));node.append(inlineEmoji(platform,match[0],match[0]));at=match.index+match[0].length;}node.append(document.createTextNode(value.slice(at)));}
  function sourceDisclosure(message) {
   const details = element('details', '', 'source'), summary = element('summary', label('ReaderSource'));
@@ -402,7 +412,7 @@
    const article = element('article', '', 'message' + (system ? ' system' : m.IsSelf ? ' self' : '')); if (m.Id) article.id = 'msg-' + m.Id;
    article.messageData=m;article.resultRow=archiveResults?row:null;
    const avatar = element('div', displayName && displayName!=='0'?Array.from(displayName)[0]:'?', 'avatar');
-   const avatarPath=identityOf(m).Avatar||index.avatars?.[m.Conversation+'/'+m.Sender]||index.avatars?.[m.Sender];if(avatarPath&&safeAsset(avatarPath)){const img=element('img');img.src=archiveBase+avatarPath;img.alt=displayName;img.onerror=()=>img.remove();avatar.append(img);}
+   const avatarPath=identityOf(m).Avatar||index.avatars?.[m.Conversation+'/'+m.Sender]||index.avatars?.[m.Sender];if(avatarPath&&safeAsset(avatarPath)){const img=element('img');loadAsset(img,avatarPath);img.alt=displayName;img.onerror=()=>img.remove();avatar.append(img);}
    const content = element('div', '', 'content'), date = new Date(m.Timestamp * 1000);
    const sender=displayName && displayName!=='0'?displayName:label('ReaderUnknownSender');
    const time = element('div', (system ? '' : sender + '  ') + (m.Timestamp>0 && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : label('ReaderUnknownTime')), 'timestamp');
@@ -526,13 +536,13 @@
  function transform(){picture.style.transform=`translate(${x}px,${y}px) scale(${scale}) rotate(${rotation}deg)`;text('zoom-value',Math.round(scale*100)+'%');}
  function fitImage(){x=y=0;const sideways=rotation%180!==0;scale=Math.min(1,(stage.clientWidth-32)/Math.max(1,sideways?picture.naturalHeight:picture.naturalWidth),(stage.clientHeight-32)/Math.max(1,sideways?picture.naturalWidth:picture.naturalHeight));transform();}
  function imageList(){const seen=new Set();return Array.from(document.querySelectorAll('#messages img.previewable')).filter(img=>{const key=img.closest('.message')?.id+':'+assetIdentity({Kind:'image',Path:img.dataset.asset});if(seen.has(key))return false;seen.add(key);return true;});}
- function openImage(path,name,origin=null){if(!safeAsset(path))return;imagePath=path;imageName=name||'image';imageOrigin=origin||imageList().find(img=>img.dataset.asset===path);rotation=0;picture.onload=fitImage;picture.src=archiveBase+path;picture.alt=imageName;if(!preview.open){centerPreview();preview.showModal();}const list=imageList(),at=list.indexOf(imageOrigin);text('image-title',imageName+(at>=0?' · '+(at+1)+' / '+list.length:''));$('image-previous').disabled=at<=0;$('image-next').disabled=at<0||at+1>=list.length;}
+ function openImage(path,name,origin=null){if(!safeAsset(path))return;imagePath=path;imageName=name||'image';imageOrigin=origin||imageList().find(img=>img.dataset.asset===path);rotation=0;picture.onload=fitImage;loadAsset(picture,path,true);picture.alt=imageName;if(!preview.open){centerPreview();preview.showModal();}const list=imageList(),at=list.indexOf(imageOrigin);text('image-title',imageName+(at>=0?' · '+(at+1)+' / '+list.length:''));$('image-previous').disabled=at<=0;$('image-next').disabled=at<0||at+1>=list.length;}
  function changeImage(delta){const list=imageList(),at=list.indexOf(imageOrigin),next=list[at+delta];if(next)openImage(next.dataset.asset,next.alt,next);}
  function locateImage(){const article=imageOrigin?.closest('.message');preview.close();if(!article){actionStatus(label('ReaderReferenceMissing'));return;}if(article.resultRow)resultContext(article.resultRow,imageOrigin);else highlight(article.messageData.Id);}
  $('image-locate').onclick=locateImage;
  for(const [id,delta,key] of [['rotate-left',-90,'ReaderRotateLeft'],['rotate-right',90,'ReaderRotateRight']]){$(id).title=label(key);$(id).setAttribute('aria-label',label(key));$(id).onclick=()=>{rotation=(rotation+delta+360)%360;fitImage();};}
  async function copyImage(path=imagePath,angle=rotation){
-  try{const img=new Image();img.src=(window.readerImageCopyBase?window.readerImageCopyBase+path.slice(7):archiveBase+path);await img.decode();if(img.naturalWidth*img.naturalHeight>32000000)throw Error('size');
+  try{const img=new Image();if(transport)await loadAsset(img,path,true);else img.src=(window.readerImageCopyBase?window.readerImageCopyBase+path.slice(7):archiveBase+path);await img.decode();if(img.naturalWidth*img.naturalHeight>32000000)throw Error('size');
    const canvas=document.createElement('canvas'),sideways=angle%180!==0;canvas.width=sideways?img.naturalHeight:img.naturalWidth;canvas.height=sideways?img.naturalWidth:img.naturalHeight;const ctx=canvas.getContext('2d');ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(angle*Math.PI/180);ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
    const encoded=canvas.toDataURL('image/png').split(',')[1];if(encoded.length>32*1024*1024)throw Error('size');if(hostAction({action:'clipboard-image',data:encoded}))return;
    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);actionStatus(label('ReaderCopied'));
@@ -548,7 +558,7 @@
  preview.addEventListener('pointerdown',e=>{backdropPressed=e.target===preview&&outsidePreview(e);});
  preview.onclick=e=>{if(backdropPressed&&e.target===preview&&outsidePreview(e))preview.close();backdropPressed=false;};
  $('image-previous').onclick=()=>changeImage(-1);$('image-next').onclick=()=>changeImage(1);$('image-close').onclick=()=>preview.close();preview.onkeydown=e=>{if(e.key==='ArrowLeft')changeImage(-1);if(e.key==='ArrowRight')changeImage(1);if(e.key==='+')zoom(1.25);if(e.key==='-')zoom(.8);};window.addEventListener('resize',()=>{if(preview.open)fitImage();if($('filter-panel').open)positionFilters();});
- function hostAction(message){if(window.chrome?.webview){window.chrome.webview.postMessage(message);return true;}return false;}
+ function hostAction(message){if(transport&&['save-file','save-image'].includes(message.action)){transport.save(message.path,message.name);return true;}if(window.chrome?.webview){window.chrome.webview.postMessage(message);return true;}return false;}
  let statusTimer;function actionStatus(value){text('action-status',value);clearTimeout(statusTimer);statusTimer=setTimeout(()=>text('action-status',''),4000);}
  window.chrome?.webview?.addEventListener('message',e=>{if(e.data?.action==='reader-status'&&typeof e.data.text==='string')actionStatus(e.data.text);});
  function saveImage(path,name){if(!safeAsset(path))return;if(hostAction({action:'save-image',path,name}))return;const a=element('a');a.href=archiveBase+path;a.download=(name||'image').replace(/[\\/:*?"<>|]/g,'_');document.body.append(a);a.click();a.remove();}
@@ -571,7 +581,7 @@
  function conversationDetails(){if(!current||archiveResults)return;
   text('conversation-details-title',current.name);const body=$('conversation-details-body');body.replaceChildren();
   const native=index.conversationKeys?.[current.id]||messages[0]?.Conversation||current.id;
-  const portrait=index.conversationAvatars?.[current.id];if(portrait&&safeAsset(portrait)){const img=element('img','','identity-portrait');img.src=archiveBase+portrait;img.alt=current.name;img.tabIndex=0;img.setAttribute('role','button');img.onclick=()=>openImage(portrait,current.name);img.onkeydown=e=>{if(e.key==='Enter')img.click();};body.append(img);}
+  const portrait=index.conversationAvatars?.[current.id];if(portrait&&safeAsset(portrait)){const img=element('img','','identity-portrait');loadAsset(img,portrait);img.alt=current.name;img.tabIndex=0;img.setAttribute('role','button');img.onclick=()=>openImage(portrait,current.name);img.onkeydown=e=>{if(e.key==='Enter')img.click();};body.append(img);}
   const facts=element('dl','','conversation-facts');for(const [key,value] of [['ReaderAccount',native],['ReaderMessages',String(current.count)],['ReaderPageSize',String(pageSize)]])facts.append(element('dt',label(key)),element('dd',value));body.append(facts);
   const known=new Map();for(const m of messages)if(m.Sender&&m.Sender!=='0')known.set(m.Sender,m);
   for(const profiles of identityHistory.values())for(const p of profiles)if(p.Conversation===native&&!known.has(p.Sender))known.set(p.Sender,{Sender:p.Sender,Conversation:native,Identity:p});

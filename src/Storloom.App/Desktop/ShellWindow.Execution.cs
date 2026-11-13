@@ -32,7 +32,7 @@ public sealed partial class ShellWindow {
         }
         if (review.Count == 0) throw new InvalidOperationException(L.T("SelectionRequired"));
         string warning = string.Join(Environment.NewLine, new[] { deletes.Count > 0 ? L.T("DeleteNotice") : "", commands.Count > 0 ? L.T("CommandNotice") : "" }.Where(s => s != ""));
-        var dialog = new ReviewWindow(review, warning) { Owner = this };
+        var dialog = new ReviewWindow(review, warning,dataRoot) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         await Run(async token => {
             int processed = 0, toolSuccess = 0, issues = 0;

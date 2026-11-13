@@ -11,7 +11,7 @@ internal sealed partial class ArchiveStore {
     // the destination's complete head is published; interrupted copies can resume.
     internal void RepackTo(ArchiveStore destination,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default){
         if(root.Equals(destination.root,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(root,destination.root)||PathPolicy.Under(destination.root,root))throw new IOException("Repack source and destination must be separate.");
-        using var lease=Lease(readOnly:true);using var writer=destination.BeginWrite(cancellation,"repack:"+Id+":"+Head,progress);var files=query.Files();long total=files.Sum(f=>f.Length),bytes=0;int done=0;
+        using var lease=Lease(readOnly:true);destination.StandaloneRequested=HasStandalone;using var writer=destination.BeginWrite(cancellation,"repack:"+Id+":"+Head,progress);var files=query.Files();long total=files.Sum(f=>f.Length),bytes=0;int done=0;
         foreach(var (conversation,_) in query.Conversations())foreach(var row in ReaderRows(conversation)){OperationPause.Check(cancellation);writer.AddStored(row);if(++done%512==0)progress?.Report(new("archive-repack-messages",done,0,TotalFiles:(int)Math.Min(int.MaxValue,query.MessageCount)));}
         var versions=new Dictionary<string,ArchiveFileEntry>(StringComparer.Ordinal);var snapshots=new List<NativeSnapshot>();
         foreach(var file in files.Where(f=>f.Path.StartsWith("native-snapshots/",StringComparison.Ordinal))){using var input=OpenFile(file.Path);snapshots.Add(ReadNativeSnapshot(input));}

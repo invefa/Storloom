@@ -10,7 +10,7 @@ internal sealed class ChatSourceLease : IDisposable {
     internal static ChatSourceLease Open(string root,ChatPlatform platform,CancellationToken cancellation,bool checkRunningClients=true,IProgress<ScanProgress>? progress=null,string? identityRoot=null){
         root=PathPolicy.Normalize(root);PathPolicy.AssertNoLinks(root);
         var names=platform==ChatPlatform.QQ?new[]{"QQ"}:new[]{"Weixin","WeChat"};
-        if(checkRunningClients&&CleanupEngine.RunningProcesses(new CleanupRule{Processes=names}).Length>0)throw new IOException("Close the chat client before reading its databases.");
+        if(checkRunningClients&&CleanupEngine.RunningProcesses(new CleanupRule{Processes=names}).Length>0)throw new IOException(Storloom.Core.Localization.L.T("ChatSourceBusy"));
         var result=new ChatSourceLease(root,identityRoot);
         try{
             var files=new List<string>();

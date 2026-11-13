@@ -75,6 +75,7 @@ internal sealed partial class ArchiveStore {
                 byte[]? key=store.keys?.DomainKey("query/private");try{query=new(directory,store.keys!=null,key);}finally{if(key!=null)CryptographicOperations.ZeroMemory(key);}
                 if(query.Applied!=log.Head)throw new IOException("Published query snapshot does not match its data.");
             }
+            if(store.StandaloneRequested||store.HasStandalone){store.PublishBrowser(log.Head!,query,Open,progress,cancellation);store.WriteBrowserRuntime(cancellation);}
             string mapping=Path.Combine(store.root,"projection.json");var projections=new List<Projection>{new(log.Head,task.Directory)};
             if(File.Exists(mapping))projections.AddRange(JsonFiles.Read<Projection[]>(mapping).Where(p=>p.Head!=log.Head));JsonFiles.Write(mapping,projections.Take(16).ToArray());
             var nextLease=LeaseQuery(Path.GetDirectoryName(query.DatabasePath)!);try{store.log.PublishCopiedHead(task.BaseHead,log.Head);}catch{nextLease.Dispose();throw;}

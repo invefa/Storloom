@@ -108,16 +108,24 @@ internal sealed record ReviewItem(string Name, string Action, string Amount, str
     public long? Bytes { get; init; }
 }
 internal sealed class ReviewWindow : ThemeWindow {
-    public ReviewWindow(List<ReviewItem> items, string warning) : base(L.T("ReviewTitle"), 1000, 680) {
-        var grid = View.Grid(View.Auto, View.Fill, new GridLength(160), View.Auto, View.Auto); grid.Margin = new Thickness(24); Body.Children.Add(grid);
+    private sealed record Split(double Ratio);
+    public ReviewWindow(List<ReviewItem> items, string warning,string? dataRoot=null) : base(L.T("ReviewTitle"), 1000, 680) {
+        MinWidth=640;MinHeight=480;double ratio=.55;string? settings=dataRoot==null?null:Path.Combine(dataRoot,"window-review-split.json");
+        try{if(settings!=null&&File.Exists(settings)){double saved=JsonFiles.Read<Split>(settings).Ratio;if(double.IsFinite(saved))ratio=Math.Clamp(saved,.15,.85);}}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException){}
+        if(dataRoot!=null)WindowGeometry.Attach(this,dataRoot,"review",640,480);
+        var grid = View.Grid(View.Auto,new GridLength(ratio,GridUnitType.Star),new GridLength(12),new GridLength(1-ratio,GridUnitType.Star),View.Auto,View.Auto); grid.Margin = new Thickness(24); Body.Children.Add(grid);
+        grid.RowDefinitions[1].MinHeight=90;grid.RowDefinitions[3].MinHeight=100;
         View.Add(grid, View.Text(L.T("ReviewLead")), 0);
         var list = View.Table(("Rule", "Name", 0), ("Action", "Action", 150), ("Bytes", "Amount", 120)); list.ItemsSource = items; View.Add(grid, list, 1);
-        var details = View.Input(readOnly: true); details.Height = double.NaN; details.AcceptsReturn = true; details.TextWrapping = TextWrapping.Wrap; details.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        details.VerticalAlignment = VerticalAlignment.Stretch; details.VerticalContentAlignment = VerticalAlignment.Top; details.Margin = new Thickness(0, 12, 0, 12); View.Add(grid, details, 2);
+        var divider=new GridSplitter{Name="review_splitter",Height=12,HorizontalAlignment=HorizontalAlignment.Stretch,VerticalAlignment=VerticalAlignment.Stretch,ResizeDirection=GridResizeDirection.Rows,ResizeBehavior=GridResizeBehavior.PreviousAndNext,Background=Brushes.Transparent,Cursor=System.Windows.Input.Cursors.SizeNS};
+        var template=new ControlTemplate(typeof(GridSplitter));var hit=new FrameworkElementFactory(typeof(Grid));hit.SetValue(Panel.BackgroundProperty,Brushes.Transparent);var line=new FrameworkElementFactory(typeof(Border));line.SetValue(FrameworkElement.HeightProperty,1d);line.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);line.SetResourceReference(Border.BackgroundProperty,"Line");hit.AppendChild(line);template.VisualTree=hit;divider.Template=template;View.Add(grid,divider,2);
+        divider.DragCompleted+=(_,_)=>{double total=grid.RowDefinitions[1].ActualHeight+grid.RowDefinitions[3].ActualHeight;if(total<=0)return;double share=Math.Clamp(grid.RowDefinitions[1].ActualHeight/total,.15,.85);grid.RowDefinitions[1].Height=new GridLength(share,GridUnitType.Star);grid.RowDefinitions[3].Height=new GridLength(1-share,GridUnitType.Star);if(settings!=null)try{JsonFiles.Write(settings,new Split(share));}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){}};
+        var details = View.Input(readOnly: true); details.Name="review_details";details.Height = double.NaN; details.AcceptsReturn = true; details.TextWrapping = TextWrapping.Wrap; details.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        details.VerticalAlignment = VerticalAlignment.Stretch; details.VerticalContentAlignment = VerticalAlignment.Top; details.Margin = new Thickness(0,0,0,12); View.Add(grid, details, 3);
         list.SelectionChanged += (_, _) => { if (list.SelectedItem is ReviewItem item) details.Text = item.Destination + "\n" + item.Details; };
-        if (items.Count > 0) list.SelectedIndex = 0; View.Add(grid, View.Text(warning), 3);
+        if (items.Count > 0) list.SelectedIndex = 0; View.Add(grid, View.Text(warning), 4);
         var back = View.Button("GoBack", () => DialogResult = false); back.IsCancel = true;
-        var actions = View.Row(back, View.Button("ConfirmExecute", () => DialogResult = true, true)); actions.HorizontalAlignment = HorizontalAlignment.Right; View.Add(grid, actions, 4);
+        var actions = View.Row(back, View.Button("ConfirmExecute", () => DialogResult = true, true)); actions.HorizontalAlignment = HorizontalAlignment.Right; View.Add(grid, actions, 5);
         Loaded += (_, _) => back.Focus();
     }
 }

@@ -169,7 +169,7 @@ public sealed class OperationPanel : Grid {
         if (!string.IsNullOrWhiteSpace(value.Detail) && detail != value.Detail) { detail = value.Detail; if(DebugToggle.IsChecked==true)AddDebugDetail("file."+phase,detail); }
         var counts=new List<string>();
         bool messages=phase is "chat-reader" or "chat-export" or "chat-update-index" or "chat-update-merge" or "archive-migration-messages";
-        string unit=L.T(messages?"ProgressUnitMessages":phase=="chat-pages"?"ProgressUnitConversations":"ProgressUnitFiles");
+        string unit=L.T(messages?"ProgressUnitMessages":phase is "chat-pages" or "browser-statistics"?"ProgressUnitConversations":"ProgressUnitFiles");
         if(value.TotalFiles is int files)counts.Add(L.T("ProgressCountTotal",value.Files,files,unit));
         else if(value.Files>0)counts.Add(L.T("ProgressCount",value.Files,unit));
         if(value.TotalBytes is long bytes)counts.Add(View.Size(value.Bytes)+" / "+View.Size(bytes));
@@ -210,6 +210,7 @@ public sealed class OperationPanel : Grid {
     }
     private static string Phase(string id) => L.T(PhaseKey(id));
     private static string PhaseKey(string id) => id switch {
+        "browser-statistics"=>"PhaseBrowserStatistics","browser-publish"=>"PhaseBrowserPublish",
         "archive-query-publish"=>"PhaseQueryPublish",
         "archive-workspace-retained"=>"PhaseWorkRetained",
         "archive-input-cleanup"=>"PhaseCompactCleanup","archive-query-copy"=>"PhaseCompactQueryCopy","archive-native-pack"=>"PhaseArchiveBackup","archive-native-restore"=>"PhaseCompactRestore","archive-repack-messages"=>"PhaseStoreMessages","archive-repack-files"=>"PhaseCompactRepack","archive-compact-unchanged"=>"PhaseCompactUnchanged",

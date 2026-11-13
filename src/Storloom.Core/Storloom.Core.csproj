@@ -8,6 +8,6 @@
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.14" />
     <PackageReference Include="SQLite3MC.PCLRaw.bundle" Version="2.6.1" />
     <EmbeddedResource Include="Localization/Locales/*.json" />
-    <EmbeddedResource Include="Chats/Reader/*" />
+    <EmbeddedResource Include="Chats/Reader/**/*" />
   </ItemGroup>
 </Project>

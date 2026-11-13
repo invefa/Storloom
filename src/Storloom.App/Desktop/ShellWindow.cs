@@ -247,10 +247,10 @@ public sealed partial class ShellWindow : ThemeWindow {
     }
     private bool Confirm(string message) => Notice.Show(this, L.T("Confirm"), message, true);
     private IProgress<ScanProgress> Progress() => new ProgressRelay(Dispatcher, value => { if (operation != null) operationView.Report(value); });
-    private Task RunPausable(Func<CancellationToken, Task> work) => RunCore(work,true);
-    private Task Run(Func<CancellationToken, Task> work) => RunCore(work,false);
-    private async Task RunCore(Func<CancellationToken, Task> work,bool pausable) {
-        if (operation != null) return;
+    private Task<bool> RunPausable(Func<CancellationToken, Task> work) => RunCore(work,true);
+    private Task<bool> Run(Func<CancellationToken, Task> work) => RunCore(work,false);
+    private async Task<bool> RunCore(Func<CancellationToken, Task> work,bool pausable) {
+        if (operation != null) return false;
         using var source = new CancellationTokenSource(); using var pauseState=new OperationPause(); using var pauseScope=pauseState.Enter(); operationPause=pauseState; operation = source; operationIncomplete = false;
         navigation.IsEnabled = menu.IsEnabled = false;
         bool previousEnabled = operationButton?.IsEnabled ?? true;
@@ -273,6 +273,7 @@ public sealed partial class ShellWindow : ThemeWindow {
             if (operationButton != null) { operationButton.Content = previousContent; operationButton.IsEnabled = previousEnabled; }
             cancel.Visibility = statusFooter.Visibility = Visibility.Collapsed;if(source.IsCancellationRequested)operationView.AddLog(status.Text); operationView.Finish(status.Text, complete); }
         if (exitAfterOperation) _ = Dispatcher.BeginInvoke(new Action(Close));
+        return complete;
     }
     private static IEnumerable<Control> Controls(DependencyObject root) {
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) {

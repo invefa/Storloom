@@ -15,20 +15,21 @@ internal sealed partial class ArchiveStore {
     internal static bool Exists(string directory)=>File.Exists(Path.Combine(directory,"archive.json"));
     internal static bool NeedsPassword(string directory){string marker=Path.Combine(directory,"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");return JsonFiles.Read<Configuration>(marker).Protected;}
     private Dictionary<string,string>? readerConversations;
-    internal byte[] ReaderIndex(){lock(readGate){
+    internal byte[] ReaderIndex(){lock(readGate)return ReaderIndex(query,OpenFile);}
+    private byte[] ReaderIndex(ArchiveQueryCache query,Func<string,Stream> open){
         JsonObject metadata;
-        try{using var input=OpenFile("archive-index.js");using var text=new StreamReader(input);string raw=text.ReadToEnd();if(!raw.StartsWith("window.archiveIndex=",StringComparison.Ordinal))throw new InvalidDataException("Invalid reader metadata.");metadata=JsonNode.Parse(raw["window.archiveIndex=".Length..].Trim().TrimEnd(';'))!.AsObject();}
+        try{using var input=open("archive-index.js");using var text=new StreamReader(input);string raw=text.ReadToEnd();if(!raw.StartsWith("window.archiveIndex=",StringComparison.Ordinal))throw new InvalidDataException("Invalid reader metadata.");metadata=JsonNode.Parse(raw["window.archiveIndex=".Length..].Trim().TrimEnd(';'))!.AsObject();}
         catch(FileNotFoundException){metadata=new(){["language"]=L.Language,["labels"]=JsonSerializer.SerializeToNode(L.Keys.Where(k=>k.StartsWith("Reader",StringComparison.Ordinal)||k=="ChatArchive").ToDictionary(k=>k,k=>L.T(k)))};}
-        readerConversations=new(StringComparer.Ordinal);var chats=new JsonArray();var native=metadata["conversationKeys"] as JsonObject??new();metadata["conversationKeys"]=native;
+        var conversations=new Dictionary<string,string>(StringComparer.Ordinal);var chats=new JsonArray();var native=metadata["conversationKeys"] as JsonObject??new();metadata["conversationKeys"]=native;
         foreach(var (key,count) in query.Conversations()){
-            string conversation=key[(key.IndexOf('/')+1)..],id=JsonFiles.Hash(conversation)[..24].ToLowerInvariant();if(readerConversations.ContainsKey(id))id=JsonFiles.Hash(key)[..24].ToLowerInvariant();readerConversations[id]=key;
-            var sample=query.Page(key,1).FirstOrDefault();string name=conversation;
+            string conversation=key[(key.IndexOf('/')+1)..],id=JsonFiles.Hash(conversation)[..24].ToLowerInvariant();if(conversations.ContainsKey(id))id=JsonFiles.Hash(key)[..24].ToLowerInvariant();conversations[id]=key;
+            var sample=query.BrowserStatisticsReady?null:query.Page(key,1).FirstOrDefault();string name=query.BrowserConversationName(key) is{Length:>0} recorded?recorded:conversation;
             if(sample!=null){using var doc=JsonDocument.Parse(sample.Json);if(doc.RootElement.TryGetProperty("ConversationName",out var value)&&value.ValueKind==JsonValueKind.String)name=value.GetString()??name;}
             chats.Add(new JsonObject{["id"]=id,["name"]=name,["count"]=count,["pages"]=(count+299)/300});native[id]=conversation;
         }
-        metadata["conversations"]=chats;metadata["preferenceScope"]=Id;metadata["nativeStore"]=true;metadata["sourceIdentity"]=ImportCursor?.SourceIdentity;
+        if(ReferenceEquals(query,this.query))readerConversations=conversations;metadata["storeConversationKeys"]=JsonSerializer.SerializeToNode(conversations);metadata["conversations"]=chats;metadata["preferenceScope"]=Id;metadata["nativeStore"]=true;metadata["sourceIdentity"]=query.Cursor?.SourceIdentity;
         return Encoding.UTF8.GetBytes("window.archiveIndex="+metadata.ToJsonString()+";");
-    }}
+    }
     internal byte[] ReaderPage(string conversation,int page){lock(readGate){
         if(readerConversations==null)_=ReaderIndex();if(!readerConversations!.TryGetValue(conversation,out string? key))throw new FileNotFoundException("Unknown conversation.");
         var rows=query.PageAt(key,page);return Encoding.UTF8.GetBytes("window.receivePage("+JsonSerializer.Serialize(conversation)+","+page+",["+string.Join(',',rows.Select(r=>r.Json))+"]);");

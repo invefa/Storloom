@@ -36,8 +36,19 @@ internal sealed class ArchiveQueryCache:IDisposable {
             // Caller-generated Unicode tokens allow single-character and mixed-script queries.
             // The index stores postings only; display data remains in current_messages.
             index.Execute("CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(tokens,content='',detail=none,columnsize=0)");
+            index.Execute("CREATE TABLE IF NOT EXISTS browser_conversations(conversation TEXT PRIMARY KEY,count INTEGER NOT NULL,name TEXT NOT NULL) WITHOUT ROWID");
             if(index.Query("SELECT 1 FROM current_messages LIMIT 1").Count==0)freshIds=new(1<<26);
         }catch{index.Dispose();throw;}
+    }
+    internal bool BrowserStatisticsReady=>index.Query("SELECT v FROM projection WHERE k='browser-statistics'").Count!=0;
+    internal string? BrowserConversationName(string key)=>BrowserStatisticsReady?index.Query("SELECT name FROM browser_conversations WHERE conversation=?",key).SingleOrDefault()?[0]:null;
+    private static string DisplayName(Message message){using var document=JsonDocument.Parse(message.Json);return document.RootElement.TryGetProperty("ConversationName",out var name)&&name.ValueKind==JsonValueKind.String?name.GetString()??"":"";}
+    internal void EnableBrowserStatistics(IProgress<ScanProgress>? progress,CancellationToken cancellation){
+        if(BrowserStatisticsReady)return;using var interrupt=index.InterruptOnCancellation(cancellation);progress?.Report(new("browser-statistics",0,0));index.Execute("BEGIN");
+        try{index.Execute("DELETE FROM browser_conversations");index.Execute("INSERT INTO browser_conversations SELECT conversation,count(*),'' FROM current_messages GROUP BY conversation");var conversations=index.Query("SELECT conversation FROM browser_conversations ORDER BY conversation");int done=0;
+            foreach(var row in conversations){OperationPause.Check(cancellation);var sample=Page(row[0],1).First();index.Execute("UPDATE browser_conversations SET name=? WHERE conversation=?",DisplayName(sample),row[0]);progress?.Report(new("browser-statistics",++done,0,TotalFiles:conversations.Count));}
+            index.Execute("INSERT OR REPLACE INTO projection VALUES('browser-statistics','1')");index.Execute("COMMIT");
+        }catch{try{index.Execute("ROLLBACK");}catch(Microsoft.Data.Sqlite.SqliteException){}cancellation.ThrowIfCancellationRequested();throw;}
     }
     internal string? Applied=>index.Query("SELECT v FROM projection WHERE k='applied'").SingleOrDefault()?[0];
     internal ArchiveImportCursor? Cursor=>index.Query("SELECT v FROM projection WHERE k='import'").Select(r=>JsonSerializer.Deserialize<ArchiveImportCursor>(r[0])).SingleOrDefault();
@@ -46,7 +57,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
     internal int AssetCount=>int.Parse(index.Query("SELECT count(*) FROM archive_files WHERE path>='assets/' AND path<'assets0'").Single()[0],CultureInfo.InvariantCulture);
     internal bool HasObject(string id)=>index.Query("SELECT 1 FROM archive_objects WHERE id=?",id).Count!=0;
     internal Message? Find(string id)=>!MayContain(id)?null:index.Query("SELECT body FROM current_messages WHERE id=?",id).Select(r=>Read(r[0])).SingleOrDefault();
-    internal IReadOnlyList<(string Key,long Count)> Conversations()=>index.Query("SELECT conversation,count(*) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture))).ToArray();
+    internal IReadOnlyList<(string Key,long Count)> Conversations()=>index.Query(BrowserStatisticsReady?"SELECT conversation,count FROM browser_conversations ORDER BY conversation":"SELECT conversation,count(*) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture))).ToArray();
     internal IReadOnlyList<Message> PageAt(string conversation,int page,int size=300){
         if(page<0||size is <1 or >10000)throw new ArgumentOutOfRangeException(nameof(page));
         return index.Query("SELECT body FROM current_messages WHERE conversation=? ORDER BY time,id LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)",conversation,size.ToString(CultureInfo.InvariantCulture),checked((long)page*size).ToString(CultureInfo.InvariantCulture)).Select(r=>Read(r[0])).ToArray();
@@ -90,7 +101,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
                 Validate(batch);
                 var prepared=new (string Normalized,string Tokens,byte[] Body)[batch.Messages.Length];
                 Parallel.For(0,prepared.Length,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(Workers,1,32),CancellationToken=cancellation},n=>{var message=batch.Messages[n];prepared[n]=(Normalize(message.Text),Tokens(message.Text),Body(message));});
-                index.Execute("BEGIN");
+                bool browserStatistics=BrowserStatisticsReady;index.Execute("BEGIN");
                 try{
                     for(int messageIndex=0;messageIndex<batch.Messages.Length;messageIndex++){
                         var message=batch.Messages[messageIndex];var ready=prepared[messageIndex];
@@ -104,6 +115,8 @@ internal sealed class ArchiveQueryCache:IDisposable {
                             index.Execute("DELETE FROM message_references WHERE message_id=?",message.Id);
                         }else{index.ExecuteValues("INSERT INTO current_messages VALUES(?,?,CAST(? AS INTEGER),?,?)",message.Id,message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),ready.Normalized,ready.Body);row=index.LastInsertRowId.ToString(CultureInfo.InvariantCulture);Remember(message.Id);}
                         index.Execute("INSERT INTO message_search(rowid,tokens) VALUES(?,?)",row,ready.Tokens);
+                        if(browserStatistics){var old=previous==null?null:Read(previous[1]);if(old!=null&&old.Conversation!=message.Conversation){index.Execute("UPDATE browser_conversations SET count=count-1 WHERE conversation=?",old.Conversation);index.Execute("DELETE FROM browser_conversations WHERE count<=0");}
+                            index.Execute("INSERT INTO browser_conversations VALUES(?,CAST(? AS INTEGER),?) ON CONFLICT(conversation) DO UPDATE SET count=count+excluded.count,name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE name END",message.Conversation,old==null||old.Conversation!=message.Conversation?"1":"0",DisplayName(message));}
                         using var raw=JsonDocument.Parse(message.Json);
                         if(raw.RootElement.ValueKind==JsonValueKind.Object){
                             void Reference(string property,string prefix){if(raw.RootElement.TryGetProperty(property,out var value)&&value.ValueKind==JsonValueKind.String&&value.GetString() is{Length:>0} reference&&reference!="0")index.Execute("INSERT OR IGNORE INTO message_references VALUES(?,?,?)",message.Conversation,prefix+reference,message.Id);}

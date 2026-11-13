@@ -51,6 +51,7 @@ internal sealed partial class ArchiveStore {
         }
         OperationPause.Check(cancellation);
         PublishBackupText(destination,"archive.json",task.Configuration);if(task.Keyring!=null)PublishBackupText(destination,"keyring.json",task.Keyring);
+        CopyBrowserSnapshot(destination,task.Head,progress,cancellation);
         target.PublishCopiedHead(target.Head,task.Head);File.Delete(taskPath);
         return new(task.Head,copied,reused,bytes);
     }

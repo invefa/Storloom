@@ -34,6 +34,7 @@ internal sealed class ArchiveSqlite:IDisposable {
         if(command.Parameters.Count!=values.Length)throw new InvalidOperationException("Archive SQL parameter mismatch.");
         for(int n=0;n<values.Length;n++){command.Parameters[n].SqliteType=values[n] is byte[]?SqliteType.Blob:SqliteType.Text;command.Parameters[n].Value=values[n];}return command;
     }
+    internal IDisposable InterruptOnCancellation(CancellationToken cancellation)=>cancellation.Register(()=>SQLitePCL.raw.sqlite3_interrupt(connection.Handle));
     internal void Execute(string sql,params string[] values)=>Command(sql,values).ExecuteNonQuery();
     internal void ExecuteValues(string sql,params object[] values)=>Command(sql,values).ExecuteNonQuery();
     internal long LastInsertRowId=>SQLitePCL.raw.sqlite3_last_insert_rowid(connection.Handle);
