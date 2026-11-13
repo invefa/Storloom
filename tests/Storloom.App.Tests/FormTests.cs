@@ -16,6 +16,19 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void ReaderMediaReadsAreBoundedAndDisposeTheirArchiveStreams(){
+        var method=typeof(ChatReaderWindow).GetMethod("BufferResource",BindingFlags.Static|BindingFlags.NonPublic)!;
+        (byte[] Bytes,int Status,string Headers) Read(Stream stream,string? range){object result=method.Invoke(null,[stream,"video/mp4",range])!;var type=result.GetType();return ((byte[])type.GetProperty("Bytes")!.GetValue(result)!,(int)type.GetProperty("Status")!.GetValue(result)!,(string)type.GetProperty("Headers")!.GetValue(result)!);}
+        var input=new MemoryStream(new byte[8*1024*1024]);var first=Read(input,null);Assert.Equal(4*1024*1024,first.Bytes.Length);Assert.Equal(206,first.Status);Assert.Contains("Content-Range: bytes 0-4194303/8388608",first.Headers);Assert.False(input.CanRead);
+        var tail=Read(new MemoryStream(new byte[8*1024*1024]),"bytes=8388600-");Assert.Equal(8,tail.Bytes.Length);Assert.Contains("Content-Range: bytes 8388600-8388607/8388608",tail.Headers);
+        var invalid=Read(new MemoryStream(new byte[8]),"bytes=9-10");Assert.Equal(416,invalid.Status);Assert.Empty(invalid.Bytes);
+    }
+    [Fact]public void PackedReaderKeepsTheDispatcherResponsiveDuringSlowResourceReads()=>OnUi(()=>{
+        string fixture=Fixture(),packed=Path.Combine(fixture,"packed");using(var store=ArchiveStore.CreateBundle(packed)){using var writer=store.BeginWrite();writer.Add(new("Fixture","room","sender",1,1,"responsive reader fixture"){Id="one"});writer.Complete(new(new string('a',64),"complete",0,0,1,0,0));}
+        using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();int uiThread=Environment.CurrentManagedThreadId,readThread=uiThread;var window=new ChatReaderWindow(packed,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};typeof(ChatReaderWindow).GetProperty("ResourceReadObserver",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(window,(Action<string>)(path=>{if(path=="archive-index.js"){readThread=Environment.CurrentManagedThreadId;entered.Set();release.Wait(TimeSpan.FromSeconds(15));}}));
+        try{window.Show();var until=DateTime.UtcNow.AddSeconds(25);while(!entered.IsSet&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.True(entered.IsSet);Assert.NotEqual(uiThread,readThread);bool tick=false;window.Dispatcher.BeginInvoke(new Action(()=>tick=true));Pump();Assert.True(tick);release.Set();while(DateTime.UtcNow<until){Pump();if(window.Browser.CoreWebView2!=null&&Wait(window.Browser.CoreWebView2!.ExecuteScriptAsync("document.querySelectorAll('.message').length"))=="1")break;Thread.Sleep(10);}Assert.Equal("1",Wait(window.Browser.CoreWebView2!.ExecuteScriptAsync("document.querySelectorAll('.message').length")));}
+        finally{release.Set();window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
     [Fact]public void ArchiveInputsValidateBeforeStartingAndBackRetainsTheSourceAndDraft()=>OnUi(()=>{
         string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);Directory.CreateDirectory(data);File.WriteAllBytes(Path.Combine(source,"nt_msg.db"),new byte[5120]);var project=ChatArchiveProject.Create("Fixture account",ChatPlatform.QQ,source,Path.Combine(fixture,"output")) with{Protection=ChatArchiveProtectionMode.All,ReadingRoot=Path.Combine(fixture,"reading")};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Height=900};const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;var type=typeof(ShellWindow);
         try{window.Show();window.Navigate("chats");Pump();Wait(AsResult((Task)type.GetMethod("PrepareReadingTask",flags)!.Invoke(window,[project,false])!));Pump();Button Start()=>Descendants(window).OfType<Button>().Single(b=>b.Name=="archive_start");Assert.False(Start().IsEnabled);
@@ -1435,9 +1448,8 @@ public sealed class FormTests {
             while(DateTime.UtcNow<until&&Query("document.querySelectorAll('.message').length")!="1"){Pump();Thread.Sleep(10);}
             Assert.Contains("Synthetic protected message",Query("document.querySelector('#messages').textContent"));Assert.True(core.Profile.IsInPrivateModeEnabled);
             using var vault=ChatVault.Open(reading,"synthetic-protected-reader");Assert.ThrowsAny<IOException>(()=>vault.Encrypt());
-            var request=core.Environment.CreateWebResourceRequest("https://archive.storloom.invalid/messages.jsonl","GET",null,"Range: bytes=2-6");
-            var response=(Microsoft.Web.WebView2.Core.CoreWebView2WebResourceResponse)typeof(ChatReaderWindow).GetMethod("VaultResponse",BindingFlags.Static|BindingFlags.NonPublic)!.Invoke(null,[core.Environment,request,vault.OpenRead("messages.jsonl"),"application/octet-stream"])!;
-            Assert.Equal(206,response.StatusCode);using(var bytes=new MemoryStream()){response.Content.CopyTo(bytes);response.Content.Dispose();Assert.Equal(original[2..7],bytes.ToArray());}
+            object response=typeof(ChatReaderWindow).GetMethod("BufferResource",BindingFlags.Static|BindingFlags.NonPublic)!.Invoke(null,[vault.OpenRead("messages.jsonl"),"application/octet-stream","bytes=2-6"])!;
+            Assert.Equal(206,response.GetType().GetProperty("Status")!.GetValue(response));Assert.Equal(original[2..7],(byte[])response.GetType().GetProperty("Bytes")!.GetValue(response)!);
             Assert.False(File.Exists(Path.Combine(reading,"archive-index.js")));Assert.False(File.Exists(Path.Combine(reading,"messages.jsonl")));
         }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
     });

@@ -42,7 +42,7 @@ internal sealed partial class ArchiveStore:IDisposable {
         }catch{keys?.Dispose();throw;}
     }
     internal static ArchiveStore Open(string directory,ReadOnlySpan<char> password=default,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default){
-        string root=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(root);string marker=Path.Combine(root,"archive.json");PathPolicy.AssertNoLinks(marker);
+        string root=ResolveRoot(directory);PathPolicy.AssertNoLinks(root);string marker=Path.Combine(root,"archive.json");PathPolicy.AssertNoLinks(marker);
         if(File.Exists(Path.Combine(root,"backup-task.json"))&&!File.Exists(Path.Combine(root,"HEAD")))throw new IOException("The first backup snapshot has not been published.");
         if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");
         var config=JsonFiles.Read<Configuration>(marker);if(config.Kind is not ("reading" or "native")||config.Version is not (2 or 3)||!Guid.TryParseExact(config.Id,"N",out _))throw new InvalidDataException("Unsupported archive format.");

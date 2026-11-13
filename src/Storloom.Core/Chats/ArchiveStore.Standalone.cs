@@ -6,7 +6,8 @@ using Storloom.Core.Localization;
 namespace Storloom.Core.Chats;
 
 internal sealed partial class ArchiveStore {
-    internal const string StandaloneEntry="阅读.html";
+    internal const string StandaloneEntry="index.html";
+    private static string EntryDirectory(string directory)=>Path.GetFileName(directory)==DataDirectory?Path.GetDirectoryName(directory)!:directory;
     internal bool StandaloneRequested{get;set;}
     internal bool HasStandalone=>File.Exists(Path.Combine(root,"browser","roots.json"));
     private sealed record BrowserRoot(string Head,string File);
@@ -15,7 +16,7 @@ internal sealed partial class ArchiveStore {
     private static string ReaderResource(string name){var assembly=typeof(ArchiveStore).Assembly;string suffix=".Chats.Reader."+name.Replace('/','.');string resource=assembly.GetManifestResourceNames().Single(n=>n.EndsWith(suffix,StringComparison.Ordinal));using var input=assembly.GetManifestResourceStream(resource)!;using var text=new StreamReader(input);return text.ReadToEnd().Replace("\r\n","\n");}
     internal string EnableStandalone(IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default){
         if(formatVersion!=3||IsNative(root))throw new InvalidOperationException(L.T("StandaloneUnsupportedArchive"));
-        using var lease=Lease();lock(readGate){if(Head==null)throw new InvalidOperationException("Publish a reading snapshot before enabling browser reading.");query.EnableBrowserStatistics(progress,cancellation);PublishBrowser(Head,query,OpenFile,progress,cancellation);WriteBrowserRuntime(cancellation);return Path.Combine(root,StandaloneEntry);}
+        using var lease=Lease();lock(readGate){if(Head==null)throw new InvalidOperationException("Publish a reading snapshot before enabling browser reading.");query.EnableBrowserStatistics(progress,cancellation);PublishBrowser(Head,query,OpenFile,progress,cancellation);WriteBrowserRuntime(cancellation);return Path.Combine(EntryDirectory(root),StandaloneEntry);}
     }
     private void PublishBrowser(string head,ArchiveQueryCache projection,Func<string,Stream> open,IProgress<ScanProgress>? progress,CancellationToken cancellation){
         OperationPause.Check(cancellation);projection.EnableBrowserStatistics(progress,cancellation);projection.Checkpoint();
@@ -45,7 +46,7 @@ internal sealed partial class ArchiveStore {
             var projections=new List<Projection>{new(snapshot,state.Query[..^"/query.db".Length])};string mapping=Path.Combine(destination,"projection.json");if(File.Exists(mapping)){PathPolicy.AssertNoLinks(mapping);projections.AddRange(JsonFiles.Read<Projection[]>(mapping).Where(p=>p.Head!=snapshot));}JsonFiles.Write(mapping,projections.Where(p=>p.Directory!="query").Take(16).ToArray());
             string targetBrowser=Path.Combine(destination,"browser");Directory.CreateDirectory(targetBrowser);PathPolicy.AssertNoLinks(targetBrowser);PublishBrowserBytes(targetBrowser,snapshot+".snapshot",cipher,cancellation);
             var roots=new List<BrowserRoot>{new(snapshot,snapshot+".snapshot")};string rootsPath=Path.Combine(targetBrowser,"roots.json");if(File.Exists(rootsPath)){PathPolicy.AssertNoLinks(rootsPath);roots.AddRange(JsonFiles.Read<BrowserRoots>(rootsPath).Roots.Where(r=>r.Head!=snapshot));}PublishBrowserBytes(targetBrowser,"roots.json",JsonSerializer.SerializeToUtf8Bytes(new BrowserRoots(1,roots.Take(16).ToArray()),JsonFiles.Options),cancellation);
-            string entry=Path.Combine(root,StandaloneEntry);PathPolicy.AssertNoLinks(entry);if(new FileInfo(entry).Length>16*1024*1024)throw new InvalidDataException("Browser runtime too large.");PublishBrowserBytes(destination,StandaloneEntry,File.ReadAllBytes(entry),cancellation);
+            string entry=Path.Combine(EntryDirectory(root),StandaloneEntry);PathPolicy.AssertNoLinks(entry);if(new FileInfo(entry).Length>16*1024*1024)throw new InvalidDataException("Browser runtime too large.");PublishBrowserBytes(EntryDirectory(destination),StandaloneEntry,File.ReadAllBytes(entry),cancellation);
         }finally{CryptographicOperations.ZeroMemory(cipher);CryptographicOperations.ZeroMemory(packed);CryptographicOperations.ZeroMemory(plain);}
     }
     private void WriteBrowserRuntime(CancellationToken cancellation){
@@ -71,6 +72,6 @@ internal sealed partial class ArchiveStore {
 <script>__SCRIPT__</script></body></html>
 """;
         html=html.Replace("__HASH__",Hash(source)).Replace("__READER_HASH__",readerHash).Replace("__STYLE__",ReaderResource("Standalone/style.css")).Replace("__NOTICES__",WebUtility.HtmlEncode(ReaderResource("Standalone/Vendor/NOTICE.txt"))).Replace("__SCRIPT__",source);
-        PublishBrowserBytes(root,StandaloneEntry,Encoding.UTF8.GetBytes(html),cancellation);
+        PublishBrowserBytes(EntryDirectory(root),StandaloneEntry,Encoding.UTF8.GetBytes(html),cancellation);
     }
 }

@@ -9,21 +9,26 @@ internal sealed partial class ArchiveStore {
     internal string DirectoryPath=>root;
     internal bool Protected=>keys!=null;
     internal ChatVaultKeyMode KeyMode=>keys?.KeyMode??ChatVaultKeyMode.Password;
-    internal static ChatVaultKeyMode ReadKeyMode(string directory)=>NeedsPassword(directory)?ArchiveKeyring.ReadKeyMode(directory):ChatVaultKeyMode.Password;
+    internal static ChatVaultKeyMode ReadKeyMode(string directory)=>NeedsPassword(directory)?ArchiveKeyring.ReadKeyMode(ResolveRoot(directory)):ChatVaultKeyMode.Password;
     internal void ChangePassword(ReadOnlySpan<char> password){using var lease=Lease();if(keys==null)throw new InvalidOperationException("This archive is not encrypted.");keys.ChangePassword(password);}
-    internal static bool SnapshotReads(string directory)=>File.Exists(Path.Combine(directory,"projection.json"));
-    internal static bool Exists(string directory)=>File.Exists(Path.Combine(directory,"archive.json"));
-    internal static bool NeedsPassword(string directory){string marker=Path.Combine(directory,"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");return JsonFiles.Read<Configuration>(marker).Protected;}
+    internal const string DataDirectory="archive-data";
+    internal static string ResolveRoot(string directory){string path=PathPolicy.Normalize(directory);if(!File.Exists(Path.Combine(path,"archive.json"))&&File.Exists(Path.Combine(path,DataDirectory,"archive.json")))path=Path.Combine(path,DataDirectory);if(Directory.Exists(path))PathPolicy.AssertNoLinks(path);return path;}
+    internal static ArchiveStore CreateBundle(string directory,ReadOnlySpan<char> password=default,ChatVaultKeyMode keyMode=ChatVaultKeyMode.Password){directory=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(Path.GetDirectoryName(directory)!);if(Directory.Exists(directory)||File.Exists(directory))throw new IOException("A new archive directory is required.");if(!password.IsEmpty||keyMode!=ChatVaultKeyMode.Password)ChatVault.ValidateCredential(password,keyMode);Directory.CreateDirectory(directory);return Create(Path.Combine(directory,DataDirectory),password,keyMode);}
+    internal static bool SnapshotReads(string directory)=>File.Exists(Path.Combine(ResolveRoot(directory),"projection.json"));
+    internal static bool Exists(string directory)=>!string.IsNullOrWhiteSpace(directory)&&Path.IsPathFullyQualified(directory)&&File.Exists(Path.Combine(ResolveRoot(directory),"archive.json"));
+    internal static bool NeedsPassword(string directory){string marker=Path.Combine(ResolveRoot(directory),"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");return JsonFiles.Read<Configuration>(marker).Protected;}
     private Dictionary<string,string>? readerConversations;
-    internal byte[] ReaderIndex(){lock(readGate)return ReaderIndex(query,OpenFile);}
+    private byte[]? cachedReaderIndex;private string? cachedReaderHead;
+    internal byte[] ReaderIndex(){lock(readGate){if(cachedReaderIndex!=null&&cachedReaderHead==Head)return cachedReaderIndex.ToArray();var bytes=ReaderIndex(query,OpenFile);if(bytes.Length<=16*1024*1024){cachedReaderIndex=bytes.ToArray();cachedReaderHead=Head;}return bytes;}}
     private byte[] ReaderIndex(ArchiveQueryCache query,Func<string,Stream> open){
         JsonObject metadata;
         try{using var input=open("archive-index.js");using var text=new StreamReader(input);string raw=text.ReadToEnd();if(!raw.StartsWith("window.archiveIndex=",StringComparison.Ordinal))throw new InvalidDataException("Invalid reader metadata.");metadata=JsonNode.Parse(raw["window.archiveIndex=".Length..].Trim().TrimEnd(';'))!.AsObject();}
         catch(FileNotFoundException){metadata=new(){["language"]=L.Language,["labels"]=JsonSerializer.SerializeToNode(L.Keys.Where(k=>k.StartsWith("Reader",StringComparison.Ordinal)||k=="ChatArchive").ToDictionary(k=>k,k=>L.T(k)))};}
         var conversations=new Dictionary<string,string>(StringComparer.Ordinal);var chats=new JsonArray();var native=metadata["conversationKeys"] as JsonObject??new();metadata["conversationKeys"]=native;
-        foreach(var (key,count) in query.Conversations()){
+        bool summarized=query.BrowserStatisticsReady;
+        foreach(var (key,count,recorded) in query.ReaderConversations(summarized)){
             string conversation=key[(key.IndexOf('/')+1)..],id=JsonFiles.Hash(conversation)[..24].ToLowerInvariant();if(conversations.ContainsKey(id))id=JsonFiles.Hash(key)[..24].ToLowerInvariant();conversations[id]=key;
-            var sample=query.BrowserStatisticsReady?null:query.Page(key,1).FirstOrDefault();string name=query.BrowserConversationName(key) is{Length:>0} recorded?recorded:conversation;
+            var sample=summarized?null:query.Page(key,1).FirstOrDefault();string name=recorded.Length>0?recorded:conversation;
             if(sample!=null){using var doc=JsonDocument.Parse(sample.Json);if(doc.RootElement.TryGetProperty("ConversationName",out var value)&&value.ValueKind==JsonValueKind.String)name=value.GetString()??name;}
             chats.Add(new JsonObject{["id"]=id,["name"]=name,["count"]=count,["pages"]=(count+299)/300});native[id]=conversation;
         }

@@ -10,7 +10,7 @@ internal sealed partial class ArchiveStore {
     private sealed record BackupTask(string Id,string? Head,string? Previous,string Configuration,string? Keyring,string Proof="");
     private string BackupProof(BackupTask task){byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(task with{Proof=""});if(keys==null)return Convert.ToHexStringLower(SHA256.HashData(bytes));byte[] secret=keys.DomainKey("backup/task");try{return Convert.ToHexStringLower(HMACSHA256.HashData(secret,bytes));}finally{CryptographicOperations.ZeroMemory(secret);}}
     internal ArchiveBackupResult BackupTo(string destination,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default){
-        using var sourceLease=Lease(readOnly:true);destination=PathPolicy.Normalize(destination);
+        using var sourceLease=Lease(readOnly:true);destination=ResolveRoot(destination);
         if(destination.Equals(root,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(destination,root)||PathPolicy.Under(root,destination))throw new InvalidOperationException("Backup directories must be separate.");
         PathPolicy.AssertNoLinks(Path.GetDirectoryName(destination)!);string taskPath=Path.Combine(destination,"backup-task.json");
         if(Directory.Exists(destination)){

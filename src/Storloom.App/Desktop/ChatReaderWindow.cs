@@ -16,18 +16,30 @@ public sealed class ChatReaderWindow : ThemeWindow {
     private ChatVault? vault;
     private ArchiveStore? store;
     private FileStream? readerLease;
+    private readonly SemaphoreSlim readWork=new(1,1);
+    private readonly CancellationTokenSource lifetime=new();
+    private readonly Dictionary<string,BufferedResource> resourceCache=new(StringComparer.Ordinal);
+    private long resourceCacheBytes;
+    internal Action<string>? ResourceReadObserver {get;set;}
+    private async Task<T> ReadAsync<T>(Func<T> work){
+        await readWork.WaitAsync(lifetime.Token);
+        try{return await Task.Run(()=>{lifetime.Token.ThrowIfCancellationRequested();return work();});}
+        finally{readWork.Release();}
+    }
     internal string? LastClipboardError { get; private set; }
     internal Action<System.Windows.Media.Imaging.BitmapSource> ImageClipboardWriter { get; set; } = Clipboard.SetImage;
     public ChatReaderWindow(string directory, string dataRoot, bool reduceMotion = false,string? archiveScope = null) : base(L.T("ChatArchive"), 1200, 820) {
         WindowGeometry.Attach(this,dataRoot,"reader",480,360);PickerHistory.Attach(this,dataRoot);
-        Body.Children.Add(Browser); Closed += (_, _) => { closed = true; Browser.Dispose(); readerLease?.Dispose(); vault?.Dispose(); store?.Dispose(); };
+        var loading=View.Stack(View.Text(L.T("ReaderOpening")),new System.Windows.Controls.ProgressBar{IsIndeterminate=true,Height=4,Margin=new Thickness(0,14,0,0)});loading.VerticalAlignment=VerticalAlignment.Center;loading.HorizontalAlignment=HorizontalAlignment.Center;
+        var surface=new System.Windows.Controls.Grid();surface.Children.Add(Browser);surface.Children.Add(loading);Body.Children.Add(surface);
+        Closed += (_, _) => { closed = true;lifetime.Cancel();Browser.Dispose();_ = Task.Run(async()=>{await readWork.WaitAsync();try{foreach(var resource in resourceCache.Values)CryptographicOperations.ZeroMemory(resource.Bytes);resourceCache.Clear();readerLease?.Dispose();vault?.Dispose();store?.Dispose();}finally{readWork.Release();}}); };
         Loaded += async (_, _) => {
             try {
                 LoadingStage="opening archive";directory = PathPolicy.Normalize(directory); PathPolicy.AssertNoLinks(directory);
                 if(File.Exists(Path.Combine(directory,".storloom-export.json")))throw new IOException(L.T("StoreFinishExport"));
                 bool packed=ArchiveStore.Exists(directory);
                 if(!packed||!ArchiveStore.SnapshotReads(directory)){
-                string lockPath=Path.Combine(directory,packed?"operation.lock":".export.lock");
+                string lockPath=Path.Combine(packed?ArchiveStore.ResolveRoot(directory):directory,packed?"operation.lock":".export.lock");
                 if(!File.Exists(lockPath)){using var create=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.Write,FileShare.Read);}
                 PathPolicy.AssertNoLinks(lockPath);readerLease=new FileStream(lockPath,FileMode.Open,FileAccess.Read,FileShare.Read);}
                 if(ChatVault.Exists(directory)||packed&&ArchiveStore.NeedsPassword(directory)){
@@ -60,11 +72,11 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         if(args.WebMessageAsJson.Length>34*1024*1024)return;
                         using var message=JsonDocument.Parse(args.WebMessageAsJson);var root=message.RootElement;
                         string? action=root.GetProperty("action").GetString();
-                        if(action=="store-reference"&&store!=null){int requestId=root.GetProperty("requestId").GetInt32();try{string conversation=root.GetProperty("conversation").GetString()??"",reference=root.GetProperty("reference").GetString()??"";byte[] target=await Task.Run(()=>store.ReaderReference(conversation,reference));if(!closed)core.PostWebMessageAsJson("{\"action\":\"store-reference-result\",\"requestId\":"+requestId+",\"result\":"+Encoding.UTF8.GetString(target)+"}");}catch{if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="store-reference-result",requestId,error=true}));}return;}
+                        if(action=="store-reference"&&store!=null){int requestId=root.GetProperty("requestId").GetInt32();try{string conversation=root.GetProperty("conversation").GetString()??"",reference=root.GetProperty("reference").GetString()??"";byte[] target=await ReadAsync(()=>store.ReaderReference(conversation,reference));if(!closed)core.PostWebMessageAsJson("{\"action\":\"store-reference-result\",\"requestId\":"+requestId+",\"result\":"+Encoding.UTF8.GetString(target)+"}");}catch{if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="store-reference-result",requestId,error=true}));}return;}
                         if(action=="store-search"&&store!=null){
                             int searchId=root.GetProperty("requestId").GetInt32();
                             try{string query=root.GetProperty("text").GetString()??"";string? cursor=root.TryGetProperty("cursor",out var c)&&c.ValueKind==JsonValueKind.String?c.GetString():null;bool reverse=root.TryGetProperty("reverse",out var r)&&r.GetBoolean();
-                                byte[] result=await Task.Run(()=>store.ReaderSearch(query,cursor,reverse));if(!closed)core.PostWebMessageAsJson("{\"action\":\"store-search-result\",\"requestId\":"+searchId+",\"result\":"+Encoding.UTF8.GetString(result)+"}");
+                                byte[] result=await ReadAsync(()=>store.ReaderSearch(query,cursor,reverse));if(!closed)core.PostWebMessageAsJson("{\"action\":\"store-search-result\",\"requestId\":"+searchId+",\"result\":"+Encoding.UTF8.GetString(result)+"}");
                             }catch{if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="store-search-result",requestId=searchId,error=true}));}return;
                         }
                         if(action!="clipboard-image"&&args.WebMessageAsJson.Length>1024*1024)return;
@@ -78,8 +90,8 @@ public sealed class ChatReaderWindow : ThemeWindow {
                         string extension=Path.GetExtension(source);if(!name.EndsWith(extension,StringComparison.OrdinalIgnoreCase))name+=extension;
                         var picker=new Microsoft.Win32.SaveFileDialog{Title=L.T(action=="save-image"?"ReaderSaveImage":"ReaderSaveFile"),FileName=name,Filter="File|*"+extension,AddExtension=true,DefaultExt=extension};
                         if(PickerHistory.Show(picker,this,action=="save-image"?"reader-save-image":"reader-save-file")!=true)return;
-                        if(vault==null&&store==null)SaveResourceFile(source,picker.FileName);
-                        else{using var input=store!=null?store.OpenFile(source):vault!.OpenRead(source);SaveDecryptedResource(input,picker.FileName);}
+                        if(vault==null&&store==null)await ReadAsync(()=>{SaveResourceFile(source,picker.FileName);return true;});
+                        else await ReadAsync(()=>{using var input=store!=null?store.OpenFile(source):vault!.OpenRead(source);SaveDecryptedResource(input,picker.FileName);return true;});
                         core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(action=="save-image"?"ReaderImageSaved":"ReaderFileSaved")}));
                     }catch(Exception ex)when(ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException or NotSupportedException or FormatException or OverflowException or CryptographicException){if(copyingImage)LastClipboardError=ex.GetType().Name+":"+ex.HResult.ToString("X");if(!closed)core.PostWebMessageAsJson(JsonSerializer.Serialize(new{action="reader-status",text=L.T(copyingImage?"ReaderCopyImageFailed":"ReaderSaveFailed")}));}
                 };
@@ -93,24 +105,31 @@ public sealed class ChatReaderWindow : ThemeWindow {
                 core.DownloadStarting += (_, args) => args.Cancel = true;
                 core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
                 var assets = ReaderAssets();
-                core.WebResourceRequested += (_, args) => {
+                core.WebResourceRequested += async (_, args) => {
                     if (!Allowed(args.Request.Uri)) args.Response = environment.CreateWebResourceResponse(null, 403, "Local archive only", "");
                     else if((vault!=null||store!=null)&&new Uri(args.Request.Uri).Host=="archive.storloom.invalid") {
+                        using var deferral=args.GetDeferral();
                         try{string relative=Uri.UnescapeDataString(new Uri(args.Request.Uri).AbsolutePath.TrimStart('/'));
+                            string? range=args.Request.Headers.Contains("Range")?args.Request.Headers.GetHeader("Range"):null;
+                            var resource=await ReadAsync(()=>{
+                            ResourceReadObserver?.Invoke(relative);
+                            string cacheKey=relative+"\n"+range;if(resourceCache.TryGetValue(cacheKey,out var cached))return cached;
                             Stream input;
                             if(store!=null&&relative=="archive-index.js")input=new MemoryStream(store.ReaderIndex(),false);
                             else if(store!=null&&System.Text.RegularExpressions.Regex.Match(relative,"^conversations/([a-f0-9]{24})-refs\\.js$") is{Success:true} reference)input=new MemoryStream(store.ReaderReferences(reference.Groups[1].Value),false);
                             else if(store!=null&&System.Text.RegularExpressions.Regex.Match(relative,"^conversations/([a-f0-9]{24})-([0-9]+)\\.js$") is{Success:true} match)input=new MemoryStream(store.ReaderPage(match.Groups[1].Value,int.Parse(match.Groups[2].Value,System.Globalization.CultureInfo.InvariantCulture)),false);
                             else input=store!=null?store.OpenFile(relative):vault!.OpenRead(relative);
-                            args.Response=VaultResponse(environment,args.Request,input,ContentType(relative));
-                        }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or OverflowException or JsonException){args.Response=environment.CreateWebResourceResponse(null,404,"Protected resource unavailable","Cache-Control: no-store");}
+                            var value=BufferResource(input,ContentType(relative),range);if(value.Bytes.Length<=512*1024){if(resourceCacheBytes+value.Bytes.Length>16*1024*1024){resourceCache.Clear();resourceCacheBytes=0;}resourceCache[cacheKey]=value;resourceCacheBytes+=value.Bytes.Length;}return value;});
+                            if(!closed)args.Response=environment.CreateWebResourceResponse(new MemoryStream(resource.Bytes,false),resource.Status,resource.Status==200?"OK":"Partial Content",resource.Headers);
+                        }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or OverflowException or JsonException or OperationCanceledException){if(!closed)args.Response=environment.CreateWebResourceResponse(null,404,"Protected resource unavailable","Cache-Control: no-store");}
                     }
                     else if (new Uri(args.Request.Uri).Host == "reader.storloom.invalid") {
                         string relative=new Uri(args.Request.Uri).AbsolutePath;
                         if(relative.StartsWith("/image-copy/",StringComparison.Ordinal)) {
-                            try {string path=vault!=null||store!=null?ValidateVaultResource("assets/"+relative[12..],true):ResolveImagePath(directory,"assets/"+relative[12..]);var input=store!=null?store.OpenFile(path):vault!=null?vault.OpenRead(path):File.OpenRead(path);if(input.Length>32*1024*1024){input.Dispose();throw new InvalidDataException("Image exceeds clipboard source limit.");}
-                                args.Response=environment.CreateWebResourceResponse(input,200,"OK","Content-Type: "+ContentType(path)+"\r\nCache-Control: no-store");
-                            }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException or CryptographicException){args.Response=environment.CreateWebResourceResponse(null,404,"Image unavailable","");}
+                            using var deferral=args.GetDeferral();
+                            try {var resource=await ReadAsync(()=>{string path=vault!=null||store!=null?ValidateVaultResource("assets/"+relative[12..],true):ResolveImagePath(directory,"assets/"+relative[12..]);using var input=store!=null?store.OpenFile(path):vault!=null?vault.OpenRead(path):File.OpenRead(path);if(input.Length>32*1024*1024)throw new InvalidDataException("Image exceeds clipboard source limit.");return BufferResource(input,ContentType(path),null);});
+                                if(!closed)args.Response=environment.CreateWebResourceResponse(new MemoryStream(resource.Bytes,false),resource.Status,"OK",resource.Headers);
+                            }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException or CryptographicException or OperationCanceledException){if(!closed)args.Response=environment.CreateWebResourceResponse(null,404,"Image unavailable","");}
                         }
                         else if (assets.TryGetValue(relative, out var asset))
                             args.Response = environment.CreateWebResourceResponse(new MemoryStream(asset.Bytes, false), 200, "OK", "Content-Type: " + asset.Type + "; charset=utf-8\r\nCache-Control: no-store");
@@ -118,9 +137,10 @@ public sealed class ChatReaderWindow : ThemeWindow {
                     }
                 };
                 if (reduceMotion) await core.AddScriptToExecuteOnDocumentCreatedAsync("document.addEventListener('DOMContentLoaded',()=>document.documentElement.classList.add('reduce-motion'));");
+                core.NavigationCompleted+=(_,_)=>loading.Visibility=Visibility.Collapsed;
                 LoadingStage="loading page";core.Navigate("https://reader.storloom.invalid/messages.html" + (Theme.IsDark ? "#dark" : "#light"));
             } catch (Exception ex) when (!closed) {
-                readerLease?.Dispose();vault?.Dispose();store?.Dispose();Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T(ChatVault.Exists(directory)||ArchiveStore.Exists(directory)?"VaultOpenFailed":"ReaderRuntimeMissing")+"\n"+ex.Message));
+                loading.Visibility=Visibility.Collapsed;readerLease?.Dispose();vault?.Dispose();store?.Dispose();Browser.Visibility = Visibility.Collapsed; Body.Children.Add(View.Text(L.T(ChatVault.Exists(directory)||ArchiveStore.Exists(directory)?"VaultOpenFailed":"ReaderRuntimeMissing")+"\n"+ex.Message));
             }
         };
     }
@@ -132,20 +152,17 @@ public sealed class ChatReaderWindow : ThemeWindow {
         ".js"=>"application/javascript", ".css"=>"text/css", ".html"=>"text/html", ".json"=>"application/json",
         ".jpg" or ".jpeg"=>"image/jpeg", ".png"=>"image/png", ".gif"=>"image/gif", ".webp"=>"image/webp", ".bmp"=>"image/bmp",
         ".mp4"=>"video/mp4", ".webm"=>"video/webm", ".wav"=>"audio/wav", ".mp3"=>"audio/mpeg", ".ogg"=>"audio/ogg", _=>"application/octet-stream"};
-    private static CoreWebView2WebResourceResponse VaultResponse(CoreWebView2Environment environment,CoreWebView2WebResourceRequest request,Stream stream,string type){
-        long length=stream.Length;string headers="Content-Type: "+type+"\r\nCache-Control: no-store\r\nAccept-Ranges: bytes";
-        if(request.Headers.Contains("Range")){
-            var match=System.Text.RegularExpressions.Regex.Match(request.Headers.GetHeader("Range"),"^bytes=([0-9]+)-([0-9]*)$");
-            if(!match.Success||!long.TryParse(match.Groups[1].Value,out long start)||start>=length){stream.Dispose();return environment.CreateWebResourceResponse(null,416,"Invalid range","Content-Range: bytes */"+length);}
-            long end=match.Groups[2].Value.Length>0&&long.TryParse(match.Groups[2].Value,out long requested)?Math.Min(requested,length-1):length-1;
-            if(end<start){stream.Dispose();return environment.CreateWebResourceResponse(null,416,"Invalid range","");}
-            stream.Position=start;return environment.CreateWebResourceResponse(new BoundedReadStream(stream,end-start+1),206,"Partial Content",headers+"\r\nContent-Length: "+(end-start+1)+"\r\nContent-Range: bytes "+start+"-"+end+"/"+length);
+    internal sealed record BufferedResource(byte[] Bytes,int Status,string Headers);
+    internal static BufferedResource BufferResource(Stream input,string type,string? range){
+        using(input){long length=input.Length,start=0,end=length-1;bool partial=range!=null;
+            string headers="Content-Type: "+type+"\r\nCache-Control: no-store\r\nAccept-Ranges: bytes";
+            if(range!=null){var match=System.Text.RegularExpressions.Regex.Match(range,"^bytes=([0-9]+)-([0-9]*)$");if(!match.Success||!long.TryParse(match.Groups[1].Value,out start)||start>=length)return new([],416,"Content-Range: bytes */"+length);if(match.Groups[2].Value.Length>0){if(!long.TryParse(match.Groups[2].Value,out long requested)||requested<start)return new([],416,"Content-Range: bytes */"+length);end=Math.Min(end,requested);}}
+            bool media=type.StartsWith("video/",StringComparison.Ordinal)||type.StartsWith("audio/",StringComparison.Ordinal);long limit=media?4*1024*1024:64*1024*1024;
+            if(end-start+1>limit){if(!media)throw new IOException("Reader resource exceeds the inline limit.");end=start+limit-1;partial=true;}
+            if(start!=0)input.Position=start;byte[] bytes=new byte[checked((int)Math.Max(0,end-start+1))];input.ReadExactly(bytes);
+            if(partial)headers+="\r\nContent-Range: bytes "+start+"-"+end+"/"+length;
+            return new(bytes,partial?206:200,headers+"\r\nContent-Length: "+bytes.Length);
         }
-        return environment.CreateWebResourceResponse(stream,200,"OK",headers+"\r\nContent-Length: "+length);
-    }
-    private sealed class BoundedReadStream(Stream input,long remaining):Stream{
-        public override int Read(byte[] buffer,int offset,int count){int read=input.Read(buffer,offset,(int)Math.Min(count,remaining));remaining-=read;return read;}
-        public override bool CanRead=>true;public override bool CanSeek=>false;public override bool CanWrite=>false;public override long Length=>remaining;public override long Position{get=>throw new NotSupportedException();set=>throw new NotSupportedException();}public override void Flush(){}public override long Seek(long offset,SeekOrigin origin)=>throw new NotSupportedException();public override void SetLength(long value)=>throw new NotSupportedException();public override void Write(byte[] buffer,int offset,int count)=>throw new NotSupportedException();protected override void Dispose(bool disposing){if(disposing)input.Dispose();base.Dispose(disposing);}
     }
     private static void SaveDecryptedResource(Stream input,string target){target=PathPolicy.Normalize(target);PathPolicy.AssertNoLinks(Path.GetDirectoryName(target)!);if(File.Exists(target)){PathPolicy.AssertNoLinks(target);if(NativeFile.ReadStamp(target).Links!=1)throw new IOException("Shared destination cannot be overwritten.");}using var output=new FileStream(target,FileMode.Create,FileAccess.Write,FileShare.None);input.CopyTo(output);output.Flush(true);}
     internal static void SaveResourceFile(string source,string target) {

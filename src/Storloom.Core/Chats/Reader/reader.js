@@ -4,7 +4,7 @@
  const archiveBase = window.archiveContentBase || '', transport=window.archiveTransport;
  const observedAssets=new Map(),assetObserver=transport?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){assetObserver.unobserve(entry.target);const load=observedAssets.get(entry.target);observedAssets.delete(entry.target);load?.();}}):null;
  function loadAsset(node,path,immediate=false){
-  if(!transport){node.src=archiveBase+path;return Promise.resolve();}
+  if(!transport){if(node.tagName==='IMG'&&!immediate){node.loading='lazy';node.decoding='async';}node.src=archiveBase+path;return Promise.resolve();}
   const load=()=>transport.asset(path).then(url=>{node.src=url;}).catch(error=>{if(error.message==='StandaloneLargeMedia'){const button=element('button',label('StandaloneLargeMedia'),'placeholder');button.onclick=()=>transport.save(path,node.dataset.name||path.split('/').at(-1));node.replaceWith(button);}else{node.dispatchEvent(new Event('error'));transport.error(error);}});
   for(const target of observedAssets.keys())if(!target.isConnected){assetObserver.unobserve(target);observedAssets.delete(target);}
   if(immediate||node.tagName!=='IMG')return load();

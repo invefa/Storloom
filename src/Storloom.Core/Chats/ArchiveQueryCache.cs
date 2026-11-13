@@ -57,6 +57,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
     internal int AssetCount=>int.Parse(index.Query("SELECT count(*) FROM archive_files WHERE path>='assets/' AND path<'assets0'").Single()[0],CultureInfo.InvariantCulture);
     internal bool HasObject(string id)=>index.Query("SELECT 1 FROM archive_objects WHERE id=?",id).Count!=0;
     internal Message? Find(string id)=>!MayContain(id)?null:index.Query("SELECT body FROM current_messages WHERE id=?",id).Select(r=>Read(r[0])).SingleOrDefault();
+    internal IReadOnlyList<(string Key,long Count,string Name)> ReaderConversations(bool summarized)=>summarized?index.Query("SELECT conversation,count,name FROM browser_conversations ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture),r[2])).ToArray():Conversations().Select(r=>(r.Key,r.Count,"")).ToArray();
     internal IReadOnlyList<(string Key,long Count)> Conversations()=>index.Query(BrowserStatisticsReady?"SELECT conversation,count FROM browser_conversations ORDER BY conversation":"SELECT conversation,count(*) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture))).ToArray();
     internal IReadOnlyList<Message> PageAt(string conversation,int page,int size=300){
         if(page<0||size is <1 or >10000)throw new ArgumentOutOfRangeException(nameof(page));

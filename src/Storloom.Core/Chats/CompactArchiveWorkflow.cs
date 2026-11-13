@@ -34,7 +34,7 @@ internal static class CompactArchiveWorkflow {
         using var source=ChatSourceLease.Open(sourceRoot,project.Platform,cancellation,checkClients&&snapshotSource==null,progress,identityRoot:project.Source);
         var proof=new SourceProof(project.Id,source.Hashes);string identity=JsonFiles.Hash(new{proof.Identity,Databases=proof.Databases.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}).ToLowerInvariant();
         var keyMode=retained?.KeyMode??request.KeyMode;
-        using var store=ArchiveStore.Exists(target)?ArchiveStore.Open(target,password.AsSpan(),progress,cancellation):ArchiveStore.Create(target,secure?password.AsSpan():default,secure?keyMode:ChatVaultKeyMode.Password);store.Workers=workers;store.StandaloneRequested=retained?.BrowserReading??request.BrowserReading;
+        using var store=ArchiveStore.Exists(target)?ArchiveStore.Open(target,password.AsSpan(),progress,cancellation):ArchiveStore.CreateBundle(target,secure?password.AsSpan():default,secure?keyMode:ChatVaultKeyMode.Password);store.Workers=workers;store.StandaloneRequested=retained?.BrowserReading??request.BrowserReading;
         SourceProof? prior=null;try{using var text=new StreamReader(store.OpenFile(".source.json"));prior=JsonSerializer.Deserialize<SourceProof>(text.ReadToEnd());}catch(FileNotFoundException){}
         if(prior?.Identity!=null&&prior.Identity!=project.Id)throw new IOException("Compact archive belongs to another source.");
         bool retryMedia=false;try{using var report=store.OpenFile("export-report.json");retryMedia=(JsonSerializer.Deserialize<ChatExportResult>(report,JsonFiles.Options)?.UnresolvedMedia??0)>0;}catch(FileNotFoundException){}

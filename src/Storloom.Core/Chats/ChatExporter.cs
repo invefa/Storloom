@@ -169,7 +169,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 issues.Add(new("chat-export", Path.GetRelativePath(source, database),
                     "QQ Guild uses a separate database key and is not included in this reading export. Its files remain in the raw backup."));
         var contacts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var avatars = new Dictionary<string,string>(StringComparer.Ordinal);
+        var avatars = new Dictionary<string,string>(StringComparer.Ordinal);var avatarOwners=new Dictionary<string,string>(StringComparer.Ordinal);
         var identities = new Dictionary<string,ChatIdentity>(StringComparer.Ordinal);
         int completed = checkpoint.Databases.Count; long messages = checkpoint.Databases.Values.Sum(d => d.Messages);
         var weights = new long[databases.Length]; var databaseBytes = databases.Select(p => new FileInfo(p).Length).ToArray();
@@ -186,7 +186,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 try {
                     bool shifted = PrepareDatabase(contact, plain, secret, platform, cancellation);
                     using var reader = new SqliteReader(plain, shifted);
-                    ReadContacts(reader, contacts, cancellation, identities);
+                    ReadContacts(reader, contacts, cancellation, identities,avatarOwners);
                     foreach(var avatar in ChatAvatars.Read(reader,destination,cancellation))avatars[avatar.Key]=avatar.Value;
                 } catch (Exception ex) when (ExportFailure(ex)) { issues.Add(new("chat-contacts", Path.GetRelativePath(source, contact), ex.Message)); }
                 finally { DeletePlain(plain); }
@@ -232,6 +232,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             databaseSeconds = clock.Elapsed.TotalSeconds; readerStarted = databaseSeconds;
             if (checkpointing && completed != databases.Length) throw new InvalidDataException("Database preparation is incomplete; committed progress was retained for resume.");
             using var voices = platform == ChatPlatform.WeChat ? new WeChatVoices(source, work, secret, cancellation) : null;
+            if(platform==ChatPlatform.QQ&&downloadQQGroupAvatars){foreach(var pair in ChatAvatars.DownloadQQUsers(contacts.Keys.Concat(avatarOwners.Values).Append(accountName??Path.GetFileName(source)),destination,progress,cancellation,parallelism))avatars[pair.Key]=pair.Value;foreach(var pair in avatarOwners)if(avatars.TryGetValue(pair.Value,out string? portrait))avatars[pair.Key]=portrait;}
             archive = new ChatArchiveWriter(source, destination, work, contacts, verified, cancellation, accountName ?? Path.GetFileName(source), useLocalImageConfiguration, checkpointing, parallelism, voices, avatars, downloadQQGroupAvatars, identities, defaultReaderDark, platform.ToString().ToLowerInvariant(),compact);
             progress?.Report(new("chat-reader", (int)Math.Min(archive.ProcessedMessages, int.MaxValue), 0, TotalFiles: (int)Math.Min(messages, int.MaxValue)));
             long assembled = 0;
@@ -309,12 +310,12 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                 var attributes = File.GetAttributes(path); if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                 string name = Path.GetFileName(path);
                 if ((attributes & FileAttributes.Directory) != 0) {
-                    if (!new[] { "attach", "FileStorage", "image", "video", "pic", "cache" }.Contains(name, StringComparer.OrdinalIgnoreCase)) pending.Push(path);
-                } else if (new[] { "contact.db", "MicroMsg.db", "nt_contact.db", "profile_info.db", "group_info.db", "head_image.db", "Misc.db" }.Contains(name, StringComparer.OrdinalIgnoreCase)) yield return path;
+                    if (!new[] { "attach", "FileStorage", "image", "video", "pic", "cache", "avatar", "avatars", "emoji", "emotion", "nt_data" }.Contains(name, StringComparer.OrdinalIgnoreCase)) pending.Push(path);
+                } else if (new[] { "contact.db", "MicroMsg.db", "nt_contact.db", "profile_info.db", "group_info.db", "head_image.db", "Misc.db" }.Contains(name, StringComparer.OrdinalIgnoreCase)||Regex.IsMatch(name,"^head_image_[0-9]+[.]db$",RegexOptions.IgnoreCase)) yield return path;
             }
         }
     }
-    private static void ReadContacts(SqliteReader reader, Dictionary<string, string> contacts, CancellationToken cancellation, Dictionary<string,ChatIdentity>? identities = null) {
+    private static void ReadContacts(SqliteReader reader, Dictionary<string, string> contacts, CancellationToken cancellation, Dictionary<string,ChatIdentity>? identities = null,Dictionary<string,string>? avatarOwners=null) {
         foreach (var row in reader.Query("SELECT name FROM sqlite_master WHERE type='table'", cancellation).ToArray()) {
             string table = row[0]?.ToString() ?? "";
             if (table is "profile_info_v6" or "group_member3" or "group_list" or "group_detail_info_ver1") {
@@ -336,6 +337,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
                             GroupCard: member ? value[2]?.ToString() : null);
                         identities[prefix + key] = identity;
                         if (uid != "") identities[prefix + uid] = identity with { Sender = uid };
+                        if(avatarOwners!=null){avatarOwners[prefix+key]=key;if(uid!="")avatarOwners[prefix+uid]=key;}
                     }
                     if (!group && uid != "") contacts[prefix + uid] = name;
                 }

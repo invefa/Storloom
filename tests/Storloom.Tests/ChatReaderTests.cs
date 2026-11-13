@@ -32,11 +32,11 @@ public sealed class ChatReaderTests : IDisposable {
         ChatIdentityHistory.FreezeLegacy(baseline);baseline["avatars"]!["sender"]="new.png";ChatIdentityHistory.FreezeLegacy(baseline);
         Assert.Equal("old.png",baseline["identityBaseline"]!["avatars"]!["sender"]!.GetValue<string>());
     }
-    [Fact]
-    public void AvatarMetadataIsExportedAndReaderRepairRejectsInvalidPaths() {
+    [Theory][InlineData("head_image.db","head_image","username","image_buffer")][InlineData("head_image_0.db","head_image","username","small_head_buf")][InlineData("Misc.db","ContactHeadImg1","usrName","bigHeadBuf")]
+    public void AvatarMetadataIsExportedAndReaderRepairRejectsInvalidPaths(string file,string table,string identity,string image) {
         string source=Path.Combine(root,"account");Directory.CreateDirectory(source);
         Database(Path.Combine(source,"message_0.db"),"CREATE TABLE MSG(Type,CreateTime,StrTalker,StrContent);INSERT INTO MSG VALUES(1,1700000000,'fixture','hello');");
-        Database(Path.Combine(source,"head_image.db"),"CREATE TABLE head_image(username,image_buffer);INSERT INTO head_image VALUES('fixture',X'"+Convert.ToHexString(Png)+"'),('invalid',X'000102');");
+        Database(Path.Combine(source,file),"CREATE TABLE "+table+"("+identity+","+image+");INSERT INTO "+table+" VALUES('fixture',X'"+Convert.ToHexString(Png)+"'),('invalid',X'000102');");
         var transfer=new TransferService();var backup=transfer.Execute(transfer.Plan(source,Path.Combine(root,"raw")),Path.Combine(root,"journals"));
         var result=new ChatExporter().ExportVerifiedBackup(backup.Manifest,Path.Combine(root,"reading"),ChatPlatform.WeChat);
         Assert.True(result.Issues.Count==0,string.Join(" | ",result.Issues.Select(i=>i.ToString())));string indexPath=Path.Combine(result.Directory,"archive-index.js");using var index=JsonDocument.Parse(File.ReadAllText(indexPath)["window.archiveIndex=".Length..].TrimEnd(';'));

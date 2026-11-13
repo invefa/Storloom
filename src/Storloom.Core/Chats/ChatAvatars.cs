@@ -3,6 +3,15 @@ using System.Security.Cryptography;
 namespace Storloom.Core.Chats;
 
 internal static class ChatAvatars {
+    internal static Dictionary<string,string> DownloadQQUsers(IEnumerable<string> users,string destination,IProgress<ScanProgress>? progress,CancellationToken cancellation,int workers=4){
+        string[] ids=users.Where(id=>System.Text.RegularExpressions.Regex.IsMatch(id,"^[1-9][0-9]{4,14}$")).Distinct(StringComparer.Ordinal).ToArray();var result=new System.Collections.Concurrent.ConcurrentDictionary<string,string>(StringComparer.Ordinal);int done=0;
+        using var client=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}){Timeout=TimeSpan.FromSeconds(8)};
+        Parallel.ForEach(ids,new ParallelOptions{MaxDegreeOfParallelism=Math.Clamp(workers,1,8),CancellationToken=cancellation},id=>{
+            try{using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromSeconds(8));using var response=client.GetAsync("https://q1.qlogo.cn/g?b=qq&nk="+id+"&s=100",HttpCompletionOption.ResponseHeadersRead,timeout.Token).GetAwaiter().GetResult();response.EnsureSuccessStatusCode();using var input=response.Content.ReadAsStream(timeout.Token);using var bytes=new MemoryStream();byte[] buffer=new byte[16384];int count;while((count=input.ReadAsync(buffer.AsMemory(),timeout.Token).AsTask().GetAwaiter().GetResult())>0){OperationPause.Check(cancellation);if(bytes.Length+count>8*1024*1024)throw new InvalidDataException("Avatar exceeds size limit.");bytes.Write(buffer,0,count);}byte[] image=bytes.ToArray();string? extension=WeChatImages.Format(image);if(extension is not (".png" or ".jpg" or ".gif" or ".webp" or ".bmp"))return;string assets=Path.Combine(destination,"assets");Directory.CreateDirectory(assets);PathPolicy.AssertNoLinks(assets);string name=Convert.ToHexStringLower(SHA256.HashData(image))+extension;lock(result){string path=Path.Combine(assets,name);if(File.Exists(path)){PathPolicy.AssertNoLinks(path);using var existing=File.OpenRead(path);if(!SHA256.HashData(existing).AsSpan().SequenceEqual(SHA256.HashData(image)))throw new IOException("Avatar content mismatch.");}else{using var output=new FileStream(path,FileMode.CreateNew,FileAccess.Write);output.Write(image);}result[id]="assets/"+name;}}
+            catch(Exception ex)when(ex is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException){OperationPause.Check(cancellation);}
+            finally{progress?.Report(new("chat-avatars",Interlocked.Increment(ref done),0,TotalFiles:ids.Length));}
+        });return new(result,StringComparer.Ordinal);
+    }
     internal static Dictionary<string,string> DownloadQQGroups(IEnumerable<string> groups,string destination,IProgress<ScanProgress>? progress,CancellationToken cancellation,out int failed,int workers=4) {
         string[] ids=groups.Where(g=>System.Text.RegularExpressions.Regex.IsMatch(g,"^group:[1-9][0-9]{4,14}$")).Distinct(StringComparer.Ordinal).ToArray();
         var result=new System.Collections.Concurrent.ConcurrentDictionary<string,string>(StringComparer.Ordinal);int done=0;
@@ -33,8 +42,8 @@ internal static class ChatAvatars {
         foreach(var (table,id,blob) in new[]{("head_image","username","image_buffer"),("ContactHeadImg1","usrName","smallHeadBuf")}) {
             if(!tables.Contains(table))continue;
             var columns=reader.Query("PRAGMA table_info("+SqliteReader.Identifier(table)+")",cancellation).Select(r=>r[1]?.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if(!columns.Contains(id)||!columns.Contains(blob))continue;
-            foreach(var row in reader.Query("SELECT "+SqliteReader.Identifier(id)+","+SqliteReader.Identifier(blob)+" FROM "+SqliteReader.Identifier(table),cancellation)) {
+            string? imageColumn=new[]{blob,"smallHeadBuf","bigHeadBuf","image_buffer","small_head_buf"}.FirstOrDefault(columns.Contains);if(!columns.Contains(id)||imageColumn==null)continue;
+            foreach(var row in reader.Query("SELECT "+SqliteReader.Identifier(id)+","+SqliteReader.Identifier(imageColumn)+" FROM "+SqliteReader.Identifier(table),cancellation)) {
                 if(row[0] is not string identity||identity.Length==0||row[1] is not byte[] bytes||bytes.Length>8*1024*1024)continue;
                 string? extension=WeChatImages.Format(bytes);if(extension is not (".png" or ".jpg" or ".gif" or ".webp" or ".bmp"))continue;
                 string name=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant()+extension;

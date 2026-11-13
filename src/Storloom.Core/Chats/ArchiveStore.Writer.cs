@@ -31,7 +31,7 @@ internal sealed partial class ArchiveStore {
                     using(var input=new FileStream(store.query.DatabasePath,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))using(var output=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){byte[] buffer=new byte[1024*1024];long bytes=0;int count;progress?.Report(new("archive-query-copy",0,0,input.Length,1));while((count=input.Read(buffer))>0){OperationPause.Check(cancellation);output.Write(buffer,0,count);bytes+=count;progress?.Report(new("archive-query-copy",0,bytes,input.Length,1));}output.Flush(true);}File.Move(temporary,database,false);
                 }
                 byte[]? key=store.keys?.DomainKey("query/private");try{query=new(directory,store.keys!=null,key);}finally{if(key!=null)CryptographicOperations.ZeroMemory(key);}
-                query.EnableWriteAhead();query.Replay(log,log.Head,store.Decode,cancellation,projection:store.DecodeProjection);sourceAssets=[];
+                query.EnableWriteAhead();if(store.Head==null)query.EnableBrowserStatistics(progress,cancellation);query.Replay(log,log.Head,store.Decode,cancellation,projection:store.DecodeProjection);sourceAssets=[];
             }catch{query?.Dispose();lease.Dispose();throw;}
         }
         internal Stream Open(string path){var file=query.FileEntry(path)??throw new FileNotFoundException(path);return new ChunkStream(file.Length,query.FileParts(file.Version),id=>store.ReadObject(id,query),()=>{});}
@@ -97,5 +97,5 @@ internal sealed partial class ArchiveStore {
             }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){/* A reader or external tool can keep a projection alive. */}
         }
     }
-    internal static void AbandonPending(string directory){string root=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(root);string lockPath=Path.Combine(root,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);using var lease=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);string path=Path.Combine(root,".write-task.json");if(File.Exists(path)){PathPolicy.AssertNoLinks(path);File.Move(path,path+"."+Guid.NewGuid().ToString("N")+".abandoned");}}
+    internal static void AbandonPending(string directory){string root=ResolveRoot(directory);PathPolicy.AssertNoLinks(root);string lockPath=Path.Combine(root,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);using var lease=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);string path=Path.Combine(root,".write-task.json");if(File.Exists(path)){PathPolicy.AssertNoLinks(path);File.Move(path,path+"."+Guid.NewGuid().ToString("N")+".abandoned");}}
 }
