@@ -8,6 +8,12 @@ using Xunit;
 namespace Storloom.Tests;
 
 public sealed class MessagePresentationTests {
+    [Theory][InlineData(47402)][InlineData(47419)]
+    public void QQRepliesReadEmbeddedSequenceSenderAndTimeWithoutLegacyReferenceFields(int sequenceField){
+        byte[] raw=B(40800,[..I(45002,7),..I(47402,sequenceField==47402?42UL:17UL),..(sequenceField==47419?I(47419,42):[]),..I(47403,12345678),..I(47404,1700000000),..B(47423,[..I(45002,1),..S(45101,"quoted fixture")])]);
+        var reply=Assert.Single(QQMessageParser.Parse(raw,2));Assert.Equal("reply",reply.Kind);Assert.Equal("seq:42",reply.ReferenceId);Assert.Equal("12345678",reply.ReferenceSender);Assert.Equal(1700000000L,reply.ReferenceTimestamp);Assert.Equal("quoted fixture",reply.ReferenceText);
+        var empty=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,7),..I(47402,0),..I(47403,0),..I(47404,0)]),2));Assert.Null(empty.ReferenceId);Assert.Empty(empty.ReferenceSender);Assert.Null(empty.ReferenceTimestamp);
+    }
     [Fact]
     public void QQEmojiReactionsAreAttachedCountsAndNeverConfusedWithRecallRoles() {
         byte[] raw = [..B(40062,[..S(48301,"75"),..I(48302,1),..I(48303,3),..I(48304,1)]),

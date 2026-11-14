@@ -908,5 +908,7 @@
   "ReaderReferenceFailed": "Could not look up the quoted message. Please try again.",
   "ReaderFiltersActive": "Filtering ({0})",
   "ReaderFiltersPaused": "Filters retained ({0}); viewing context",
-  "ReaderSearchRunning": "Searching…"
+  "ReaderSearchRunning": "Searching…",
+  "ReaderReferenceMismatch": "A message with this reference was found, but its sender or time differs from the quote. Navigation was stopped to avoid opening the wrong message.",
+  "ReaderReferenceNoId": "The backup did not record a message ID or sequence that can locate this quote."
 }

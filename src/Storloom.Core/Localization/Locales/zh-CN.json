@@ -908,5 +908,7 @@
   "ReaderReferenceFailed": "引用查找失败, 请重试.",
   "ReaderFiltersActive": "筛选中 ({0})",
   "ReaderFiltersPaused": "已保留筛选 ({0}), 当前查看上下文",
-  "ReaderSearchRunning": "搜索中…"
+  "ReaderSearchRunning": "搜索中…",
+  "ReaderReferenceMismatch": "归档中存在同编号消息, 但发送者或时间与引用记录不一致, 已避免跳转到错误消息.",
+  "ReaderReferenceNoId": "备份未记录此引用可用于定位的消息编号或序号."
 }

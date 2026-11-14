@@ -212,24 +212,26 @@
    const result=target||null;referenceInfo.set(key,result);while(referenceInfo.size>256)referenceInfo.delete(referenceInfo.keys().next().value);return result;
   })();referencePending.set(key,pending);try{return await pending;}finally{referencePending.delete(key);}
  }
- async function jump(reference, block) {
+ function quoteMatches(message,part){if(!message)return false;const sender=part?.ReferenceSender,time=part?.ReferenceTimestamp;return !(sender&&/^[1-9][0-9]*$/.test(sender)&&message.Sender&&message.Sender!=='0'&&message.Sender!==sender)&&!(time>0&&message.Timestamp>0&&time!==message.Timestamp);}
+ async function resolveQuoteReference(conversation,part,platform,metadataOnly){let conflict=false;for(const reference of [...new Set([part.ReferenceId,...(part.ReferenceAlternatives||[])].filter(Boolean))]){const info=await lookupReference(conversation,reference,platform,true);if(!info)continue;if(info.message&&!quoteMatches(info.message,part)){conflict=true;continue;}return metadataOnly?info:await lookupReference(conversation,reference,platform,false);}return conflict?{unmatched:true}:null;}
+ async function jump(reference, block,part={ReferenceId:reference}) {
   const article=block?.closest('.message'),sourceRow=article?.resultRow,platform=article?.messageData?.Platform,conversation=sourceRow?.conversation||current.id;
   if(block?.getAttribute('aria-busy')==='true')return;block?.setAttribute('aria-busy','true');
   try{const local=localReference(reference,sourceRow?[sourceRow.message]:messages,platform);
-   if(local){if(sourceRow)resultContext({...sourceRow,message:local},block);else showContext(local.Id,page,block);return;}
-   const target=await lookupReference(conversation,reference,platform);
+   if(local&&quoteMatches(local,part)){if(sourceRow)resultContext({...sourceRow,message:local},block);else showContext(local.Id,page,block);return;}
+   const target=await resolveQuoteReference(conversation,part,platform,false);
    if(!sourceRow&&current.id!==conversation)return;
-   if(!target){actionStatus(label('ReaderReferenceNotFound'));return;}
+   if(!target){actionStatus(label('ReaderReferenceNotFound'));return;}if(target.unmatched){actionStatus(label('ReaderReferenceMismatch'));return;}
    if(sourceRow)resultContext({conversation,page:target.page,message:{Id:target.id}},block);else showContext(target.id,await logicalTarget(conversation,target.page,target.id));
   }catch(error){if(error.message!=='cancelled')actionStatus(label('ReaderReferenceFailed'));}finally{block?.removeAttribute('aria-busy');}
  }
  function quoteMetadata(quote,part,m){
   if(part.ReferenceText==='[Protected quote]')return;
   const meta=element('div','','quote-meta'),sender=element('span','','quote-sender'),time=element('time','','quote-time');meta.append(sender,time);quote.append(meta);
-  const show=message=>{sender.textContent=message?nameOf(message):part.ReferenceSender?(contactNames[m.Conversation+'/'+part.ReferenceSender]||contactNames[part.ReferenceSender]||part.ReferenceSender):label('ReaderUnknownSender');const stamp=message?.Timestamp||part.ReferenceTimestamp,date=new Date(stamp*1000);time.textContent=stamp>0&&!Number.isNaN(date.valueOf())?date.toLocaleString():label('ReaderUnknownTime');if(stamp>0&&!Number.isNaN(date.valueOf()))time.dateTime=date.toISOString();};
-  const local=part.ReferenceId?localReference(part.ReferenceId,messages,m.Platform):null;show(local);if(!part.ReferenceId||local)return;
+  const show=message=>{const recorded=part.ReferenceSender&&part.ReferenceSender!=='0'?part.ReferenceSender:null,profile=recorded?(identityHistory.get(recorded)||[]).find(p=>p.Conversation===m.Conversation)||(identityHistory.get(recorded)||[])[0]:null;const display=message?.Sender&&message.Sender!=='0'?nameOf(message):recorded?(contactNames[m.Conversation+'/'+recorded]||contactNames[recorded]||(profile?nameOf({Sender:recorded,Conversation:m.Conversation,Identity:profile}):recorded)):null;sender.textContent=display||'';sender.hidden=!display||display==='0';const stamp=part.ReferenceTimestamp||message?.Timestamp,date=new Date(stamp*1000),valid=stamp>0&&!Number.isNaN(date.valueOf());time.textContent=valid?date.toLocaleString():'';time.hidden=!valid;if(valid)time.dateTime=date.toISOString();else time.removeAttribute('datetime');meta.hidden=sender.hidden&&time.hidden;};
+  const local=part.ReferenceId?localReference(part.ReferenceId,messages,m.Platform):null;show(local&&quoteMatches(local,part)?local:null);if(!part.ReferenceId||local&&quoteMatches(local,part))return;
   const conversation=archiveResults?archiveResults.find(row=>row.message===m||row.message.Id===m.Id)?.conversation:current?.id;
-  quote.resolveQuote=async()=>{try{const target=await lookupReference(conversation||current?.id,part.ReferenceId,m.Platform,true);if(quote.isConnected&&target?.message)show(target.message);}catch(error){if(error.message!=='cancelled'&&quote.isConnected)quote.title=label('ReaderReferenceFailed');}};
+  quote.resolveQuote=async()=>{try{const target=await resolveQuoteReference(conversation||current?.id,part,m.Platform,true);if(quote.isConnected&&target?.message)show(target.message);}catch(error){if(error.message!=='cancelled'&&quote.isConnected)quote.title=label('ReaderReferenceFailed');}};
 
   queueMicrotask(()=>{if(quote.isConnected)quoteObserver.observe(quote);});
  }
@@ -279,6 +281,7 @@
   const parts=index.messageParts?.[m.Id]||(m.Parts?.length?m.Parts:legacyParts(m));
   if(m.Platform!=='QQ'||!m.RawBase64||!parts.some(p=>p.Kind==='system'&&!p.Text||['unsupported','unparsed','reply','reaction','recall'].includes(p.Kind)))return parts;
   try{
+   const replies=[];
    for(const segment of protoFields(m.RawBase64)){
     const value=n=>segment.find(f=>f.id===n)?.value;
     const str=n=>typeof value(n)==='string'?value(n):'';
@@ -288,8 +291,10 @@
      return [{Kind:'system',Text:Array.from(root.querySelectorAll('qq,nor')).map(e=>e.tagName==='qq'?contactNames[e.getAttribute('uin')]||e.getAttribute('nm')||e.getAttribute('jp')||e.getAttribute('uin')||e.textContent:e.getAttribute('txt')||e.textContent).join('')}];
     }
     if((value(45002)==='8'||m.Type===5)&&segment.some(f=>f.id===47702))return [{Kind:'recall',ReferenceSender:str(47716)||str(47715)||str(47714),ReferenceText:str(47705),Detail:str(47713),RecallRole:Number(value(47702))}];
+    if(value(45002)==='7'){const positive=n=>typeof value(n)==='string'&&/^[1-9][0-9]*$/.test(value(n))?value(n):null,sequence=positive(47419)||positive(47402),stamp=Number(positive(47404));replies.push({sequence,alternatives:[positive(47419),positive(47402)].filter(Boolean).map(value=>'seq:'+value),sender:positive(47403)||str(47421),timestamp:Number.isSafeInteger(stamp)&&stamp>0&&stamp<=253402300799?stamp:null});}
     const poke=segment.find(f=>f.id===47401&&f.bytes);if(poke){const action=wireFields(poke.bytes).find(f=>f.id===47413);return [{Kind:'poke',Text:typeof action?.value==='string'?action.value:''}];}
    }
+   if(replies.length){let at=0;return parts.map(part=>{if(part.Kind!=='reply')return part;const info=replies[at++];if(!info||part.ReferenceText==='[Protected quote]')return part;return {...part,ReferenceId:info.sequence?'seq:'+info.sequence:part.ReferenceId,ReferenceAlternatives:[...new Set([...info.alternatives,...(part.ReferenceAlternatives||[]),part.ReferenceId].filter(Boolean))],ReferenceSender:info.sender||part.ReferenceSender,ReferenceTimestamp:info.timestamp||part.ReferenceTimestamp};});}
   }catch{}
   return parts;
  }
@@ -480,7 +485,7 @@
      quoteMetadata(quote,part,m);
      quote.append(element('span', part.ReferenceText || (part.ReferenceKind && part.ReferenceKind !== 'text' ? label('ReaderKind_' + part.ReferenceKind) : label('ReaderReferenceMissing')), 'quote-text'));
      if (part.ReferenceId) { quote.tabIndex = 0; quote.setAttribute('role', 'button'); quote.title = label('ReaderJumpReference');
-      quote.onclick = () => jump(part.ReferenceId, quote); quote.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(part.ReferenceId, quote); } }; }
+      quote.onclick = () => jump(part.ReferenceId, quote,part); quote.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(part.ReferenceId, quote,part); } }; } else quote.title=label('ReaderReferenceNoId');
      if (depth === 0) { const slot = element('div', '', 'quote-slot'); slot.quote = quote; slot.append(quote); block.append(slot); }
      else block.append(quote);
     }
