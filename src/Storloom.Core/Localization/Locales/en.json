@@ -903,5 +903,10 @@
   "StandaloneEnableHelp": "Create a local HTML entry which reads this compact archive in a browser, without Storloom or a server. The first preparation calculates conversation summaries; later updates maintain them incrementally. Content and media are not duplicated.",
   "PhaseBrowserStatistics": "Preparing browser conversation summaries",
   "PhaseBrowserPublish": "Publishing independent HTML snapshot",
-  "ChatSourceBusy": "Close the chat client before reading its databases. Your current configuration is retained."
+  "ChatSourceBusy": "Close the chat client before reading its databases. Your current configuration is retained.",
+  "ReaderReferenceNotFound": "Original message was not found in this archive. It may be outside the backup.",
+  "ReaderReferenceFailed": "Could not look up the quoted message. Please try again.",
+  "ReaderFiltersActive": "Filtering ({0})",
+  "ReaderFiltersPaused": "Filters retained ({0}); viewing context",
+  "ReaderSearchRunning": "Searching…"
 }

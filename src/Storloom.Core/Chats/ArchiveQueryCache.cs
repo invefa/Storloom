@@ -69,7 +69,13 @@ internal sealed class ArchiveQueryCache:IDisposable {
         return index.Query("SELECT body FROM current_messages WHERE conversation=? ORDER BY time,id LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)",conversation,size.ToString(CultureInfo.InvariantCulture),offset.ToString(CultureInfo.InvariantCulture)).Select(r=>Read(r[0])).ToArray();
     }
     internal long Rank(Message message)=>long.Parse(index.Query("SELECT count(*) FROM current_messages WHERE conversation=? AND (time,id)<(CAST(? AS INTEGER),?)",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),message.Id).Single()[0],CultureInfo.InvariantCulture);
-    internal Message? Reference(string conversation,string reference)=>index.Query("SELECT m.body FROM message_references r JOIN current_messages m ON m.id=r.message_id WHERE r.conversation=? AND r.reference=? ORDER BY m.time DESC,m.id DESC LIMIT 1",conversation,reference).Select(r=>Read(r[0])).FirstOrDefault();
+    private Message? ExactReference(string conversation,string reference)=>index.Query("SELECT m.body FROM message_references r JOIN current_messages m ON m.id=r.message_id WHERE r.conversation=? AND r.reference=? ORDER BY m.time DESC,m.id DESC LIMIT 1",conversation,reference).Select(r=>Read(r[0])).FirstOrDefault();
+    internal Message? Reference(string conversation,string reference){
+        var exact=ExactReference(conversation,reference);if(exact!=null||!conversation.StartsWith("QQ/",StringComparison.Ordinal))return exact;
+        string number=reference.StartsWith("seq:",StringComparison.Ordinal)?reference[4..]:reference;
+        if(number.Length==0||number.Any(c=>c is <'0' or >'9'))return null;
+        return ExactReference(conversation,reference.StartsWith("seq:",StringComparison.Ordinal)?number:"seq:"+number);
+    }
     internal IReadOnlyList<ArchiveFileEntry> Files()=>index.Query("SELECT body FROM archive_files ORDER BY path").Select(r=>JsonSerializer.Deserialize<ArchiveFileEntry>(r[0])!).ToArray();
     internal IReadOnlyList<ArchiveFileEntry> NativeSnapshotFiles()=>index.Query("SELECT body FROM archive_files WHERE path>='native-snapshots/' AND path<'native-snapshots0' ORDER BY path").Select(r=>JsonSerializer.Deserialize<ArchiveFileEntry>(r[0])!).ToArray();
     internal ArchiveFileEntry? FileEntry(string path)=>index.Query("SELECT body FROM archive_files WHERE path=?",path).Select(r=>JsonSerializer.Deserialize<ArchiveFileEntry>(r[0])).SingleOrDefault();

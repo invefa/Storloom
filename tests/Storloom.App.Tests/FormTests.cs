@@ -814,6 +814,9 @@ public sealed class FormTests {
             Query("document.querySelector('#filter-toggle').click();document.querySelector('#message-search').value='absent';document.querySelector('#message-search').dispatchEvent(new Event('input'));document.querySelector('#find-page').click();document.querySelector('#stop-search').click();true");
             Assert.Equal("false",Query("document.querySelector('#find-page').disabled"));Assert.Contains("stopped",Query("document.querySelector('#filter-status').textContent"));
             Query("document.querySelector('#reset-filter').click();true");Until("document.querySelectorAll('.message').length","201");
+            Query("document.querySelector('#message-search').value='absent';document.querySelector('#message-search').dispatchEvent(new Event('input'));if(document.querySelector('#filter-panel').open)document.querySelector('#filter-toggle').click();true");
+            Assert.Contains("Filtering (1)",Query("document.querySelector('#filter-toggle').textContent"));Assert.Equal("false",Query("document.querySelector('#filter-clear').hidden"));
+            Query("document.querySelector('#filter-clear').click();true");Until("document.querySelectorAll('.message').length","201");Assert.Equal("false",Query("document.querySelector('#filter-toggle').classList.contains('has-filters')"));
             Query("document.querySelector('#search-scope').value='conversation';document.querySelector('#search-scope').dispatchEvent(new Event('change'));document.querySelector('#page-size').value='100';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","100");
             Assert.Equal("\"1 / 3\"",Query("document.querySelector('#page').textContent"));
             Query("document.querySelector('#next').click();true");Until("document.querySelector('#page').textContent","\"2 / 3\"");
@@ -824,6 +827,8 @@ public sealed class FormTests {
             Assert.Equal("true",Query("document.querySelector('#messages').getBoundingClientRect().right<=document.querySelector('#minimap').getBoundingClientRect().left+1"));
             Query("document.querySelector('#page-size').value='125';document.querySelector('#page-size').dispatchEvent(new Event('change'));true");Until("document.querySelectorAll('.message').length","125");
             Query("document.querySelector('#page-size').value='500';document.querySelector('#page-size-toggle').click();true");
+            Assert.Equal("1",Query("document.querySelectorAll('#page-size-toggle svg path').length"));
+            Assert.Equal("true",Query("(()=>{const input=document.querySelector('#page-size'),toggle=document.querySelector('#page-size-toggle'),border=parseFloat(getComputedStyle(input.parentElement).borderTopWidth);return getComputedStyle(input).borderTopWidth==='0px'&&getComputedStyle(toggle).borderTopWidth==='0px'&&border>0&&border<=1.5})()"));
             Assert.Equal("6",Query("document.querySelectorAll('#page-sizes button').length"));
             Assert.Equal("true",Query("!document.querySelector('#page-sizes').hidden&&document.querySelector('#page-sizes').getBoundingClientRect().bottom<document.querySelector('#page-size').getBoundingClientRect().top"));
             Assert.Equal("true",Query("document.querySelector('#page-size').getBoundingClientRect().width>=88"));
@@ -942,6 +947,8 @@ public sealed class FormTests {
             Query("document.querySelector('#back-results').click();true");
             Assert.Equal("0",Query("document.querySelectorAll('.bubble .source').length"));Query("document.getElementById('next').click();true");
             Until("document.querySelectorAll('.forwarded').length","1");Assert.Contains("Forwarded fixture",Query("document.querySelector('.forwarded').textContent"));
+            Query("document.querySelector('blockquote').scrollIntoView({block:'center'});true");Until("document.querySelector('blockquote .quote-time').dateTime","\"2023-11-14T22:13:21.000Z\"");
+
             Query("document.querySelector('blockquote').click();true");Until("document.querySelectorAll('.referenced').length","1");
             Assert.Contains("Original target",Query("document.querySelector('.referenced .bubble').textContent"));Assert.Contains("1 / 2",Query("document.getElementById('page').textContent"));
             Assert.Equal("\"instant\"",Query("window.readerJumpBehavior"));Query("Element.prototype.scrollIntoView=window.readerOriginalScrollIntoView;true");

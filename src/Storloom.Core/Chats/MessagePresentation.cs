@@ -11,6 +11,8 @@ public sealed record MessagePart(string Kind, string Text = "", string Title = "
     public string? MediaState { get; init; }
     public string? ReferenceKind { get; init; }
     public string? ReferenceId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public long? ReferenceTimestamp { get; init; }
     public bool Inline { get; init; }
     public string? EmojiId { get; init; }
     public int? RecallRole { get; init; }
@@ -93,7 +95,7 @@ public static class MessagePresentation {
         if (root.Name.LocalName == "msg" && root.Attribute("nickname") != null) kind = "contact";
         if (kind == "text" && app == null) kind = "unsupported";
         string title = SafeSummary(Value("title")), detail = SafeSummary(Value("des")), text = "", sender = "", reference = "";
-        string? referenceKind = null, referenceId = null;
+        string? referenceKind = null, referenceId = null;long? referenceTimestamp=null;
         ForwardedMessage[] forwarded = [];
         if (kind == "reply") {
             text = title; title = ""; var refer = Find("refermsg");
@@ -101,6 +103,7 @@ public static class MessagePresentation {
             reference = SafeSummary(refer?.Elements().FirstOrDefault(e => e.Name.LocalName == "content")?.Value ?? "");
             referenceId = refer?.Elements().FirstOrDefault(e => e.Name.LocalName == "svrid")?.Value;
             if (referenceId is "" or "0") referenceId = null;
+            if(long.TryParse(refer?.Elements().FirstOrDefault(e=>e.Name.LocalName=="createtime")?.Value,out long timestamp)&&timestamp>0&&timestamp<=253402300799)referenceTimestamp=timestamp;
             if (long.TryParse(refer?.Elements().FirstOrDefault(e => e.Name.LocalName == "type")?.Value, out long referenceType)) referenceKind = WeChatKind(referenceType);
         } else if (kind == "transfer") {
             title = SafeSummary(Value("feedesc")); detail = SafeSummary(Value("pay_memo"));
@@ -141,7 +144,7 @@ public static class MessagePresentation {
             .Where(v => System.Text.RegularExpressions.Regex.IsMatch(v, "^[a-fA-F0-9]{32}$")).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (kind == "file" && title != "") keys.Add(Path.GetFileName(title));
         keys.AddRange(forwarded.SelectMany(f => f.Parts).SelectMany(p => p.MediaKeys ?? []));
-        return new(kind, text, title, detail, sender, reference, keys.ToArray()) { ReferenceKind = referenceKind, ReferenceId = referenceId, Forwarded = forwarded };
+        return new(kind, text, title, detail, sender, reference, keys.ToArray()) { ReferenceKind = referenceKind, ReferenceId = referenceId, ReferenceTimestamp=referenceTimestamp, Forwarded = forwarded };
     }
     private static ForwardedMessage[] ReadForward(XElement root, ChatMessage message, int depth) {
         if (depth >= 4) return [];

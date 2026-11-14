@@ -35,8 +35,8 @@ public sealed class MessagePresentationTests {
     [Fact]
     public void EmbeddedForwardsReferencesAndSystemTemplatesPreserveTheirMeaning() {
         var reply = MessagePresentation.Parse(new("WeChat", "fixture", "friend", 0, 49,
-            "<msg><appmsg><type>57</type><title>Reply</title><refermsg><svrid>9223372036854775806</svrid><type>3</type><content><msg><img md5=\"0123456789abcdef0123456789abcdef\"/></msg></content></refermsg></appmsg></msg>"))[0];
-        Assert.Equal("reply", reply.Kind); Assert.Equal("9223372036854775806", reply.ReferenceId); Assert.Equal("image", reply.ReferenceKind);
+            "<msg><appmsg><type>57</type><title>Reply</title><refermsg><createtime>1700000000</createtime><svrid>9223372036854775806</svrid><type>3</type><content><msg><img md5=\"0123456789abcdef0123456789abcdef\"/></msg></content></refermsg></appmsg></msg>"))[0];
+        Assert.Equal("reply", reply.Kind); Assert.Equal("9223372036854775806", reply.ReferenceId); Assert.Equal("image", reply.ReferenceKind);Assert.Equal(1700000000L,reply.ReferenceTimestamp);
         var system = MessagePresentation.Parse(new("WeChat", "fixture", "", 0, 10002,
             "<sysmsg><sysmsgtemplate><content_template><template>$actor$ invited $member$</template><link_list><link name=\"actor\"><memberlist><member><nickname>Alex</nickname></member></memberlist></link><link name=\"member\"><memberlist><member><nickname>Sam</nickname></member></memberlist></link></link_list></content_template></sysmsgtemplate></sysmsg>"))[0];
         Assert.Equal("system", system.Kind); Assert.Equal("Alex invited Sam", system.Text);

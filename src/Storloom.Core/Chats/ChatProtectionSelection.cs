@@ -49,7 +49,7 @@ internal static class ChatProtectionPlanner {
         return new(selectedPages,media,publicPages);
     }
     private static void SanitizeQuotes(JsonNode? parts){if(parts is not JsonArray list)return;foreach(var part in list){if(part is not JsonObject obj)continue;
-        if(obj["Kind"]?.GetValue<string>()=="reply"){obj["ReferenceText"]="[Protected quote]";obj["ReferenceSender"]=null;obj["Title"]="";obj["Detail"]="";}
+        if(obj["Kind"]?.GetValue<string>()=="reply"){obj["ReferenceText"]="[Protected quote]";obj["ReferenceSender"]=null;obj["ReferenceTimestamp"]=null;obj["Title"]="";obj["Detail"]="";}
         if(obj["Forwarded"] is JsonArray forwards)foreach(var entry in forwards){if(entry is JsonObject item){item["RawBase64"]=null;item["SourceText"]=null;SanitizeQuotes(item["Parts"]);}}
     }}
     private static bool Matches(JsonNode node,ChatProtectionSelection scope){

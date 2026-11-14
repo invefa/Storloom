@@ -10,6 +10,16 @@ public sealed class CompactArchiveTests:IDisposable {
     public CompactArchiveTests()=>Directory.CreateDirectory(root);
     private string Dir(string name){string path=Path.Combine(root,name);Directory.CreateDirectory(path);return path;}
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
+    [Theory][InlineData(false)][InlineData(true)]public void QuotedMetadataAndSequenceFallbackWorkAcrossUnloadedPagesWithoutLeakingMessagePayload(bool encrypted){
+        using var store=ArchiveStore.CreateBundle(Path.Combine(root,"quoted"),encrypted?"fixture-password":"");
+        using(var writer=store.BeginWrite()){for(int n=0;n<631;n++)writer.Add(new("QQ","room","sam",1700000000+n,1,"private quoted payload "+n){Id="m"+n,ServerId=(9000+n).ToString(),Sequence=(100+n).ToString(),SenderName="Sam"});writer.Add(new("WeChat","wx","sam",1700000000,1,"separate platform"){Id="wx",ServerId="99999",Sequence="405"});writer.Complete(new(new string('a',64),"complete",0,0,632,0,0));}store.EnableStandalone();
+        using var index=JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(store.ReaderIndex())["window.archiveIndex=".Length..].TrimEnd(';'));
+        string Conversation(string key)=>index.RootElement.GetProperty("storeConversationKeys").EnumerateObject().Single(p=>p.Value.GetString()==key).Name;
+        string room=Conversation("QQ/room");
+        using var details=JsonDocument.Parse(store.ReaderReference(room,"405",true));Assert.Equal(JsonValueKind.Null,details.RootElement.GetProperty("page").ValueKind);Assert.Equal("Sam",details.RootElement.GetProperty("message").GetProperty("SenderName").GetString());Assert.Equal(1700000305,details.RootElement.GetProperty("message").GetProperty("Timestamp").GetInt64());Assert.DoesNotContain("private quoted payload",details.RootElement.GetRawText());
+        using var target=JsonDocument.Parse(store.ReaderReference(room,"seq:9305"));Assert.Equal(1,target.RootElement.GetProperty("page").GetInt64());Assert.Equal(details.RootElement.GetProperty("id").GetString(),target.RootElement.GetProperty("id").GetString());
+        Assert.Equal("null",System.Text.Encoding.UTF8.GetString(store.ReaderReference(room,"missing")));Assert.Equal("null",System.Text.Encoding.UTF8.GetString(store.ReaderReference(Conversation("WeChat/wx"),"405")));
+    }
     [Theory][InlineData(false)][InlineData(true)]public void ReaderUsesPublishedMetadataWithoutReopeningDataPacks(bool encrypted){
         string archive=Path.Combine(root,"reader-snapshot"),secret=encrypted?"fixture-password":"";
         using(var store=ArchiveStore.CreateBundle(archive,secret)){using(var writer=store.BeginWrite()){writer.Add(new("Fixture","room","sender",1,1,"snapshot fixture"){Id="one"});writer.Complete(new(new string('a',64),"complete",0,0,1,0,0));}store.EnableStandalone();}

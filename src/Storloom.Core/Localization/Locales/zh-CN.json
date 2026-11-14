@@ -903,5 +903,10 @@
   "StandaloneEnableHelp": "生成本地 HTML 入口, 用浏览器直接读取紧凑归档, 无需 Storloom 或服务. 首次准备会统计会话摘要, 后续增量维护. 不重复保存消息或媒体.",
   "PhaseBrowserStatistics": "正在准备独立阅读的会话摘要",
   "PhaseBrowserPublish": "正在发布独立 HTML 快照",
-  "ChatSourceBusy": "请先退出聊天客户端, 再重试读取数据库. 当前配置已保留."
+  "ChatSourceBusy": "请先退出聊天客户端, 再重试读取数据库. 当前配置已保留.",
+  "ReaderReferenceNotFound": "当前归档中未找到原消息, 可能未包含在备份中.",
+  "ReaderReferenceFailed": "引用查找失败, 请重试.",
+  "ReaderFiltersActive": "筛选中 ({0})",
+  "ReaderFiltersPaused": "已保留筛选 ({0}), 当前查看上下文",
+  "ReaderSearchRunning": "搜索中…"
 }

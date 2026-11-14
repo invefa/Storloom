@@ -11,7 +11,8 @@
   queueMicrotask(()=>{if(node.isConnected){observedAssets.set(node,load);assetObserver.observe(node);}else load();});return Promise.resolve();
  }
  let current = null, page = 0, messages = [], request = 0, pendingJump = null;
- const referenceMaps = new Map(), referenceLoads = new Map();
+ const referenceMaps = new Map(), referenceLoads = new Map(),referenceInfo=new Map(),referencePending=new Map(),referencePageInfo=new Map();
+ const quoteObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){quoteObserver.unobserve(entry.target);entry.target.resolveQuote?.();}});
  const label = key => labels[key] || key;
  const contactNames = index.contactNames || {};
  const baseline=index.identityBaseline||{contactNames,avatars:index.avatars||{}};
@@ -153,7 +154,7 @@
   else if(readerPrefs.autoBottom&&!contextMode)scrollBottom();
  };
  window.receiveReferences = (conversation, map) => {
-  referenceMaps.set(conversation, map); referenceLoads.get(conversation)?.(map); referenceLoads.delete(conversation);
+  referenceMaps.set(conversation, map); referenceLoads.get(conversation)?.resolve(map); referenceLoads.delete(conversation);
  };
  function highlight(id,animate=true) {
   pinBottom=false;const target = $('msg-' + id); if (!target) {actionStatus(label('ReaderReferenceMissing'));return;}
@@ -175,6 +176,7 @@
    highlight(id);
   }else{page=targetPage;pendingJump={conversation:current.id,page,id};load();}
  }
+ function syncFilterIndicator(){const count=Object.values(readFilters()).filter(value=>value===true||typeof value==='string'&&value.length>0).length,running=!$('stop-search').hidden;const state=running?label('ReaderSearchRunning'):count?label(contextMode?'ReaderFiltersPaused':'ReaderFiltersActive').replace('{0}',count):'';text('filter-label',label('ReaderFilters')+(state?' · '+state:''));$('filter-toggle').classList.toggle('has-filters',!!count||running);$('filter-toggle').setAttribute('aria-busy',String(running));$('filter-clear').hidden=!count;$('filter-clear').title=label('ReaderResetFilters');$('filter-clear').setAttribute('aria-label',label('ReaderResetFilters'));}
  function readFilters(){return Object.fromEntries(['message-search','kind-filter','sender-filter','date-from','date-to','self-filter'].map(id=>[id,$(id).type==='checkbox'?$(id).checked:$(id).value]));}
  $('back-results').onclick=()=>{stopSearch();const saved=returnPoints.pop();if(!saved)return;current=index.conversations.find(c=>c.id===saved.conversation);contextMode=saved.context;for(const [id,value] of Object.entries(saved.filters)){$(id).type==='checkbox'?$(id).checked=value:$(id).value=value;}$('back-results').hidden=returnPoints.length===0;page=saved.page;messages=saved.items;archiveResults=saved.results;archiveSearch=saved.session;pendingJump=null;selectConversation();updateHeading();render();if(archiveResults)resultPager();else normalPager();$('messages').scrollTop=saved.scroll;};
  function updateHeading(){text('chat-title',current?.name||labels.ReaderSelect);text('chat-meta',current?current.count+' '+labels.ReaderMessages:'');}
@@ -196,22 +198,40 @@
  $('archive-search').onclick=()=>{$('search-scope').value='archive';filterChanged();scopeHint();toggleFilters(true);$('message-search').focus();};
  $('page-bottom').onclick=scrollBottom;$('auto-bottom').onchange=()=>{readerPrefs.autoBottom=$('auto-bottom').checked;savePrefs();if(readerPrefs.autoBottom)scrollBottom();};
  $('auto-last').onchange=()=>{readerPrefs.autoLast=$('auto-last').checked;savePrefs();if(readerPrefs.autoLast&&current){leaveContext();go(pageCount(current)-1);}};
+ function referenceKeys(reference,platform){return platform==='QQ'&&/^(?:seq:)?[0-9]+$/.test(reference)?[reference,reference.startsWith('seq:')?reference.slice(4):'seq:'+reference]:[reference];}
+ function localReference(reference,items,platform){for(const key of referenceKeys(reference,platform)){const found=items.find(m=>m.ServerId===key||m.Sequence&&'seq:'+m.Sequence===key);if(found)return found;}return null;}
+ async function lookupReference(conversation,reference,platform,metadataOnly=false){
+  const key=conversation+'\n'+reference+'\n'+metadataOnly;if(referenceInfo.has(key))return referenceInfo.get(key);if(referencePending.has(key))return referencePending.get(key);
+  const pending=(async()=>{let target;
+   if(transport)target=await transport.reference(conversation,reference,metadataOnly);
+   else if(index.nativeStore&&window.chrome?.webview)target=await storeRequest('store-reference',{conversation,reference,metadataOnly});
+   else {let map=referenceMaps.get(conversation);if(!map){let task=referenceLoads.get(conversation);if(!task){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});task={promise,resolve,reject};referenceLoads.set(conversation,task);const script=element('script');script.src=archiveBase+'conversations/'+conversation+'-refs.js';script.onload=()=>{script.remove();if(referenceLoads.has(conversation)){referenceLoads.delete(conversation);reject(Error('reference'));}};script.onerror=()=>{script.remove();referenceLoads.delete(conversation);reject(Error('reference'));};document.head.append(script);}map=await task.promise;}
+    for(const candidate of referenceKeys(reference,platform)){if(Object.hasOwn(map,candidate)){target=map[candidate];break;}}
+    if(target&&metadataOnly&&!target.message){const pageKey=conversation+':'+target.page;let info=referencePageInfo.get(pageKey);if(!info){info=readPage(conversation,target.page).then(items=>new Map(items.map(({Id,Sender,SenderName,Conversation,Timestamp,Identity,IdentityVersion})=>[Id,{Sender,SenderName,Conversation,Timestamp,Identity,IdentityVersion}])));referencePageInfo.set(pageKey,info);info.catch(()=>{if(referencePageInfo.get(pageKey)===info)referencePageInfo.delete(pageKey);});while(referencePageInfo.size>8)referencePageInfo.delete(referencePageInfo.keys().next().value);}const message=(await info).get(target.id);if(message)target={...target,message};}
+   }
+   const result=target||null;referenceInfo.set(key,result);while(referenceInfo.size>256)referenceInfo.delete(referenceInfo.keys().next().value);return result;
+  })();referencePending.set(key,pending);try{return await pending;}finally{referencePending.delete(key);}
+ }
  async function jump(reference, block) {
-  const sourceRow=block?.closest('.message')?.resultRow;const conversation = sourceRow?.conversation||current.id;
-  const local = (sourceRow?[sourceRow.message]:messages).find(m => m.ServerId === reference || ('seq:' + m.Sequence) === reference);
-  if (local) { if(sourceRow)resultContext({...sourceRow,message:local},block);else showContext(local.Id,page,block); return; }
-  let map = transport?{[reference]:await transport.reference(conversation,reference).catch(()=>null)}:index.nativeStore&&window.chrome?.webview?{[reference]:await storeRequest('store-reference',{conversation,reference}).catch(()=>null)}:referenceMaps.get(conversation);
-  if (!map) map = await new Promise(resolve => {
-   if (referenceLoads.has(conversation)) { resolve(null); return; }
-   referenceLoads.set(conversation, resolve);
-   const script = element('script'); script.src = archiveBase + 'conversations/' + conversation + '-refs.js';
-   script.onload = () => script.remove(); script.onerror = () => { script.remove(); referenceLoads.delete(conversation); resolve(null); };
-   document.head.append(script);
-  });
-  if (!sourceRow&&current.id !== conversation) return;
-  const target = map && Object.hasOwn(map, reference) ? map[reference] : null;
-  if (!target) { actionStatus(label('ReaderReferenceMissing')); return; }
-  if(sourceRow)resultContext({conversation,page:target.page,message:{Id:target.id}},block);else showContext(target.id,await logicalTarget(conversation,target.page,target.id));
+  const article=block?.closest('.message'),sourceRow=article?.resultRow,platform=article?.messageData?.Platform,conversation=sourceRow?.conversation||current.id;
+  if(block?.getAttribute('aria-busy')==='true')return;block?.setAttribute('aria-busy','true');
+  try{const local=localReference(reference,sourceRow?[sourceRow.message]:messages,platform);
+   if(local){if(sourceRow)resultContext({...sourceRow,message:local},block);else showContext(local.Id,page,block);return;}
+   const target=await lookupReference(conversation,reference,platform);
+   if(!sourceRow&&current.id!==conversation)return;
+   if(!target){actionStatus(label('ReaderReferenceNotFound'));return;}
+   if(sourceRow)resultContext({conversation,page:target.page,message:{Id:target.id}},block);else showContext(target.id,await logicalTarget(conversation,target.page,target.id));
+  }catch(error){if(error.message!=='cancelled')actionStatus(label('ReaderReferenceFailed'));}finally{block?.removeAttribute('aria-busy');}
+ }
+ function quoteMetadata(quote,part,m){
+  if(part.ReferenceText==='[Protected quote]')return;
+  const meta=element('div','','quote-meta'),sender=element('span','','quote-sender'),time=element('time','','quote-time');meta.append(sender,time);quote.append(meta);
+  const show=message=>{sender.textContent=message?nameOf(message):part.ReferenceSender?(contactNames[m.Conversation+'/'+part.ReferenceSender]||contactNames[part.ReferenceSender]||part.ReferenceSender):label('ReaderUnknownSender');const stamp=message?.Timestamp||part.ReferenceTimestamp,date=new Date(stamp*1000);time.textContent=stamp>0&&!Number.isNaN(date.valueOf())?date.toLocaleString():label('ReaderUnknownTime');if(stamp>0&&!Number.isNaN(date.valueOf()))time.dateTime=date.toISOString();};
+  const local=part.ReferenceId?localReference(part.ReferenceId,messages,m.Platform):null;show(local);if(!part.ReferenceId||local)return;
+  const conversation=archiveResults?archiveResults.find(row=>row.message===m||row.message.Id===m.Id)?.conversation:current?.id;
+  quote.resolveQuote=async()=>{try{const target=await lookupReference(conversation||current?.id,part.ReferenceId,m.Platform,true);if(quote.isConnected&&target?.message)show(target.message);}catch(error){if(error.message!=='cancelled'&&quote.isConnected)quote.title=label('ReaderReferenceFailed');}};
+
+  queueMicrotask(()=>{if(quote.isConnected)quoteObserver.observe(quote);});
  }
  const safeAsset = path => /^assets\/[a-f0-9]{64}\.(png|jpg|jpeg|gif|webp|bmp|mp4|webm|mp3|wav|ogg|m4a|pdf|doc|docx|ppt|pptx|xls|xlsx|zip|7z|rar|txt|md|csv)$/.test(path);
  const logicalImage=media=>{for(const name of [media.Key,media.Name]){const hash=/(?:^|[^a-f0-9])([a-f0-9]{32})(?![a-f0-9])/i.exec(name||'');if(hash)return 'md5:'+hash[1].toLowerCase();}return (media.Path||'').replace(/\.[a-z0-9]+$/i,'');};
@@ -249,7 +269,7 @@
  }
  const positionKey='storloom.reader.position:'+index.conversations.map(c=>c.id+':'+c.count).join('|');
  const pageLoads=new Map(),storeRequests=new Map();let searching=0,storeRequestId=0;
- function stopSearch(){searching++;for(const pending of pageLoads.values())pending.cancel?.();pageLoads.clear();for(const pending of storeRequests.values())pending.reject(Error('cancelled'));storeRequests.clear();$('stop-search').hidden=true;$('find-page').disabled=$('find-previous').disabled=false;}
+ function stopSearch(){searching++;for(const pending of pageLoads.values())pending.cancel?.();pageLoads.clear();for(const pending of storeRequests.values())pending.reject(Error('cancelled'));storeRequests.clear();$('stop-search').hidden=true;syncFilterIndicator();$('find-page').disabled=$('find-previous').disabled=false;}
  window.chrome?.webview?.addEventListener('message',e=>{if(!['store-search-result','store-reference-result'].includes(e.data?.action))return;const pending=storeRequests.get(e.data.requestId);if(!pending)return;storeRequests.delete(e.data.requestId);e.data.error?pending.reject(Error('search')):pending.resolve(e.data.result);});
  function storeRequest(action,args){if(transport)return action==='store-search'?transport.search(args.text,args.cursor,args.reverse):transport.reference(args.conversation,args.reference);return new Promise((resolve,reject)=>{const requestId=++storeRequestId,timer=setTimeout(()=>{storeRequests.delete(requestId);reject(Error('timeout'));},30000),finish=callback=>value=>{clearTimeout(timer);callback(value);};storeRequests.set(requestId,{resolve:finish(resolve),reject:finish(reject)});window.chrome.webview.postMessage({action,requestId,...args});});}
  function indexedSearch(text,cursor,reverse){return storeRequest('store-search',{text,cursor,reverse});}
@@ -303,12 +323,12 @@
   stopSearch();leaveContext();const generation=searching,fingerprint=JSON.stringify(readFilters())+':native:'+direction;
   if(!archiveSearch||archiveSearch.fingerprint!==fingerprint)archiveSearch={fingerprint,direction,starts:[null],batch:0,finished:false,origin:{conversation:current.id,page,items:messages}};
   const session=archiveSearch;if(batch===undefined)batch=session.batch+1;if(!(batch in session.starts))return;
-  $('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;
+  $('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;syncFilterIndicator();
   try{const result=await indexedSearch($('message-search').value,session.starts[batch],direction<0);if(generation!==searching)return;
    session.batch=batch;session.finished=result.next===null;if(session.finished){session.endBatch=batch;session.starts.length=batch+1;}else session.starts[batch+1]=result.next;
    archiveResults=result.rows;render();resultPager();text('filter-status',result.rows.length?label('ReaderMatchFound'):label('ReaderNoMoreMatches'));toggleFilters(false);
   }catch(error){if(generation===searching&&error.message!=='cancelled')text('filter-status',label('ReaderSearchFailed'));}
-  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;}}
+  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;syncFilterIndicator();}}
  }
  async function searchArchive(batch,direction=archiveSearch?.direction||1){
   if(index.nativeStore&&(transport||window.chrome?.webview)&&$('message-search').value&&!$('kind-filter').value&&!$('sender-filter').value&&!$('date-from').value&&!$('date-to').value&&!$('self-filter').checked)return searchStore(batch,direction);
@@ -319,7 +339,7 @@
   }
   const session=archiveSearch;if(batch===undefined)batch=session.batch+1;if(!session.starts[batch])return;
   const cursor={...session.starts[batch]},rows=[],total=index.conversations.reduce((n,c)=>n+c.pages,0);
-  $('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;
+  $('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;syncFilterIndicator();
   try{
    outer:while(cursor.c>=0&&cursor.c<index.conversations.length){
     const chat=index.conversations[cursor.c];if(cursor.p<0||cursor.p>=chat.pages){cursor.c+=direction;if(cursor.c<0||cursor.c>=index.conversations.length)break;cursor.p=direction>0?0:index.conversations[cursor.c].pages-1;cursor.i=null;continue;}
@@ -334,16 +354,16 @@
    session.batch=batch;session.finished=cursor.c<0||cursor.c>=index.conversations.length;if(session.finished)session.endBatch=batch;if(!session.finished)session.starts[batch+1]={...cursor};else session.starts.length=batch+1;
    archiveResults=rows;render();resultPager();text('filter-status',rows.length?label('ReaderMatchFound'):label('ReaderNoMoreMatches'));toggleFilters(false);
   }catch{if(generation===searching)text('filter-status',label('ReaderSearchFailed'));}
-  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;}}
+  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;syncFilterIndicator();}}
  }
  async function findMatch(direction){
   if(!current)return;if($('search-scope').value==='archive'){await searchArchive(archiveSearch&&archiveResults&&archiveSearch.direction===direction?undefined:0,direction);return;}
-  stopSearch();const generation=searching,conversation=current.id,max=pageCount(current);$('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;
+  stopSearch();const generation=searching,conversation=current.id,max=pageCount(current);$('find-page').disabled=$('find-previous').disabled=true;$('stop-search').hidden=false;syncFilterIndicator();
   try{for(let n=page+direction;n>=0&&n<max&&generation===searching;n+=direction){
    text('filter-status',label('ReaderSearchingPage').replace('{0}',n+1).replace('{1}',max));const items=await logicalPage(current,n);
    if(generation!==searching)return;if(items.some(m=>matches(m,true))){page=n;load();text('filter-status',label('ReaderMatchFound'));return;}
   }if(generation===searching)text('filter-status',label('ReaderNoMoreMatches'));}catch{if(generation===searching)text('filter-status',label('ReaderSearchFailed'));}
-  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;}}
+  finally{if(generation===searching){$('find-page').disabled=$('find-previous').disabled=false;$('stop-search').hidden=true;syncFilterIndicator();}}
  }
  $('find-page').onclick=()=>findMatch(1);$('find-previous').onclick=()=>findMatch(-1);
  $('stop-search').onclick=()=>{stopSearch();text('filter-status',label('ReaderSearchStopped'));};
@@ -353,6 +373,7 @@
  for(const id of ['message-search','kind-filter','sender-filter','date-from','date-to','self-filter'])$(id).oninput=filterChanged;
  $('search-scope').onchange=()=>{filterChanged();scopeHint();};
  for(const id of ['message-search','sender-filter'])$(id).onkeydown=e=>{if(e.key==='Enter')$('find-page').click();};
+ $('filter-clear').onclick=()=>$('reset-filter').click();
  $('reset-filter').onclick=()=>{for(const id of ['message-search','kind-filter','sender-filter','date-from','date-to'])$(id).value='';$('self-filter').checked=false;filterChanged();};
  function emojiPath(platform,key){if(!key)return null;const name=String(key).trim().replace(/^\//,'').replace(/^\[(.*)\]$/,'$1');return emojis[platform+':'+key]||emojis[platform+':'+name]||emojis[platform+':/'+name]||emojis[platform+':['+name+']'];}
  const emojiPatterns={};
@@ -398,8 +419,9 @@
   const preview=decode(data,0);return preview+(binary.length>data.length?'\n'+label('ReaderSourceTruncated'):'');
  }
  function render() {
+  quoteObserver.disconnect();syncFilterIndicator();
   pinBottom=false;const fragment = document.createDocumentFragment();let shownCount=0;
-  text('filter-label',label('ReaderFilters'));$('filter-toggle').classList.toggle('active',Object.values(readFilters()).some(v=>v!==''&&v!==false));
+  $('filter-toggle').classList.toggle('active',Object.values(readFilters()).some(v=>v!==''&&v!==false));
   const hasFilters=Object.values(readFilters()).some(value=>value!==''&&value!==false);
   for (const row of archiveResults||messages.map((message,i)=>({message,conversation:current.id,page:Math.floor((page*pageSize+i)/physicalSize)}))) {
    const m=row.message;
@@ -455,7 +477,7 @@
     const rich = /<[^>]+>|&lt;\/?\w+/.test(part.Text || '');
     if (kind === 'reply') {
      const quote = element('blockquote', '', 'quote');
-     if (part.ReferenceSender) quote.append(element('span', (contactNames[m.Conversation+'/'+part.ReferenceSender] || contactNames[part.ReferenceSender] || part.ReferenceSender) + ': ', 'quote-sender'));
+     quoteMetadata(quote,part,m);
      quote.append(element('span', part.ReferenceText || (part.ReferenceKind && part.ReferenceKind !== 'text' ? label('ReaderKind_' + part.ReferenceKind) : label('ReaderReferenceMissing')), 'quote-text'));
      if (part.ReferenceId) { quote.tabIndex = 0; quote.setAttribute('role', 'button'); quote.title = label('ReaderJumpReference');
       quote.onclick = () => jump(part.ReferenceId, quote); quote.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(part.ReferenceId, quote); } }; }
