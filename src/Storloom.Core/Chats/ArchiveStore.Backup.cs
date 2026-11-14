@@ -20,7 +20,7 @@ internal sealed partial class ArchiveStore {
         }else Directory.CreateDirectory(destination);
         string lockPath=Path.Combine(destination,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);
         using var destinationLease=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
-        var target=new ArchiveCommitLog(destination);BackupTask task;
+        if(Directory.Exists(Path.Combine(root,"packs")))ArchiveCommitLog.CreateObjectDirectories(destination);var target=new ArchiveCommitLog(destination);BackupTask task;
         if(File.Exists(taskPath)){
             PathPolicy.AssertNoLinks(taskPath);if(new FileInfo(taskPath).Length>16384)throw new InvalidDataException("Invalid backup task size.");task=JsonFiles.Read<BackupTask>(taskPath);
             if(task.Id!=Id||task.Proof!=BackupProof(task))throw new InvalidDataException("Backup task identity or integrity check failed.");
@@ -37,15 +37,15 @@ internal sealed partial class ArchiveStore {
         if(target.Head!=task.Previous&&target.Head!=task.Head)throw new IOException("Backup destination changed since its checkpoint.");
         var copies=new Dictionary<string,long>(StringComparer.Ordinal);
         foreach(var entry in log.CommitsSince(task.Previous,task.Head)){
-            copies[entry.Id+".commit"]=new FileInfo(Path.Combine(root,entry.Id+".commit")).Length;
+            copies[entry.Id+".commit"]=new FileInfo(log.ObjectPath(entry.Id,".commit")).Length;
             copies[entry.Entry.Payload+".pack"]=entry.Entry.Bytes;
         }
-        long total=0;foreach(var entry in copies)total=checked(total+entry.Value*(File.Exists(Path.Combine(destination,entry.Key))?1:2));
+        long total=0;foreach(var entry in copies)total=checked(total+entry.Value*(File.Exists(target.ObjectPath(entry.Key[..64],entry.Key[64..]))?1:2));
         int done=0,copied=0,reused=0;long bytes=0;
         void Report(string? path=null)=>progress?.Report(new("archive-store-backup",done,bytes,total,copies.Count,path));
         Report();
         foreach(var entry in copies){
-            OperationPause.Check(cancellation);string source=Path.Combine(root,entry.Key),targetPath=Path.Combine(destination,entry.Key);PathPolicy.AssertNoLinks(source);
+            OperationPause.Check(cancellation);string source=log.ObjectPath(entry.Key[..64],entry.Key[64..]),targetPath=target.ObjectPath(entry.Key[..64],entry.Key[64..]);PathPolicy.AssertNoLinks(source);
             bool existed=File.Exists(targetPath);CopyImmutable(source,targetPath,entry.Key[..64],entry.Value,cancellation,n=>{bytes+=n;Report(entry.Key);});
             if(existed)reused++;else copied++;done++;Report(entry.Key);
         }

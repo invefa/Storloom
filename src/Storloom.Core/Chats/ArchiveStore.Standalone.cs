@@ -49,7 +49,13 @@ internal sealed partial class ArchiveStore {
             string entry=Path.Combine(EntryDirectory(root),StandaloneEntry);PathPolicy.AssertNoLinks(entry);if(new FileInfo(entry).Length>16*1024*1024)throw new InvalidDataException("Browser runtime too large.");PublishBrowserBytes(EntryDirectory(destination),StandaloneEntry,File.ReadAllBytes(entry),cancellation);
         }finally{CryptographicOperations.ZeroMemory(cipher);CryptographicOperations.ZeroMemory(packed);CryptographicOperations.ZeroMemory(plain);}
     }
-    private void WriteBrowserRuntime(CancellationToken cancellation){
+    internal static void RefreshStandaloneRuntime(string directory,CancellationToken cancellation=default){
+        string root=ResolveRoot(directory),marker=Path.Combine(root,"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");var config=JsonFiles.Read<Configuration>(marker);
+        if(config.Version!=3||config.Kind!="reading"||!Guid.TryParseExact(config.Id,"N",out _)||!File.Exists(Path.Combine(root,"browser","roots.json")))throw new InvalidOperationException("Prepare an independent HTML snapshot before refreshing its entry.");
+        string lockPath=Path.Combine(root,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);using var lease=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);WriteBrowserRuntime(root,config.Id,cancellation);
+    }
+    private void WriteBrowserRuntime(CancellationToken cancellation)=>WriteBrowserRuntime(root,Id,cancellation);
+    private static void WriteBrowserRuntime(string root,string id,CancellationToken cancellation){
         string brotli=ReaderResource("Standalone/Vendor/brotli.js").Replace("export default init;","return {init,DecompressStream};").Replace("export ","").Replace("import.meta.url","''");
         string worker=ReaderResource("Standalone/Vendor/sqlite3.js")+"\nconst Brotli=(()=>{"+brotli+"})();\n"+ReaderResource("Standalone/worker.js").Replace("__SQLITE_WASM__",ReaderResource("Standalone/Vendor/sqlite3.wasm.base64")).Replace("__BROTLI_WASM__",ReaderResource("Standalone/Vendor/brotli.wasm.base64"));
         var catalogs=new Dictionary<string,Dictionary<string,string>>();var assembly=typeof(L).Assembly;
@@ -58,13 +64,14 @@ internal sealed partial class ArchiveStore {
         static string Hash(string text)=>Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
         string readerScript="function startStandaloneReader(){\n"+ReaderResource("reader.js")+"\n}",readerHash=Hash(readerScript);
         string readerDocument="<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'sha256-"+readerHash+"'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\"><style>"+ReaderResource("reader.css")+"</style></head><body>"+body+"<script>"+readerScript+"</script></body></html>";
-        string source="const standaloneWorkerSource='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(worker))+"';\nconst standaloneReaderDocument='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(readerDocument))+"';\nwindow.readerCatalogs="+JsonSerializer.Serialize(catalogs)+";\n"+ReaderResource("Standalone/bootstrap.js");
+        string source="const standaloneEntryId="+JsonSerializer.Serialize(id)+";\nconst standaloneWorkerSource='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(worker))+"';\nconst standaloneReaderDocument='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(readerDocument))+"';\nwindow.readerCatalogs="+JsonSerializer.Serialize(catalogs)+";\n"+ReaderResource("Standalone/bootstrap.js");
         string html="""
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-__HASH__' 'sha256-__READER_HASH__' 'wasm-unsafe-eval'; worker-src blob:; frame-src 'self'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Storloom</title><style>__STYLE__</style></head><body>
 <section id="standalone-start"><h1 id="standalone-title"></h1><p id="standalone-help"></p>
-<div class="standalone-actions"><button id="standalone-directory"></button><button id="standalone-compatible"></button><input id="standalone-files" type="file" webkitdirectory multiple hidden></div>
+<div class="standalone-actions"><button id="standalone-resume" hidden></button><button id="standalone-directory"></button><button id="standalone-compatible"></button><button id="standalone-forget" hidden></button><input id="standalone-files" type="file" webkitdirectory multiple hidden></div>
+<label class="standalone-remember"><input id="standalone-remember" type="checkbox" checked><span id="standalone-remember-label"></span></label><p id="standalone-memory-note" role="status" hidden></p>
 <form id="standalone-unlock" hidden><label id="standalone-secret-label" for="standalone-secret"></label><input id="standalone-secret" type="password" autocomplete="off"><button id="standalone-open" type="submit"></button></form>
 <p id="standalone-status" role="status"></p><details><summary id="standalone-license-label"></summary><pre class="standalone-licenses">__NOTICES__</pre></details></section>
 <iframe id="standalone-reader" title="Storloom" allowfullscreen hidden></iframe>

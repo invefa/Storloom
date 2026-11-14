@@ -315,7 +315,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         cleanupPlan = JsonFiles.Read<CleanupPlan>(dialog.FileName); excluded.Clear(); RenderRules(); Navigate("cleanup");
     }
     private void OpenReaderArchive() {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom archive|messages.html;vault.storloom.json;archive.json" };
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom archive|index.html;messages.html;vault.storloom.json;archive.json" };
         if (PickerHistory.Show(dialog,this,"reader-open") == true) new ChatReaderWindow(Path.GetDirectoryName(dialog.FileName)!, dataRoot, preferences.ReduceMotion) { Owner = this }.ShowDialog();
     }
     private void SetCapturedKey(byte[]? key) { if (capturedKey != null) CryptographicOperations.ZeroMemory(capturedKey); capturedKey = key;if(key!=null){keyInput?.Clear();if(activeChat!=null){string id=Storloom.Core.Chats.ChatArchiveProject.Identity(activeChat.Platform,activeChat.Directory);if(accessDrafts.TryGetValue(id,out var draft))accessDrafts[id]=draft with{DatabaseKey=null};}} }

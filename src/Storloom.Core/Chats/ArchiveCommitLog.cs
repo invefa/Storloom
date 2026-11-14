@@ -18,7 +18,9 @@ internal sealed class ArchiveCommitLog {
         root=PathPolicy.Normalize(directory);PathPolicy.AssertNoLinks(root);
         if(!Directory.Exists(root))throw new DirectoryNotFoundException(root);
     }
-    private string Child(string name){PathPolicy.AssertNoLinks(root);string path=TransferService.Child(root,name);if(File.Exists(path)||Directory.Exists(path))PathPolicy.AssertNoLinks(path);return path;}
+    internal static void CreateObjectDirectories(string root){PathPolicy.AssertNoLinks(root);foreach(string name in new[]{"commits","packs"}){string path=Path.Combine(root,name);Directory.CreateDirectory(path);PathPolicy.AssertNoLinks(path);}}
+    internal string ObjectPath(string id,string extension){if(!IsId(id)||extension is not (".commit" or ".pack"))throw new InvalidDataException("Invalid archive object reference.");return Child(id+extension);}
+    private string Child(string name){PathPolicy.AssertNoLinks(root);if(name.Length==69&&name.EndsWith(".pack",StringComparison.Ordinal)&&IsId(name[..64])||name.Length==71&&name.EndsWith(".commit",StringComparison.Ordinal)&&IsId(name[..64])){string category=name.EndsWith(".pack",StringComparison.Ordinal)?"packs":"commits",folder=Path.Combine(root,category),grouped=Path.Combine(folder,name);if(Directory.Exists(folder)){PathPolicy.AssertNoLinks(folder);if(File.Exists(grouped)||!File.Exists(Path.Combine(root,name)))name=category+"/"+name;}}string path=TransferService.Child(root,name);if(File.Exists(path)||Directory.Exists(path))PathPolicy.AssertNoLinks(path);return path;}
     private static bool IsId(string? id)=>id is{Length:64}&&id.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f');
     private static string Hash(ReadOnlySpan<byte> value)=>Convert.ToHexStringLower(SHA256.HashData(value));
     internal string? Head {
