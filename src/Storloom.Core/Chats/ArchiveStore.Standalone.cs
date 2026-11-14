@@ -69,6 +69,7 @@ internal sealed partial class ArchiveStore {
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-__HASH__' 'sha256-__READER_HASH__' 'wasm-unsafe-eval'; worker-src blob:; frame-src 'self'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Storloom</title><style>__STYLE__</style></head><body>
+<div id="standalone-appearance"><select id="standalone-palette"></select><button id="standalone-theme" type="button"></button></div>
 <section id="standalone-start"><h1 id="standalone-title"></h1><p id="standalone-help"></p>
 <div class="standalone-actions"><button id="standalone-resume" hidden></button><button id="standalone-directory"></button><button id="standalone-compatible"></button><button id="standalone-forget" hidden></button><input id="standalone-files" type="file" webkitdirectory multiple hidden></div>
 <label class="standalone-remember"><input id="standalone-remember" type="checkbox" checked><span id="standalone-remember-label"></span></label><p id="standalone-memory-note" role="status" hidden></p>

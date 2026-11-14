@@ -61,7 +61,12 @@ internal sealed class ArchiveQueryCache:IDisposable {
     internal IReadOnlyList<(string Key,long Count)> Conversations()=>index.Query(BrowserStatisticsReady?"SELECT conversation,count FROM browser_conversations ORDER BY conversation":"SELECT conversation,count(*) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>(r[0],long.Parse(r[1],CultureInfo.InvariantCulture))).ToArray();
     internal IReadOnlyList<Message> PageAt(string conversation,int page,int size=300){
         if(page<0||size is <1 or >10000)throw new ArgumentOutOfRangeException(nameof(page));
-        return index.Query("SELECT body FROM current_messages WHERE conversation=? ORDER BY time,id LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)",conversation,size.ToString(CultureInfo.InvariantCulture),checked((long)page*size).ToString(CultureInfo.InvariantCulture)).Select(r=>Read(r[0])).ToArray();
+        long offset=checked((long)page*size);
+        // Published summaries are maintained in the same transaction as messages.
+        // Walk from the nearer end of the timeline, especially for auto-last-page.
+        string? count=BrowserStatisticsReady?index.Query("SELECT count FROM browser_conversations WHERE conversation=?",conversation).SingleOrDefault()?[0]:null;
+        if(count!=null){long total=long.Parse(count,CultureInfo.InvariantCulture);if(offset>=total)return [];if(offset>total/2){int take=(int)Math.Min(size,total-offset);return index.Query("SELECT body FROM current_messages WHERE conversation=? ORDER BY time DESC,id DESC LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)",conversation,take.ToString(CultureInfo.InvariantCulture),(total-offset-take).ToString(CultureInfo.InvariantCulture)).Select(r=>Read(r[0])).Reverse().ToArray();}}
+        return index.Query("SELECT body FROM current_messages WHERE conversation=? ORDER BY time,id LIMIT CAST(? AS INTEGER) OFFSET CAST(? AS INTEGER)",conversation,size.ToString(CultureInfo.InvariantCulture),offset.ToString(CultureInfo.InvariantCulture)).Select(r=>Read(r[0])).ToArray();
     }
     internal long Rank(Message message)=>long.Parse(index.Query("SELECT count(*) FROM current_messages WHERE conversation=? AND (time,id)<(CAST(? AS INTEGER),?)",message.Conversation,message.Timestamp.ToString(CultureInfo.InvariantCulture),message.Id).Single()[0],CultureInfo.InvariantCulture);
     internal Message? Reference(string conversation,string reference)=>index.Query("SELECT m.body FROM message_references r JOIN current_messages m ON m.id=r.message_id WHERE r.conversation=? AND r.reference=? ORDER BY m.time DESC,m.id DESC LIMIT 1",conversation,reference).Select(r=>Read(r[0])).FirstOrDefault();

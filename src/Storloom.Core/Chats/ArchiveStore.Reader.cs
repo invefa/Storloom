@@ -19,7 +19,21 @@ internal sealed partial class ArchiveStore {
     internal static bool NeedsPassword(string directory){string marker=Path.Combine(ResolveRoot(directory),"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");return JsonFiles.Read<Configuration>(marker).Protected;}
     private Dictionary<string,string>? readerConversations;
     private byte[]? cachedReaderIndex;private string? cachedReaderHead;
-    internal byte[] ReaderIndex(){lock(readGate){if(cachedReaderIndex!=null&&cachedReaderHead==Head)return cachedReaderIndex.ToArray();var bytes=ReaderIndex(query,OpenFile);if(bytes.Length<=16*1024*1024){cachedReaderIndex=bytes.ToArray();cachedReaderHead=Head;}return bytes;}}
+    internal byte[] ReaderIndex(){lock(readGate){if(cachedReaderIndex!=null&&cachedReaderHead==Head)return cachedReaderIndex.ToArray();var bytes=PublishedReaderIndex()??ReaderIndex(query,OpenFile);if(bytes.Length<=16*1024*1024){cachedReaderIndex=bytes.ToArray();cachedReaderHead=Head;}return bytes;}}
+    private byte[]? PublishedReaderIndex(){
+        // Reuse the authenticated browser snapshot: one sequential metadata read,
+        // rather than resolving every chunk of archive-index.js through the index.
+        if(Head is not{} head)return null;string path=Path.Combine(root,"browser",head+".snapshot");if(!File.Exists(path))return null;
+        PathPolicy.AssertNoLinks(path);if(new FileInfo(path).Length>ArchiveCommitLog.MaximumPayloadBytes)throw new InvalidDataException("Browser snapshot too large.");
+        byte[] cipher=File.ReadAllBytes(path),packed=UnprotectRecord(cipher,"browser/snapshot"),plain=ArchivePackCodec.Expand(packed);
+        try{var snapshot=JsonSerializer.Deserialize<BrowserSnapshot>(plain,JsonFiles.Options)??throw new InvalidDataException("Invalid browser snapshot.");
+            if(snapshot.Version!=1||snapshot.Head!=head||snapshot.ArchiveId!=Id)throw new InvalidDataException("Browser snapshot identity mismatch.");
+            if(snapshot.Query!=Path.GetRelativePath(root,query.DatabasePath).Replace('\\','/'))return null;
+            var mapping=snapshot.Index.GetProperty("storeConversationKeys").Deserialize<Dictionary<string,string>>()??throw new InvalidDataException("Invalid browser conversations.");
+            if(mapping.Count!=snapshot.Index.GetProperty("conversations").GetArrayLength())throw new InvalidDataException("Invalid browser conversations.");readerConversations=mapping;
+            return Encoding.UTF8.GetBytes("window.archiveIndex="+snapshot.Index.GetRawText()+";");
+        }finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(cipher);System.Security.Cryptography.CryptographicOperations.ZeroMemory(packed);System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain);}
+    }
     private byte[] ReaderIndex(ArchiveQueryCache query,Func<string,Stream> open){
         JsonObject metadata;
         try{using var input=open("archive-index.js");using var text=new StreamReader(input);string raw=text.ReadToEnd();if(!raw.StartsWith("window.archiveIndex=",StringComparison.Ordinal))throw new InvalidDataException("Invalid reader metadata.");metadata=JsonNode.Parse(raw["window.archiveIndex=".Length..].Trim().TrimEnd(';'))!.AsObject();}

@@ -47,10 +47,10 @@
  const mediaMatches=(keys,media)=>(keys||[]).some(key=>[media.Key,media.Name].some(value=>typeof value==='string'&&key.toLowerCase()===value.toLowerCase()));
  const preferenceScope=window.readerPreferenceScope||index.preferenceScope||index.conversations.map(c=>c.id).join(',');
  const preferenceKey='storloom.reader.'+preferenceScope;
- const stored=(()=>{const host=window.readerHostPreferences||{};try{const local=JSON.parse(localStorage.getItem(preferenceKey))||{};return (local.updatedAt||0)>(host.updatedAt||0)?local:host.updatedAt?host:local;}catch{return host;}})();
+ const stored=(()=>{const host=window.readerHostPreferences||{};try{const local=JSON.parse(localStorage.getItem(preferenceKey))||{};const scoped=(local.updatedAt||0)>(host.updatedAt||0)?local:host.updatedAt?host:local;const global=window.readerGlobalAppearance||JSON.parse(localStorage.getItem('storloom.reader.appearance'))||{};return {...scoped,...(window.readerGlobalAppearance||(global.updatedAt||0)>=(scoped.updatedAt||0)?{palette:global.palette??scoped.palette,dark:global.dark??scoped.dark}:{})};}catch{return {...host,...window.readerGlobalAppearance};}})();
  let paletteReady=!!stored.palette||!!index.defaultPalette;
  const readerPrefs=stored.view||(()=>{try{return JSON.parse(localStorage.getItem('storloom.reader.view'))||{};}catch{return {};}})();
- function persistAppearance(){if(!paletteReady)return;const value={updatedAt:Date.now(),view:readerPrefs,palette:$('palette').value,dark:document.body.classList.contains('dark')};try{localStorage.setItem(preferenceKey,JSON.stringify(value));}catch{}if(window.chrome?.webview)window.chrome.webview.postMessage({action:'reader-preferences',preferences:value});}
+ function persistAppearance(){if(!paletteReady)return;const value={updatedAt:Date.now(),view:readerPrefs,palette:$('palette').value,dark:document.body.classList.contains('dark')};try{localStorage.setItem(preferenceKey,JSON.stringify(value));localStorage.setItem('storloom.reader.appearance',JSON.stringify({updatedAt:value.updatedAt,palette:value.palette,dark:value.dark}));}catch{}window.readerAppearanceChanged?.({updatedAt:value.updatedAt,palette:value.palette,dark:value.dark});if(window.chrome?.webview)window.chrome.webview.postMessage({action:'reader-preferences',preferences:value});}
  const validPageSize=n=>Number.isInteger(n)&&n>=10&&n<=5000;
  let pageSize=validPageSize(Number(readerPrefs.pageSize))?Number(readerPrefs.pageSize):300;
  const physicalSize=300, pageCount=chat=>Math.max(1,Math.ceil(chat.count/pageSize));
@@ -107,6 +107,7 @@
   (index.unsupportedMessages ? ' | ' + label('ReaderUnsupportedCount') + ' ' + index.unsupportedMessages : ''));
  let dark = typeof stored.dark==='boolean'?stored.dark:typeof index.defaultDark==='boolean'?index.defaultDark:typeof window.readerDefaults?.dark==='boolean'?window.readerDefaults.dark:location.hash === '#dark' || (!location.hash && matchMedia('(prefers-color-scheme:dark)').matches);
  document.body.classList.toggle('dark', dark);
+ window.readerAppearanceChanged?.({palette:$('palette').value,dark});
  $('theme').onclick = () => { dark = !dark; document.body.classList.toggle('dark', dark);persistAppearance(); };
  const conversationRows=new Map();
  function selectConversation(){for(const [id,row] of conversationRows)row.classList.toggle('active',current?.id===id);}

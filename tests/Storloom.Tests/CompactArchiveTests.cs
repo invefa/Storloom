@@ -10,6 +10,20 @@ public sealed class CompactArchiveTests:IDisposable {
     public CompactArchiveTests()=>Directory.CreateDirectory(root);
     private string Dir(string name){string path=Path.Combine(root,name);Directory.CreateDirectory(path);return path;}
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
+    [Theory][InlineData(false)][InlineData(true)]public void ReaderUsesPublishedMetadataWithoutReopeningDataPacks(bool encrypted){
+        string archive=Path.Combine(root,"reader-snapshot"),secret=encrypted?"fixture-password":"";
+        using(var store=ArchiveStore.CreateBundle(archive,secret)){using(var writer=store.BeginWrite()){writer.Add(new("Fixture","room","sender",1,1,"snapshot fixture"){Id="one"});writer.Complete(new(new string('a',64),"complete",0,0,1,0,0));}store.EnableStandalone();}
+        string data=ArchiveStore.ResolveRoot(archive),packs=Path.Combine(data,"packs"),offline=Path.Combine(root,"offline-packs");Directory.Move(packs,offline);
+        try{using var opened=ArchiveStore.Open(archive,secret);using var index=JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(opened.ReaderIndex())["window.archiveIndex=".Length..].TrimEnd(';'));string id=index.RootElement.GetProperty("conversations")[0].GetProperty("id").GetString()!;Assert.Contains("snapshot fixture",System.Text.Encoding.UTF8.GetString(opened.ReaderPage(id,0)));}
+        finally{Directory.Move(offline,packs);}
+    }
+    [Fact]public void ReaderPagesFromEitherEndKeepStableOrderAndPartialPageBoundaries(){
+        using var store=ArchiveStore.Create(Path.Combine(root,"paging"));store.Upsert(Enumerable.Range(0,631).Select(n=>new ArchiveQueryCache.Message(n.ToString("D4"),"Fixture/room",n/3,"paging fixture","{}")));store.EnableStandalone();
+        using var projection=new ArchiveQueryCache(Path.Combine(store.DirectoryPath,"query"),false);
+        var all=store.Page("Fixture/room",1000).Select(m=>m.Id).ToArray();
+        foreach(int size in new[]{1,17,300})foreach(int page in new[]{0,1,2,3,17,37,630,631})Assert.Equal(all.Skip(page*size).Take(size),projection.PageAt("Fixture/room",page,size).Select(m=>m.Id));
+        Assert.Empty(projection.PageAt("Fixture/missing",0));
+    }
     [Theory][InlineData(false)][InlineData(true)]public void ExternalQueryWorkspaceResumesAndPublishesASelfContainedArchive(bool encrypted){
         string archive=Path.Combine(root,"archive"),work=Dir("ssd-work"),proof=new string('a',64),password=encrypted?"fixture-password":"";
         using(var store=ArchiveStore.Create(archive,password)){store.WriteWorkspace=Path.Combine(work,"query-writing");using(var writer=store.BeginWrite(source:proof)){for(int n=0;n<600;n++)writer.Add(new("Fixture","room","sender",n,1,"workspace fixture "+n){Id="m"+n});writer.Flush();}Assert.Null(store.Head);Assert.True(File.Exists(Path.Combine(work,"query-writing","query.db")));}
