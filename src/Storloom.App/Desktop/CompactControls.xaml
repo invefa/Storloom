@@ -42,7 +42,7 @@
    <ControlTemplate.Triggers>
     <Trigger Property="IsChecked" Value="True"><Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/><Setter TargetName="box" Property="BorderBrush" Value="Transparent"/><Setter TargetName="mark" Property="Visibility" Value="Visible"/></Trigger>
     <Trigger Property="IsChecked" Value="{x:Null}"><Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/><Setter TargetName="box" Property="BorderBrush" Value="Transparent"/><Setter TargetName="partial" Property="Visibility" Value="Visible"/></Trigger>
-    <Trigger Property="HasContent" Value="False"><Setter TargetName="label" Property="Visibility" Value="Collapsed"/><Setter TargetName="label" Property="Margin" Value="0"/></Trigger>
+    <Trigger Property="HasContent" Value="False"><Setter TargetName="box" Property="Grid.ColumnSpan" Value="2"/><Setter TargetName="box" Property="HorizontalAlignment" Value="Center"/><Setter TargetName="label" Property="Visibility" Value="Collapsed"/><Setter TargetName="label" Property="Margin" Value="0"/></Trigger>
     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Line}"/></Trigger>
     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="box" Property="BorderThickness" Value="2"/></Trigger>
     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>

@@ -34,13 +34,14 @@
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style x:Key="EditorBase" TargetType="Control">
+  <!-- Native text/password views add 2 DIP for the caret; apply the remaining inset only once. -->
   <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/>
   <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}"/><Setter Property="BorderThickness" Value="1"/>
-  <Setter Property="Padding" Value="8,0"/><Setter Property="MinHeight" Value="32"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+  <Setter Property="Padding" Value="6,0"/><Setter Property="MinHeight" Value="32"/><Setter Property="VerticalContentAlignment" Value="Center"/>
   <Setter Property="FocusVisualStyle" Value="{StaticResource ButtonKeyboardFocus}"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control">
    <Border x:Name="frame" CornerRadius="3" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
-    <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" Style="{StaticResource EditorScrollViewer}"/>
+    <ScrollViewer x:Name="PART_ContentHost" Margin="0" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" Style="{StaticResource EditorScrollViewer}"/>
    </Border>
    <ControlTemplate.Triggers>
     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="frame" Property="BorderBrush" Value="{DynamicResource Line}"/></Trigger>

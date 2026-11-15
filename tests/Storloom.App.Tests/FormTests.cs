@@ -65,6 +65,17 @@ public sealed class FormTests {
             var columnHeader=nodes.OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>().Single(h=>ReferenceEquals(h.Content,header));
             var box=(Border)header.Template.FindName("box",header);var point=box.TranslatePoint(new Point(),columnHeader);
             Assert.InRange(point.X,0,columnHeader.ActualWidth-box.ActualWidth);Assert.InRange(point.Y,0,columnHeader.ActualHeight-box.ActualHeight);
+            var dataRow=(DataGridRow)table.ItemContainerGenerator.ContainerFromIndex(0)!;
+            var rowCheck=Descendants(dataRow).OfType<CheckBox>().Single();var rowBox=(Border)rowCheck.Template.FindName("box",rowCheck);
+            double headerCenter=box.TranslatePoint(new Point(box.ActualWidth/2,0),table).X,rowCenter=rowBox.TranslatePoint(new Point(rowBox.ActualWidth/2,0),table).X;
+            Assert.True(Math.Abs(headerCenter-rowCenter)<=.1,$"Header center {headerCenter}, row center {rowCenter}; header box offset {point.X}, row control {rowCheck.ActualWidth}");
+            var input=nodes.OfType<TextBox>().Single(t=>t.Name=="gallery_input");var selector=nodes.OfType<ComboBox>().Single();
+            var selectedText=Descendants(selector).OfType<ContentPresenter>().Single(p=>Equals(p.Content,selector.SelectionBoxItem));
+            double inputInset=input.GetRectFromCharacterIndex(0).X,choiceInset=selectedText.TranslatePoint(new Point(),selector).X;
+            Assert.True(Math.Abs(inputInset-choiceInset)<=.1,$"Input inset {inputInset}, choice inset {choiceInset}");
+            var secret=nodes.OfType<PasswordBox>().Single();
+            var secretView=Descendants(secret).OfType<FrameworkElement>().Single(e=>e.GetType().Name.EndsWith("BoxView",StringComparison.Ordinal));
+            Assert.InRange(Math.Abs(secretView.TranslatePoint(new Point(),secret).X-choiceInset),0,.1);
             Assert.Equal(Visibility.Collapsed,((FrameworkElement)header.Template.FindName("label",header)).Visibility);
             Capture(window,"component-library-"+theme+"-"+locale);
             header.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.True(header.IsChecked);

@@ -9,7 +9,7 @@ The first component library stays inside the desktop project: shared templates i
 - Resolve colors through theme resources: Canvas, Surface, Ink, Muted, Accent, OnAccent, Selection, Danger and ControlBorder. Do not bake a palette into an individual window.
 - Use the existing compact controls, 32-DIP editor/action height and spacing in multiples of four. Keep labels aligned. Let narrow layouts wrap actions and scroll their content.
 - Checkbox marks are vector shapes: an empty box for none, a check for all, and a centered rounded inset square for partial selection, using OnAccent for contrast. Use both shape and color to communicate state.
-- A checkbox-only table column is 28 DIPs wide; its header has zero text padding. The 16-DIP glyph sits inside a centered 20-DIP control. Labels without content do not reserve space.
+- A checkbox-only table column is 28 DIPs wide; its header balances the trailing 1-DIP separator with a 1-DIP leading inset. The 16-DIP glyph sits inside a centered 20-DIP control. Labels without content do not reserve space, and the glyph centers across the full control. Text/password editors apply their inset once and account for the native 2-DIP caret margin so their text aligns with the dropdown selection.
 - Keep keyboard focus visible. Use action labels/tooltips and automation names for icon-only controls. A disabled action remains visibly distinct.
 
 ## Reusable behavior
