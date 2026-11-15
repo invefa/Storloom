@@ -54,7 +54,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (File.Exists(backups)) foreach (var pair in JsonFiles.Read<Dictionary<string, string>>(backups)) verifiedBackups[pair.Key] = pair.Value;
         L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
         WindowGeometry.Attach(this,dataRoot,"main",640,480);
-        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;accessDrafts.Clear();tray?.Dispose();};
+        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;accessDrafts.Clear();retainedChatSections.Clear();tray?.Dispose();};
         if (preferences.CloseToTray) EnsureTray();
         InputBindings.Add(new KeyBinding(new ActionCommand(() => operationView.ToggleFollowing()), new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new ActionCommand(() => ShowHelp()), new KeyGesture(Key.F1)));

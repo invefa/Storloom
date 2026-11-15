@@ -17,6 +17,29 @@ public sealed partial class ShellWindow {
     private TabControl chatSections=null!;
     private Grid chatWorkspace=null!;
     private bool syncingChatSections;
+    private int activeChatSection;
+    private readonly Dictionary<int,Action> retainedChatSections=new();
+    private Action RetainChatSection(){
+        if(capturedKey!=null&&keyInput!=null&&activeChat!=null)keyInput.Password=ChatDatabaseKey.Format(capturedKey,activeChat.Platform);
+        var workspace=chatWorkspace;var content=chatContent;var footer=chatFooter;var title=chatTaskTitle;int step=chatStep;
+        var backup=backupInput;var key=keyInput;var password=archivePassword;var confirmation=archivePasswordConfirmation;var reading=readingRootInput;
+        var accessOwner=accessDraftOwner;var rawOwner=rawDraftOwner;var account=activeChat;var manifest=activeManifest;var directory=readingDirectory;var prepared=preparedArchive;
+        var scrolls=Controls(chatContent).OfType<ScrollViewer>().Select(view=>(View:view,Offset:view.VerticalOffset,Horizontal:view.HorizontalOffset)).ToArray();
+        var project=pendingArchive;var request=pendingArchiveRequest;bool direct=directChatSource;var resume=chatResume;var update=chatUpdate;
+        return ()=>{if(activeChat?.Directory!=account?.Directory||activeChat?.Platform!=account?.Platform)SetCapturedKey(null);chatWorkspace=workspace;chatContent=content;chatFooter=footer;chatTaskTitle=title;chatStep=step;
+            backupInput=backup;keyInput=key;archivePassword=password;archivePasswordConfirmation=confirmation;readingRootInput=reading;accessDraftOwner=accessOwner;rawDraftOwner=rawOwner;
+            activeChat=account;activeManifest=manifest;readingDirectory=directory;preparedArchive=prepared;pendingArchive=project;pendingArchiveRequest=request;directChatSource=direct;chatResume=resume;chatUpdate=update;if(key!=null){string value=key.Password;key.Clear();key.Password=value;}Dispatcher.BeginInvoke(new Action(()=>{if(!windowClosed)foreach(var scroll in scrolls){scroll.View.ScrollToVerticalOffset(scroll.Offset);scroll.View.ScrollToHorizontalOffset(scroll.Horizontal);}}),System.Windows.Threading.DispatcherPriority.Loaded);
+        };
+    }
+    private void SwitchChatSection(int selected){
+        retainedChatSections[activeChatSection]=RetainChatSection();activeChatSection=selected;
+        if(retainedChatSections.TryGetValue(selected,out var restore)){restore();syncingChatSections=true;try{foreach(TabItem item in chatSections.Items)item.Content=null;((TabItem)chatSections.Items[selected]).Content=chatWorkspace;}finally{syncingChatSections=false;}return;}
+        // Give independent pages their own controls, so unsaved edits, expansion and scroll survive tab changes.
+        accessDraftOwner=rawDraftOwner=null;readingRootInput=null;archivePassword=archivePasswordConfirmation=keyInput=null;backupInput=null;
+        chatWorkspace=View.Grid(View.Auto,View.Fill,View.Auto);chatWorkspace.Margin=new Thickness(0,12,0,0);chatTaskTitle=View.Text("",14);View.Add(chatWorkspace,chatTaskTitle,0);chatContent=new Grid();View.Add(chatWorkspace,View.Card(chatContent,14),1);chatFooter=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right};View.Add(chatWorkspace,chatFooter,2);
+        chatStep=selected==1?7:selected==2?8:-1;RenderChatStage();
+    }
+
     private WrapPanel archiveUtilities=null!;
     private TextBlock accountNotice = null!;
     private Button chatNext = null!;
@@ -29,6 +52,7 @@ public sealed partial class ShellWindow {
     private bool readingComplete;
     private ChatExportResult? latestExportResult;
     private void BuildChats() {
+        retainedChatSections.Clear();activeChatSection=0;
         var layout = Page("chats", "ChatTitle", "ChatLead", View.Fill);
         LoadArchiveProjects();
         var host=new Grid();View.Add(layout,host,1);
@@ -48,8 +72,7 @@ public sealed partial class ShellWindow {
         chatFooter=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,16,0,0)};View.Add(chatWorkspace,chatFooter,2);
         chatSections.SelectionChanged+=(_,e)=>{
             if(syncingChatSections||!ReferenceEquals(e.Source,chatSections))return;
-            chatStep=chatSections.SelectedIndex==1?7:chatSections.SelectedIndex==2?8:-1;SetCapturedKey(null);
-            RenderChatStage();
+            SwitchChatSection(chatSections.SelectedIndex);
         };
         RenderChatStage();
     }
@@ -61,7 +84,7 @@ public sealed partial class ShellWindow {
         chatContent.Children.Clear(); chatFooter.Children.Clear(); backupInput = null; keyInput?.Clear(); keyInput = null; chatResume = null; chatUpdate = null;
         syncingChatSections=true;
         try{
-            int selected=chatStep==7?1:chatStep==8?2:0;
+            int selected=chatStep==7?1:chatStep==8?2:0;activeChatSection=selected;
             foreach(TabItem item in chatSections.Items)item.Content=null;
             chatSections.SelectedIndex=selected;((TabItem)chatSections.Items[selected]).Content=chatWorkspace;
         }finally{syncingChatSections=false;}

@@ -4,7 +4,7 @@ using Storloom.Core.Chats;
 namespace Storloom.App;
 
 public sealed partial class ShellWindow {
-    private void ConfigureChats(){chatStep=8;RenderChatStage();}
+    private void ConfigureChats(){chatSections.SelectedIndex=2;}
     private async void RestoreChatBackup(){try{await RestoreChatBackupFrom(null);}catch(Exception ex){Error(ex);}}
     private async Task RestoreChatBackupFrom(string? selectedManifest) {
         try {

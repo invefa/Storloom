@@ -50,7 +50,7 @@ public static class QQMessageParser {
         long referenceSequence=kind=="reply"?(Number(47419)!=0?Number(47419):Number(47402)):0;
         long referenceTime=kind=="reply"?Number(47404):0;
         if(kind=="reply"&&sender.Length==0&&Number(47403)>0)sender=Number(47403).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        string? referenceKind = null;
+        string? referenceKind = null;string[]? referenceMediaKeys=null;
         var keys = new List<string>(); if (name != "") keys.Add(Path.GetFileName(name.Replace('\\', '/')));
         foreach (int number in new[] { 45406, 45424, 45862 }) {
             var data = fields.FirstOrDefault(f => f.Number == number)?.Bytes;
@@ -64,10 +64,10 @@ public static class QQMessageParser {
         }
         if (kind == "sticker") { name = Text(47602); if (name == "") name = Text(45815); if (name == "" && Number(47601) > 0) name = "#" + Number(47601); }
         if (kind == "video" && Number(45410) > 0) detail = Number(45410) + " s";
-        if (kind == "reply" && reference == "") {
+        if (kind == "reply") {
             var quoted = fields.FirstOrDefault(f => f.Number is 47423 or 47710)?.Bytes;
             if (quoted != null) { var quotedParts = Parse(quoted, 2, depth + 1);
-                reference = string.Join("\n", quotedParts.Where(p => p.Kind == "text").Select(p => p.Text)); referenceKind = quotedParts.FirstOrDefault()?.Kind; }
+                if(reference=="")reference = string.Join("\n", quotedParts.Where(p => p.Kind == "text").Select(p => p.Text)); referenceKind = quotedParts.FirstOrDefault()?.Kind;referenceMediaKeys=quotedParts.SelectMany(p=>p.MediaKeys??[]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(); }
         }
         if (kind == "call") { detail = MessagePresentation.SafeSummary(Text(48153)); if (Number(48152) > 0) detail += " " + Number(48152) + " s"; }
         if (kind == "system" && body == "") body = MessagePresentation.SafeSummary(Text(80900));
@@ -92,7 +92,7 @@ public static class QQMessageParser {
         if (kind == "text" && (body.TrimStart().StartsWith('<') || body.TrimStart().StartsWith('{')))
             return MessagePresentation.Parse(new("QQ", "", "", 0, outerType, body))[0];
         return new(kind, kind is "text" or "reply" or "system" or "markdown" ? body : "", MessagePresentation.SafeSummary(name), detail,
-            MessagePresentation.SafeSummary(sender), MessagePresentation.SafeSummary(reference), keys.ToArray()) { ReferenceKind = referenceKind,
+            MessagePresentation.SafeSummary(sender), MessagePresentation.SafeSummary(reference), keys.ToArray()) { ReferenceKind = referenceKind,ReferenceMediaKeys=referenceMediaKeys,
                 ReferenceId = referenceSequence>0?"seq:"+referenceSequence.ToString(System.Globalization.CultureInfo.InvariantCulture):kind == "reply" && Number(47401) != 0 ? Number(47401).ToString(System.Globalization.CultureInfo.InvariantCulture) : null,
                 ReferenceTimestamp=referenceTime is >0 and <=253402300799?referenceTime:null,
                 Inline = type == 6, EmojiId = type == 6 && fields.Any(f=>f.Number==47601) ? Number(47601).ToString(System.Globalization.CultureInfo.InvariantCulture) : null };

@@ -168,10 +168,10 @@ internal sealed class ChatArchiveWriter : IDisposable {
         int emojiBefore=emoji.CreatedFiles;emoji.UseParts(message.Platform,parts);MediaFiles+=emoji.CreatedFiles-emojiBefore;
         if (parts.Count(p => p.Kind is "image" or "video" or "audio" or "sticker") == 1 && message.LocalMediaKeys.Length > 0)
             parts = parts.Select(p => p.Kind is "image" or "video" or "audio" or "sticker" ? p with { MediaKeys = [.. p.MediaKeys ?? [], .. message.LocalMediaKeys] } : p).ToArray();
-        var keys = Regex.Matches(message.Text, "(?:md5|cdnthumbmd5)=[\"']([a-fA-F0-9]{32})[\"']")
+        var keys = Regex.Matches(parts.Any(p=>p.Kind=="reply")?"":message.Text, "(?:md5|cdnthumbmd5)=[\"']([a-fA-F0-9]{32})[\"']")
             .Select(m => m.Groups[1].Value).ToList();
         IEnumerable<MessagePart> Flatten(IEnumerable<MessagePart> items) { foreach (var p in items) { yield return p; foreach (var child in Flatten(p.Forwarded.SelectMany(f => f.Parts))) yield return child; } }
-        keys.AddRange(Flatten(parts).SelectMany(p => p.MediaKeys ?? []));
+        keys.AddRange(Flatten(parts).SelectMany(p => (p.MediaKeys ?? []).Concat(p.ReferenceMediaKeys??[])));
         if (message.Text.StartsWith("[attachment] ", StringComparison.Ordinal)) keys.Add(Path.GetFileName(message.Text[13..].Trim()));
         foreach (string key in keys.Distinct(StringComparer.OrdinalIgnoreCase)) {
             if (!resolved.TryGetValue(key, out ChatMedia? item)) { item = ResolveMedia(key); resolved[key] = item; }

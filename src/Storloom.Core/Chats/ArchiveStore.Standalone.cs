@@ -49,13 +49,22 @@ internal sealed partial class ArchiveStore {
             string entry=Path.Combine(EntryDirectory(root),StandaloneEntry);PathPolicy.AssertNoLinks(entry);if(new FileInfo(entry).Length>16*1024*1024)throw new InvalidDataException("Browser runtime too large.");PublishBrowserBytes(EntryDirectory(destination),StandaloneEntry,File.ReadAllBytes(entry),cancellation);
         }finally{CryptographicOperations.ZeroMemory(cipher);CryptographicOperations.ZeroMemory(packed);CryptographicOperations.ZeroMemory(plain);}
     }
-    internal static void RefreshStandaloneRuntime(string directory,CancellationToken cancellation=default){
+    internal static void RefreshStandaloneRuntime(string directory,CancellationToken cancellation=default,string? defaultPalette=null,bool? defaultDark=null){
         string root=ResolveRoot(directory),marker=Path.Combine(root,"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");var config=JsonFiles.Read<Configuration>(marker);
         if(config.Version!=3||config.Kind!="reading"||!Guid.TryParseExact(config.Id,"N",out _)||!File.Exists(Path.Combine(root,"browser","roots.json")))throw new InvalidOperationException("Prepare an independent HTML snapshot before refreshing its entry.");
-        string lockPath=Path.Combine(root,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);using var lease=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);WriteBrowserRuntime(root,config.Id,cancellation);
+        string lockPath=Path.Combine(root,"operation.lock");if(File.Exists(lockPath))PathPolicy.AssertNoLinks(lockPath);using var lease=new FileStream(lockPath,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);WriteBrowserRuntime(root,config.Id,cancellation,defaultPalette==null&&defaultDark==null?null:new ReaderDefaults(defaultPalette,defaultDark));
     }
-    private void WriteBrowserRuntime(CancellationToken cancellation)=>WriteBrowserRuntime(root,Id,cancellation);
-    private static void WriteBrowserRuntime(string root,string id,CancellationToken cancellation){
+    private sealed record ReaderDefaults(string? Palette,bool? Dark);
+    private void WriteBrowserRuntime(CancellationToken cancellation){
+        byte[] bytes=ReaderIndex();using var document=JsonDocument.Parse(Encoding.UTF8.GetString(bytes)["window.archiveIndex=".Length..].TrimEnd(';'));var metadata=document.RootElement;
+        string? palette=metadata.TryGetProperty("defaultPalette",out var p)&&p.ValueKind==JsonValueKind.String?p.GetString():null;
+        if(palette==null&&metadata.TryGetProperty("storeConversationKeys",out var keys)){var platforms=keys.EnumerateObject().Select(k=>k.Value.GetString()?.Split('/')[0]).Distinct().ToArray();if(platforms.Length==1)palette=platforms[0]=="WeChat"?"wechat":platforms[0]=="QQ"?"qq":null;}
+        bool? dark=metadata.TryGetProperty("defaultDark",out var d)&&d.ValueKind is JsonValueKind.True or JsonValueKind.False?d.GetBoolean():null;
+        WriteBrowserRuntime(root,Id,cancellation,new(palette,dark));
+    }
+    private static void WriteBrowserRuntime(string root,string id,CancellationToken cancellation,ReaderDefaults? defaults=null){
+        if(defaults==null){string previous=Path.Combine(EntryDirectory(root),StandaloneEntry);if(File.Exists(previous)){PathPolicy.AssertNoLinks(previous);if(new FileInfo(previous).Length<=16*1024*1024){var match=System.Text.RegularExpressions.Regex.Match(File.ReadAllText(previous),@"const standaloneDefaults=(\{[^\r\n]{1,512}\});");if(match.Success)try{defaults=JsonSerializer.Deserialize<ReaderDefaults>(match.Groups[1].Value);}catch(JsonException){}}}}
+        if(defaults?.Palette is not (null or "default" or "qq" or "wechat"))defaults=null;
         string brotli=ReaderResource("Standalone/Vendor/brotli.js").Replace("export default init;","return {init,DecompressStream};").Replace("export ","").Replace("import.meta.url","''");
         string worker=ReaderResource("Standalone/Vendor/sqlite3.js")+"\nconst Brotli=(()=>{"+brotli+"})();\n"+ReaderResource("Standalone/worker.js").Replace("__SQLITE_WASM__",ReaderResource("Standalone/Vendor/sqlite3.wasm.base64")).Replace("__BROTLI_WASM__",ReaderResource("Standalone/Vendor/brotli.wasm.base64"));
         var catalogs=new Dictionary<string,Dictionary<string,string>>();var assembly=typeof(L).Assembly;
@@ -64,13 +73,14 @@ internal sealed partial class ArchiveStore {
         static string Hash(string text)=>Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
         string readerScript="function startStandaloneReader(){\n"+ReaderResource("reader.js")+"\n}",readerHash=Hash(readerScript);
         string readerDocument="<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'sha256-"+readerHash+"'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\"><style>"+ReaderResource("reader.css")+"</style></head><body>"+body+"<script>"+readerScript+"</script></body></html>";
-        string source="const standaloneEntryId="+JsonSerializer.Serialize(id)+";\nconst standaloneWorkerSource='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(worker))+"';\nconst standaloneReaderDocument='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(readerDocument))+"';\nwindow.readerCatalogs="+JsonSerializer.Serialize(catalogs)+";\n"+ReaderResource("Standalone/bootstrap.js");
+        string source="const standaloneEntryId="+JsonSerializer.Serialize(id)+";\nconst standaloneDefaults="+JsonSerializer.Serialize(defaults??new(null,null))+";\nconst standaloneWorkerSource='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(worker))+"';\nconst standaloneReaderDocument='"+Convert.ToBase64String(Encoding.UTF8.GetBytes(readerDocument))+"';\nwindow.readerCatalogs="+JsonSerializer.Serialize(catalogs)+";\n"+ReaderResource("Standalone/bootstrap.js");
         string html="""
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-__HASH__' 'sha256-__READER_HASH__' 'wasm-unsafe-eval'; worker-src blob:; frame-src 'self'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Storloom</title><style>__STYLE__</style></head><body>
 <div id="standalone-appearance"><select id="standalone-palette"></select><button id="standalone-theme" type="button"></button></div>
 <section id="standalone-start"><h1 id="standalone-title"></h1><p id="standalone-help"></p>
+<p id="standalone-location" hidden><span id="standalone-location-path"></span> <button id="standalone-copy-location" type="button"></button></p>
 <div class="standalone-actions"><button id="standalone-resume" hidden></button><button id="standalone-directory"></button><button id="standalone-compatible"></button><button id="standalone-forget" hidden></button><input id="standalone-files" type="file" webkitdirectory multiple hidden></div>
 <label class="standalone-remember"><input id="standalone-remember" type="checkbox" checked><span id="standalone-remember-label"></span></label><p id="standalone-memory-note" role="status" hidden></p>
 <form id="standalone-unlock" hidden><label id="standalone-secret-label" for="standalone-secret"></label><input id="standalone-secret" type="password" autocomplete="off"><button id="standalone-open" type="submit"></button></form>

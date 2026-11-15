@@ -10,6 +10,11 @@ public sealed class CompactArchiveTests:IDisposable {
     public CompactArchiveTests()=>Directory.CreateDirectory(root);
     private string Dir(string name){string path=Path.Combine(root,name);Directory.CreateDirectory(path);return path;}
     private sealed class Callback(Action<ScanProgress> action):IProgress<ScanProgress>{public void Report(ScanProgress value)=>action(value);}
+    [Theory][InlineData("WeChat","wechat")][InlineData("QQ","qq")]
+    public void IndependentEntryCarriesClientAppearanceBeforeUnlockAndRetainsItOnRuntimeRefresh(string platform,string palette){
+        string archive=Path.Combine(root,"appearance-"+platform);using(var store=ArchiveStore.CreateBundle(archive,"fixture-password")){using(var writer=store.BeginWrite()){writer.Add(new(platform,"room","sender",1,1,"private appearance fixture"){Id="one"});writer.Complete(new(new string('a',64),"complete",0,0,1,0,0));}string entry=store.EnableStandalone();Assert.Contains("\"Palette\":\""+palette+"\"",File.ReadAllText(entry));}
+        ArchiveStore.RefreshStandaloneRuntime(archive);string html=File.ReadAllText(Path.Combine(archive,"index.html"));Assert.Contains("\"Palette\":\""+palette+"\"",html);Assert.DoesNotContain("private appearance fixture",html);
+    }
     [Theory][InlineData(false)][InlineData(true)]public void QuotedMetadataAndSequenceFallbackWorkAcrossUnloadedPagesWithoutLeakingMessagePayload(bool encrypted){
         using var store=ArchiveStore.CreateBundle(Path.Combine(root,"quoted"),encrypted?"fixture-password":"");
         using(var writer=store.BeginWrite()){for(int n=0;n<631;n++)writer.Add(new("QQ","room","sam",1700000000+n,1,"private quoted payload "+n){Id="m"+n,ServerId=(9000+n).ToString(),Sequence=(100+n).ToString(),SenderName="Sam"});writer.Add(new("WeChat","wx","sam",1700000000,1,"separate platform"){Id="wx",ServerId="99999",Sequence="405"});writer.Complete(new(new string('a',64),"complete",0,0,632,0,0));}store.EnableStandalone();

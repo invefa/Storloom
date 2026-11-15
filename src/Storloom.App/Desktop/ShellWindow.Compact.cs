@@ -58,9 +58,11 @@ public sealed partial class ShellWindow {
     }
     private async Task EnableBrowserReading(string directory){
         string? secret=null;string? entry=null;try{
+            string preparedEntry=Path.Combine(directory,ArchiveStore.StandaloneEntry);
+            if(File.Exists(preparedEntry)){var project=archiveProjects.Values.FirstOrDefault(p=>p.Reading==directory);await Task.Run(()=>ArchiveStore.RefreshStandaloneRuntime(directory,defaultPalette:project?.Platform==ChatPlatform.WeChat?"wechat":project?.Platform==ChatPlatform.QQ?"qq":null));OpenFile(preparedEntry);return;}
             if(ArchiveStore.NeedsPassword(directory)){var unlock=new VaultPasswordWindow(false,false){Owner=this};if(unlock.ShowDialog()!=true)return;secret=unlock.Password;unlock.ClearSecret();}
             var progress=Progress();bool complete=await RunPausable(async token=>{entry=await Task.Run(()=>{using var store=ArchiveStore.Open(directory,secret.AsSpan(),progress,token);return store.EnableStandalone(progress,token);},token);});
-            if(complete&&entry!=null)OpenFile(entry);
+            if(complete&&entry!=null){status.Text=L.T("StandalonePrepared");RenderChatStage();if(secret==null)OpenFile(entry);else Notice.Show(this,L.T("StandalonePrepare"),L.T("StandalonePrepared"));}
         }finally{secret=null;}
     }
     private async Task CompactStatistics(string directory){

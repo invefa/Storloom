@@ -139,3 +139,5 @@ main{grid-template-rows:auto auto auto minmax(0,1fr) auto auto}.chat-header{grid
 
 /* Inline faces follow text size; stickers and photos have separate, aspect-preserving bounds. */
 #messages img.chat-image{max-width:min(100%,360px);max-height:360px;height:auto;object-fit:contain}#messages img.chat-sticker{max-width:min(100%,200px);max-height:200px;height:auto;object-fit:contain}
+
+.quote{white-space:normal}.quote-meta{white-space:normal}.quote .quote-text,.palette-wechat .reference-zone .quote .quote-text{display:block;white-space:pre-wrap}.reference-zone .quote-image{display:block;max-width:min(140px,100%);max-height:110px;width:auto;height:auto;object-fit:contain;margin:4px 0}

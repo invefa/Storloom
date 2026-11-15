@@ -8,6 +8,11 @@ using Xunit;
 namespace Storloom.Tests;
 
 public sealed class MessagePresentationTests {
+    [Fact]public void QuotedImagesHaveSeparateResourceOwnership(){
+        string hash=new('a',32);string xml="<msg><appmsg><title>reply fixture</title><type>57</type><refermsg><type>47</type><content><![CDATA[<msg><emoji md5=\""+hash+"\"/></msg>]]></content></refermsg></appmsg></msg>";
+        var part=Assert.Single(MessagePresentation.Parse(new("WeChat","room","sender",1,49,xml)));Assert.Equal("reply",part.Kind);Assert.Equal("sticker",part.ReferenceKind);Assert.Empty(part.MediaKeys!);Assert.Contains(hash,part.ReferenceMediaKeys!);
+        var qq=Assert.Single(QQMessageParser.Parse(B(40800,[..I(45002,7),..B(47423,[..I(45002,2),..S(45402,"quoted.png")])]),2));Assert.Empty(qq.MediaKeys!);Assert.Contains("quoted.png",qq.ReferenceMediaKeys!);Assert.Equal("image",qq.ReferenceKind);
+    }
     [Theory][InlineData(47402)][InlineData(47419)]
     public void QQRepliesReadEmbeddedSequenceSenderAndTimeWithoutLegacyReferenceFields(int sequenceField){
         byte[] raw=B(40800,[..I(45002,7),..I(47402,sequenceField==47402?42UL:17UL),..(sequenceField==47419?I(47419,42):[]),..I(47403,12345678),..I(47404,1700000000),..B(47423,[..I(45002,1),..S(45101,"quoted fixture")])]);

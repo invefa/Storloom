@@ -5,6 +5,7 @@ namespace Storloom.App;
 internal static class ReaderPreferences {
     internal static JsonObject Sanitize(JsonElement value){var result=new JsonObject();if(value.ValueKind!=JsonValueKind.Object)throw new JsonException("Invalid preferences.");
         if(value.TryGetProperty("palette",out var palette)&&palette.ValueKind==JsonValueKind.String&&palette.GetString() is "default" or "qq" or "wechat")result["palette"]=palette.GetString();
+        if(value.TryGetProperty("paletteExplicit",out var explicitPalette)&&explicitPalette.ValueKind is JsonValueKind.True or JsonValueKind.False)result["paletteExplicit"]=explicitPalette.GetBoolean();
         if(value.TryGetProperty("dark",out var dark)&&dark.ValueKind is JsonValueKind.True or JsonValueKind.False)result["dark"]=dark.GetBoolean();
         if(value.TryGetProperty("updatedAt",out var time)&&time.ValueKind==JsonValueKind.Number&&time.TryGetInt64(out long stamp)&&stamp>0&&stamp<=DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeMilliseconds())result["updatedAt"]=stamp;
         var view=new JsonObject();if(value.TryGetProperty("view",out var fields)&&fields.ValueKind==JsonValueKind.Object){foreach(var pair in fields.EnumerateObject()){

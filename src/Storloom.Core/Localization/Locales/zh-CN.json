@@ -910,5 +910,9 @@
   "ReaderFiltersPaused": "已保留筛选 ({0}), 当前查看上下文",
   "ReaderSearchRunning": "搜索中…",
   "ReaderReferenceMismatch": "归档中存在同编号消息, 但发送者或时间与引用记录不一致, 已避免跳转到错误消息.",
-  "ReaderReferenceNoId": "备份未记录此引用可用于定位的消息编号或序号."
+  "ReaderReferenceNoId": "备份未记录此引用可用于定位的消息编号或序号.",
+  "StandalonePrepare": "生成独立 HTML 入口",
+  "StandalonePrepared": "HTML 入口已生成。点击独立 HTML 阅读后，只需在浏览器中解锁；以后打开无需在 Storloom 输入密码。",
+  "StandaloneCopyLocation": "复制归档路径",
+  "StandaloneCopyLocationHelp": "已选中归档路径，按 Ctrl+C 复制。"
 }

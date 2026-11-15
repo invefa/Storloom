@@ -11,6 +11,7 @@ public sealed record MessagePart(string Kind, string Text = "", string Title = "
     public string? MediaState { get; init; }
     public string? ReferenceKind { get; init; }
     public string? ReferenceId { get; init; }
+    public string[]? ReferenceMediaKeys { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public long? ReferenceTimestamp { get; init; }
     public bool Inline { get; init; }
@@ -139,12 +140,16 @@ public static class MessagePresentation {
         }
         else if (kind == "text") text = title;
         if (kind is "link" or "music" or "miniapp" or "channel") detail = string.Join("\n", new[] { detail, SafeSummary(Value("sourcedisplayname")), SafeUrl(Value("url")) }.Where(s => s != ""));
-        var keys = root.DescendantsAndSelf().SelectMany(e => e.Attributes().Where(a => a.Name.LocalName.Contains("md5", StringComparison.OrdinalIgnoreCase)).Select(a => a.Value)
+        var keys = root.DescendantsAndSelf().Where(e=>!e.AncestorsAndSelf().Any(a=>a.Name.LocalName=="refermsg")).SelectMany(e => e.Attributes().Where(a => a.Name.LocalName.Contains("md5", StringComparison.OrdinalIgnoreCase)).Select(a => a.Value)
             .Concat(e.Name.LocalName is "md5" or "filemd5" ? [e.Value] : Array.Empty<string>()))
             .Where(v => System.Text.RegularExpressions.Regex.IsMatch(v, "^[a-fA-F0-9]{32}$")).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (kind == "file" && title != "") keys.Add(Path.GetFileName(title));
         keys.AddRange(forwarded.SelectMany(f => f.Parts).SelectMany(p => p.MediaKeys ?? []));
-        return new(kind, text, title, detail, sender, reference, keys.ToArray()) { ReferenceKind = referenceKind, ReferenceId = referenceId, ReferenceTimestamp=referenceTimestamp, Forwarded = forwarded };
+        return new(kind, text, title, detail, sender, reference, keys.ToArray()) { ReferenceKind = referenceKind, ReferenceId = referenceId, ReferenceTimestamp=referenceTimestamp, ReferenceMediaKeys=kind=="reply"?QuotedMediaKeys(Find("refermsg")):null, Forwarded = forwarded };
+    }
+    private static string[] QuotedMediaKeys(XElement? quote){
+        if(quote==null)return [];string content=quote.ToString();
+        return System.Text.RegularExpressions.Regex.Matches(WebUtility.HtmlDecode(content),"(?i)(?:md5|cdnthumbmd5|filemd5)=[\"']([a-f0-9]{32})[\"']").Select(m=>m.Groups[1].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
     private static ForwardedMessage[] ReadForward(XElement root, ChatMessage message, int depth) {
         if (depth >= 4) return [];

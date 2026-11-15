@@ -910,5 +910,9 @@
   "ReaderFiltersPaused": "Filters retained ({0}); viewing context",
   "ReaderSearchRunning": "Searching…",
   "ReaderReferenceMismatch": "A message with this reference was found, but its sender or time differs from the quote. Navigation was stopped to avoid opening the wrong message.",
-  "ReaderReferenceNoId": "The backup did not record a message ID or sequence that can locate this quote."
+  "ReaderReferenceNoId": "The backup did not record a message ID or sequence that can locate this quote.",
+  "StandalonePrepare": "Prepare independent HTML entry",
+  "StandalonePrepared": "HTML entry prepared. Open independent HTML reading to unlock in your browser; future openings do not ask for a password in Storloom.",
+  "StandaloneCopyLocation": "Copy archive folder",
+  "StandaloneCopyLocationHelp": "Archive path selected. Press Ctrl+C to copy."
 }

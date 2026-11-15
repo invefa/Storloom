@@ -80,7 +80,7 @@ public sealed partial class ShellWindow {
             var export=AsyncButton("StoreExportReader",()=>RunStoreAction("export",item.Store??new StoreEntry("",item.Reader!,"",true)));export.Visibility=compactReader||item.Store!=null&&project==null?Visibility.Visible:Visibility.Collapsed;
             update.Visibility=readable?Visibility.Visible:Visibility.Collapsed;
             Section("ReadingTaskHeading",readable?item.Reading+(compactReader?" / "+L.T("StorageCompact"):""):L.T("ArchiveReadingPending"),open,update,fromBackup,export);
-            if(compactReader){var browser=AsyncButton("StandaloneEnable",()=>EnableBrowserReading(item.Reader!));browser.Name="archive_browser_enable";browser.IsEnabled=!pending;browser.ToolTip=L.T("StandaloneEnableHelp");details.Children.Add(View.Row(browser));}
+            if(compactReader){var browser=AsyncButton(File.Exists(Path.Combine(item.Reader!,ArchiveStore.StandaloneEntry))?"StandaloneEnable":"StandalonePrepare",()=>EnableBrowserReading(item.Reader!));browser.Name="archive_browser_enable";browser.IsEnabled=!pending;browser.ToolTip=L.T("StandaloneEnableHelp");details.Children.Add(View.Row(browser));}
             var protect=AsyncButton(encrypted?"HubAdjustProtection":"HubEncrypt",async()=>{if(project!=null)await ConfigureArchiveProtection(project);else if(item.Store!=null)await RunStoreAction("password",item.Store);else await ProtectConnectedReader(item.Reader!);});protect.Name="archive_protection";if(compactReader&&encrypted)protect.Visibility=Visibility.Collapsed;protect.IsEnabled=readable&&!pending&&(project!=null||item.Store==null||encrypted);
             if(item.Store!=null&&project==null)protect.Content=L.T("StoreChangePassword");
             var decrypt=AsyncButton("HubDecrypt",async()=>{if(project!=null)await RemoveArchiveProtection(project);else await DecryptConnectedReader(item.Reader!);});decrypt.Name="archive_decrypt";decrypt.IsEnabled=readable&&encrypted&&!pending&&(project!=null||item.Store==null);
@@ -104,8 +104,8 @@ public sealed partial class ShellWindow {
             var statistics=AsyncButton("CompactStatistics",()=>CompactStatistics(item.Reader!));statistics.Visibility=compactReader?Visibility.Visible:Visibility.Collapsed;
             var reorganize=AsyncButton("CompactRepack",()=>RepackCompact(project!));reorganize.Visibility=compactReader&&project!=null?Visibility.Visible:Visibility.Collapsed;reorganize.IsEnabled=!pending;
             var fresh=AsyncButton("CompactCreateFresh",()=>PrepareArchiveUpdate(project!,new(DirectReading:true){CreateCompact=true}));fresh.Visibility=project!=null&&readable&&!compactReader&&local?Visibility.Visible:Visibility.Collapsed;fresh.IsEnabled=!pending;fresh.ToolTip=L.T("CompactFreshHelp");
-            var advancedActions=View.Row(format,packed,statistics,reorganize,fresh);advancedActions.Margin=new Thickness(0,8,0,0);
-            var advanced=new Expander{Header=L.T("HubAdvanced"),Content=advancedActions,Margin=new Thickness(0,6,0,4),Visibility=readable?Visibility.Visible:Visibility.Collapsed};
+            var advancedActions=View.Row(new[]{format,packed,statistics,reorganize,fresh}.Where(b=>b.Visibility==Visibility.Visible).ToArray());advancedActions.Margin=new Thickness(0,8,0,0);
+            var advanced=new Expander{Header=L.T("HubAdvanced"),Content=advancedActions,Padding=new Thickness(0,6,0,0),Margin=new Thickness(0,6,0,4),Visibility=readable?Visibility.Visible:Visibility.Collapsed};
             readingDetails.Children.Add(advanced);materialTabs.SelectedIndex=materialTabsBySource.GetValueOrDefault(item.Id);if(materialTabs.SelectedItem==historyTab)historyTab.Content=BuildAccountHistory(item);
         }
         sourcePicker.SelectionChanged+=(_,_)=>{if(!changingSource)Selection(false);};
