@@ -16,6 +16,36 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void TablesFitPopulatedContentButRespectManualOverflowUntilTheSourceChanges()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.AdaptiveTable")!;var table=(DataGrid)Activator.CreateInstance(type)!;
+        table.Columns.Add(new DataGridTextColumn{Header="",Width=28,MinWidth=28,CanUserResize=false});
+        foreach(string key in new[]{"Name","Path","State"})table.Columns.Add(new DataGridTextColumn{Header=key,Binding=new System.Windows.Data.Binding(key),MinWidth=48});
+        var window=new ThemeWindow("Synthetic table layout",720,460){ShowInTaskbar=false};table.Margin=new Thickness(16);window.Body.Children.Add(table);
+        try{
+            window.Show();Pump();table.ItemsSource=Enumerable.Range(0,600).Select(i=>new{Name="Cache",Path=i==599?new string('x',220):"short",State="Ready"}).ToArray();Pump();window.UpdateLayout();Pump();
+            var scroll=Descendants(table).OfType<ScrollViewer>().Single(s=>s.Name=="DG_ScrollViewer");
+            Assert.InRange(table.Columns.Sum(c=>c.ActualWidth),scroll.ViewportWidth-2,scroll.ViewportWidth+1);
+            Assert.True(table.Columns[2].ActualWidth>table.Columns[1].ActualWidth);Assert.InRange(table.Columns[3].ActualWidth,48,100);Assert.Equal(28,table.Columns[0].ActualWidth);
+            Assert.InRange(scroll.ScrollableWidth,0,1);
+            var header=Descendants(table).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>().Single(h=>h.Column==table.Columns[2]);
+            var grip=(System.Windows.Controls.Primitives.Thumb)header.Template.FindName("PART_RightHeaderGripper",header);
+            grip.RaiseEvent(new System.Windows.Controls.Primitives.DragStartedEventArgs(0,0){RoutedEvent=System.Windows.Controls.Primitives.Thumb.DragStartedEvent});
+            table.Columns[2].Width=new DataGridLength(1200);grip.RaiseEvent(new System.Windows.Controls.Primitives.DragCompletedEventArgs(0,0,false){RoutedEvent=System.Windows.Controls.Primitives.Thumb.DragCompletedEvent});
+            Pump();window.UpdateLayout();Assert.Equal(1200,table.Columns[2].ActualWidth);Assert.True(scroll.ScrollableWidth>0);
+            window.Width=640;Pump();table.Visibility=Visibility.Collapsed;table.Visibility=Visibility.Visible;Pump();Assert.Equal(1200,table.Columns[2].ActualWidth);
+            table.ItemsSource=new[]{new{Name="New",Path="short",State="Ready"}};Pump();window.UpdateLayout();Pump();
+            Assert.InRange(table.Columns.Sum(c=>c.ActualWidth),scroll.ViewportWidth-2,scroll.ViewportWidth+1);Assert.InRange(scroll.ScrollableWidth,0,1);
+            table.ItemsSource=Array.Empty<object>();Pump();Assert.InRange(table.Columns.Sum(c=>c.ActualWidth),scroll.ViewportWidth-2,scroll.ViewportWidth+1);
+        }finally{window.Close();}
+    });
+    [Fact]public void TableWidthAllocationCompressesLongestColumnsFirstAndPreservesMinimums(){
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.AdaptiveTable")!;var fit=type.GetMethod("Distribute",BindingFlags.Static|BindingFlags.NonPublic)!;
+        double[] Allocate(double available,double[] desired,double[] minimum,bool[] flexible)=>(double[])fit.Invoke(null,[available,desired,minimum,desired.Select(_=>double.PositiveInfinity).ToArray(),flexible])!;
+        var widths=Allocate(600,[28,90,800,100],[28,48,60,48],[false,true,true,true]);Assert.Equal(28,widths[0]);Assert.Equal(90,widths[1]);Assert.InRange(widths[2],381.99,382.01);Assert.Equal(100,widths[3]);
+        var balanced=Allocate(600,[500,400,100],[48,48,48],[true,true,true]);Assert.InRange(balanced[0],249.99,250.01);Assert.InRange(balanced[1],249.99,250.01);Assert.Equal(100,balanced[2]);
+        var narrow=Allocate(60,[100,100],[48,48],[true,true]);Assert.Equal(new double[]{48,48},narrow);
+    }
     [Theory][InlineData(AppTheme.Light,"en")][InlineData(AppTheme.Dark,"zh-CN")][InlineData(AppTheme.OneDark,"zh-CN")]
     public void SharedSelectionComponentsRenderThreeStatesWithoutClippingAndFollowFilteredViews(AppTheme theme,string locale)=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});L.SetLanguage(locale);
@@ -28,6 +58,7 @@ public sealed class FormTests {
                 var check=nodes.OfType<CheckBox>().Single(c=>c.Name==item.Item1);check.ApplyTemplate();
                 Assert.Equal(item.Item2,((FrameworkElement)check.Template.FindName("mark",check)).Visibility);
                 Assert.Equal(item.Item3,((FrameworkElement)check.Template.FindName("partial",check)).Visibility);
+                if(check.IsChecked==null){var fill=(System.Windows.Shapes.Rectangle)check.Template.FindName("partial",check);Assert.Equal(((SolidColorBrush)Theme.Brush("Accent")).Color,((SolidColorBrush)fill.Fill).Color);Assert.True(fill.ActualWidth>=12);}
             }
             var table=nodes.OfType<DataGrid>().Single(t=>t.Name=="gallery_table");var header=(CheckBox)table.Columns[0].Header;
             Assert.Null(header.IsChecked);Assert.Equal(Visibility.Visible,((FrameworkElement)header.Template.FindName("partial",header)).Visibility);

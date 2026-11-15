@@ -25,10 +25,10 @@ internal static class TableInteraction {
             void Command(string key, Action action) {
                 var item = new MenuItem { Header = L.T(key) }; item.Click += (_, _) => action(); menu.Items.Add(item);
             }
-            Command("FitColumn", () => column.Width = DataGridLength.Auto);
-            Command("FitAllColumns", () => { foreach (var entry in table.Columns.Where(c => c.CanUserResize)) entry.Width = DataGridLength.Auto; });
+            Command("FitColumn", () => { (table as AdaptiveTable)?.UseManualWidths(); column.Width = DataGridLength.Auto; });
+            Command("FitAllColumns", () => { (table as AdaptiveTable)?.UseManualWidths(); foreach (var entry in table.Columns.Where(c => c.CanUserResize)) entry.Width = DataGridLength.Auto; });
             menu.Items.Add(new Separator());
-            Command("ResetColumns", () => { foreach (var entry in original) entry.Key.Width = entry.Value; });
+            Command("ResetColumns", () => { foreach (var entry in original) entry.Key.Width = entry.Value; (table as AdaptiveTable)?.FitToViewport(); });
             var headerStyle = new Style(typeof(DataGridColumnHeader), (Style)Application.Current.FindResource(typeof(DataGridColumnHeader)));
             headerStyle.Setters.Add(new Setter(FrameworkElement.ContextMenuProperty, menu)); column.HeaderStyle = headerStyle;
             if (column is DataGridBoundColumn { Binding: Binding binding }) {
