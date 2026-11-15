@@ -29,8 +29,8 @@ Storloom starts on **Cleanup and archive**. Nothing is cleaned on startup. Press
 ## Clean or archive caches
 
 1. Open Preferences > Rule sets and enable only the software categories you need.
-2. Click Scan cleanup items. Select an item on the left; inspect its files and diagnostics on the right.
-3. Check the items to process. Uncheck individual files to retain them. Every item starts unchecked.
+2. Check the scan categories on the left, then click Scan selected targets. Only checked categories are scanned. The checkbox header selects all categories; Invert selection reverses the current selection.
+3. Matching results start selected. Inspect files and diagnostics on the right, and uncheck anything to retain. File select-all and invert affect only the currently filtered files. Choose scan targets returns to the scope list with the previous scan selection retained; scan again to replace the results.
 4. For a file item, choose its Treatment: the rule's action, Archive and keep originals, or Archive then remove originals. The archive destination is set in Preferences.
 5. Click Review selected. The review shows exact actions, destinations, source samples, and any native commands. Confirm and execute is the mutation boundary.
 

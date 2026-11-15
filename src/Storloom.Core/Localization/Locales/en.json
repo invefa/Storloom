@@ -159,7 +159,7 @@
   "OverviewLead": "Choose a drive or folder, then scan its contents",
   "ScanFolder": "Analyze folder",
   "CleanupTitle": "Review before making space",
-  "CleanupLead": "1  Choose rules     2  Scan and select     3  Review",
+  "CleanupLead": "1  Select scan targets     2  Scan and select results     3  Review",
   "ScanCaches": "Scan cleanup items",
   "ChooseRuleSets": "Choose rule sets...",
   "ReviewSelection": "Review selected...",
@@ -917,5 +917,14 @@
   "StandalonePrepare": "Prepare independent HTML entry",
   "StandalonePrepared": "HTML entry prepared. Open independent HTML reading to unlock in your browser; future openings do not ask for a password in Storloom.",
   "StandaloneCopyLocation": "Copy archive folder",
-  "StandaloneCopyLocationHelp": "Archive path selected. Press Ctrl+C to copy."
+  "StandaloneCopyLocationHelp": "Archive path selected. Press Ctrl+C to copy.",
+  "SelectAll": "Select all",
+  "InvertSelection": "Invert selection",
+  "ScanSelectedTargets": "Scan selected targets",
+  "ChooseScanScope": "Choose scan targets",
+  "CleanupScopeHelp": "Select the categories to scan. Scanning does not delete files.",
+  "CleanupResultsHelp": "Scan complete. Select the results to clean, then review the processing list.",
+  "CleanupNoResults": "No cleanup targets found. Choose scan targets to scan again.",
+  "ScanScopeSummary": "{0} scan categories selected",
+  "CleanupScanDone": "Scanned {0} categories: {1} files and {2} native cleanup commands."
 }

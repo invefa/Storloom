@@ -14,7 +14,7 @@ Catalogs are local JSON data with `version: 1` and a non-empty `rules` array. Un
 | `include`, `exclude` | Relative file globs; includes default to `["**"]`, excludes to `[]` |
 | `processes` | Executable names without `.exe`; must be closed before execution |
 | `enabled`, `recursive` | Both default to true; disabled rules can still be explicitly selected in CLI |
-| `risk` | `Review` (default) or `Low`; GUI items start unchecked in both cases |
+| `risk` | `Review` (default) or `Low`; GUI scan categories start unchecked in both cases; matched scan results start selected and require review before execution |
 | `minimumAgeHours` | Default 168; both creation and last-write must be older; 0 through 876000 |
 | `minimumBytes`, `maximumBytes` | Inclusive length bounds; default minimum 0, no maximum |
 

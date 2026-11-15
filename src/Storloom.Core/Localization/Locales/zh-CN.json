@@ -159,7 +159,7 @@
   "OverviewLead": "选择磁盘或目录, 然后查看占用情况",
   "ScanFolder": "分析目录",
   "CleanupTitle": "选择要清理或归档的内容",
-  "CleanupLead": "1  选择规则集     2  扫描并勾选     3  确认处理",
+  "CleanupLead": "1  选择扫描对象     2  扫描并勾选结果     3  确认处理",
   "ScanCaches": "扫描清理项",
   "ChooseRuleSets": "选择规则集...",
   "ReviewSelection": "确认处理清单...",
@@ -917,5 +917,14 @@
   "StandalonePrepare": "生成独立 HTML 入口",
   "StandalonePrepared": "HTML 入口已生成。点击独立 HTML 阅读后，只需在浏览器中解锁；以后打开无需在 Storloom 输入密码。",
   "StandaloneCopyLocation": "复制归档路径",
-  "StandaloneCopyLocationHelp": "已选中归档路径，按 Ctrl+C 复制。"
+  "StandaloneCopyLocationHelp": "已选中归档路径，按 Ctrl+C 复制。",
+  "SelectAll": "全选",
+  "InvertSelection": "反选",
+  "ScanSelectedTargets": "扫描所选对象",
+  "ChooseScanScope": "重新选择扫描对象",
+  "CleanupScopeHelp": "勾选要扫描的类别。扫描只查找文件，不会执行清理。",
+  "CleanupResultsHelp": "扫描完成。勾选要清理的结果，再确认处理清单。",
+  "CleanupNoResults": "未找到清理对象，可重新选择扫描对象。",
+  "ScanScopeSummary": "已选 {0} 个扫描类别",
+  "CleanupScanDone": "已扫描 {0} 个类别，找到 {1} 个文件、{2} 条原生清理命令。"
 }

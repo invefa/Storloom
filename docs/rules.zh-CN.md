@@ -14,7 +14,7 @@
 | `include`、`exclude` | 相对文件匹配模式，分别默认为`["**"]`与`[]` |
 | `processes` | 不带`.exe`的程序名称，执行前必须退出 |
 | `enabled`、`recursive` | 均默认为真；命令行仍可显式选择禁用的规则 |
-| `risk` | 默认`Review`或`Low`；界面中两者均默认不勾选 |
+| `risk` | 默认`Review`或`Low`；界面中两者的初次扫描类别均不勾选；匹配结果默认勾选，执行前仍须确认处理清单 |
 | `minimumAgeHours` | 默认168，创建与最后写入时间均需达到要求；范围0至876000 |
 | `minimumBytes`、`maximumBytes` | 包含边界的大小限制；默认最小0，无最大限制 |
 

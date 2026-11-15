@@ -12,7 +12,8 @@ public sealed partial class ShellWindow {
         foreach (string id in ids) {
             var rule = engine.Catalog.Rules.Single(r => r.Id == id); var matches = files.Where(f => f.RuleId == id).ToArray();
             if (rule.Action == CleanupAction.Command) {
-                var command = snapshot.Commands.SingleOrDefault(c => c.RuleId == id) ?? throw new InvalidDataException(L.T("ToolNotAvailable"));
+                var command = snapshot.Commands.SingleOrDefault(c => c.RuleId == id);
+                if (command == null) continue;
                 commands.Add(id); review.Add(new(L.RuleName(rule), L.T("Command"), NativeSize(id), CommandText(command), L.T("NativeScope")) { Bytes = snapshot.Measurements.GetValueOrDefault(id)?.Bytes }); continue;
             }
             if (matches.Length == 0) continue;

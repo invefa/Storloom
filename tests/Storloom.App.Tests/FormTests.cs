@@ -16,6 +16,36 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void CleanupSelectsScanScopeThenOffersOnlyMatchedResultsAndRestoresScope()=>OnUi(()=>{
+        string fixture=Fixture(),data=Path.Combine(fixture,"data");
+        var rules=Enumerable.Range(0,3).Select(i=>{string root=Path.Combine(fixture,"cache-"+i);Directory.CreateDirectory(root);File.WriteAllText(Path.Combine(root,"one.tmp"),"synthetic cleanup target");File.WriteAllText(Path.Combine(root,"two.tmp"),"second target");return new CleanupRule{Id="fixture-"+i,Name="Cache "+i,Roots=[root],MinimumAgeHours=0};}).ToList();
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;var type=typeof(ShellWindow);
+        try{
+            type.GetField("engine",flags)!.SetValue(window,new CleanupEngine(new RuleCatalog{Rules=rules}));type.GetMethod("RenderRules",flags)!.Invoke(window,null);
+            window.Show();window.Navigate("cleanup");Pump();
+            var table=(DataGrid)type.GetField("ruleList",flags)!.GetValue(window)!;var files=(DataGrid)type.GetField("candidateList",flags)!.GetValue(window)!;
+            var all=(CheckBox)table.Columns[0].Header;var fileAll=(CheckBox)files.Columns[0].Header;
+            var scan=(Button)type.GetField("scanCleanup",flags)!.GetValue(window)!;var review=(Button)type.GetField("reviewSelection",flags)!.GetValue(window)!;
+            void Click(Button button)=>button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            void Toggle(CheckBox check)=>check.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            bool Selected(object row)=>(bool)row.GetType().GetProperty("Selected")!.GetValue(row)!;
+            Assert.False(scan.IsEnabled);Assert.False(review.IsEnabled);Assert.Equal(3,table.Items.Count);
+            Toggle(all);Assert.All(table.Items.Cast<object>(),r=>Assert.True(Selected(r)));Assert.True(scan.IsEnabled);
+            table.Items[1].GetType().GetProperty("Selected")!.SetValue(table.Items[1],false);Assert.Null(all.IsChecked);
+            Toggle(all);Assert.True(all.IsChecked);Assert.All(table.Items.Cast<object>(),r=>Assert.True(Selected(r)));
+            Click(Descendants(window).OfType<Button>().Single(b=>b.Name=="invert_cleanup_rules"));Assert.False(all.IsChecked);Assert.False(scan.IsEnabled);
+            table.Items[1].GetType().GetProperty("Selected")!.SetValue(table.Items[1],true);
+            Wait(AsResult((Task)type.GetMethod("ScanRules",flags)!.Invoke(window,null)!));Pump();
+            var plan=(CleanupPlan)type.GetField("cleanupPlan",flags)!.GetValue(window)!;Assert.Equal(2,plan.Files.Count);Assert.All(plan.Files,f=>Assert.Equal("fixture-1",f.RuleId));Assert.Single(table.Items.Cast<object>());Assert.True(review.IsEnabled);Assert.Equal(Visibility.Collapsed,scan.Visibility);
+            Assert.Equal(2,files.Items.Count);Toggle(fileAll);Assert.All(files.Items.Cast<object>(),r=>Assert.False(Selected(r)));Assert.False(review.IsEnabled);
+            Click(Descendants(window).OfType<Button>().Single(b=>b.Name=="invert_cleanup_files"));Assert.All(files.Items.Cast<object>(),r=>Assert.True(Selected(r)));Assert.True(review.IsEnabled);
+            ((TextBox)type.GetField("filter",flags)!.GetValue(window)!).Text="one.tmp";Assert.Single(files.Items.Cast<object>());Toggle(fileAll);Assert.True(review.IsEnabled);
+            ((TextBox)type.GetField("filter",flags)!.GetValue(window)!).Text="";Assert.Null(fileAll.IsChecked);
+            Click((Button)type.GetField("chooseScanScope",flags)!.GetValue(window)!);Assert.Equal(3,table.Items.Count);Assert.Single(table.Items.Cast<object>().Where(Selected));Assert.False(review.IsEnabled);
+            Assert.Equal("fixture-1",((CleanupRule)table.Items.Cast<object>().Single(Selected).GetType().GetProperty("Rule")!.GetValue(table.Items.Cast<object>().Single(Selected))!).Id);
+            Assert.All(rules,r=>Assert.Equal(2,Directory.GetFiles(r.Roots[0]).Length));
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
     [Theory][InlineData(ChatPlatform.QQ)][InlineData(ChatPlatform.WeChat)]public void ArchiveTabsPreserveTheSameFormControlsAndDraftAcrossIndependentSections(ChatPlatform platform)=>OnUi(()=>{
         string fixture=Fixture(),source=Path.Combine(fixture,"account"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(source);Directory.CreateDirectory(data);File.WriteAllBytes(Path.Combine(source,platform==ChatPlatform.QQ?"nt_msg.db":"message_0.db"),new byte[5120]);var project=ChatArchiveProject.Create("Fixture account",platform,source,Path.Combine(fixture,"output")) with{ReadingRoot=Path.Combine(fixture,"reading")};JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false,Height=900};const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
         try{window.Show();window.Navigate("chats");Pump();Wait(AsResult((Task)typeof(ShellWindow).GetMethod("PrepareReadingTask",flags)!.Invoke(window,[project,false])!));Pump();var sections=Descendants(window).OfType<TabControl>().Single(t=>t.Name=="archive_sections");var input=(PasswordBox)typeof(ShellWindow).GetField("keyInput",flags)!.GetValue(window)!;input.Password="fixture-draft";var browser=Descendants(window).OfType<CheckBox>().Single(c=>c.Name=="archive_browser_reading");Assert.True(browser.IsChecked);Assert.Equal(1,Descendants(window).OfType<ComboBox>().Single(c=>c.Name=="reading_storage_format").SelectedIndex);Assert.DoesNotContain(Descendants(window).OfType<Expander>(),e=>Descendants(e).Contains(browser));
@@ -533,6 +563,8 @@ public sealed class FormTests {
                 Assert.True(scrollbar.ActualWidth==12||scrollbar.ActualHeight==12);
             }
             var button=Descendants(window).OfType<Button>().Single(b=>b.Name=="scan_cleanup");
+            var scanRules=Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="cleanup_rules");
+            scanRules.Items[0].GetType().GetProperty("Selected")!.SetValue(scanRules.Items[0],true);
             button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent});
             var frame=(Border)button.Template.FindName("frame",button);
             if(SystemParameters.ClientAreaAnimation)Assert.True(((SolidColorBrush)frame.Background).HasAnimatedProperties);
@@ -553,6 +585,8 @@ public sealed class FormTests {
         try {
             window.Show();Pump();var type=typeof(ShellWindow);
             Task Invoke(string method)=>(Task)type.GetMethod(method,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null)!;
+            var scope=Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="cleanup_rules");
+            scope.Items[0].GetType().GetProperty("Selected")!.SetValue(scope.Items[0],true);
             Wait(AsResult(Invoke("ScanRules")));
             var rules=Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="cleanup_rules");
             rules.Items[0].GetType().GetProperty("Selected")!.SetValue(rules.Items[0],true);
