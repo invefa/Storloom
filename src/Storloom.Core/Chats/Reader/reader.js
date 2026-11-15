@@ -267,8 +267,9 @@
  function renderMedia(media, kind) {
   if(media.Kind==='file'){const link=element('a',label('ReaderSaveFile'),'file-download');link.href=transport?'#':archiveBase+media.Path;link.download=media.Name||'file';link.onclick=e=>{if(hostAction({action:'save-file',path:media.Path,name:media.Name}))e.preventDefault();};return link;}
   const node = element(media.Kind === 'video' ? 'video' : media.Kind === 'audio' ? 'audio' : 'img');
+  const presentation=kind==='sticker'||media.Kind==='sticker'?'sticker':media.Kind==='video'?'video':'image';node.classList.add('chat-'+presentation);
   node.dataset.asset=media.Path;node.dataset.name=media.Name||'';loadAsset(node,media.Path);
-  function fit(width, height) { if (width > 0 && height > 0) node.width = Math.max(1, Math.round(Math.min(width, 560, width * 420 / height)));if(pinBottom)requestAnimationFrame(scrollBottom); }
+  function fit(width, height) { const maxWidth=presentation==='sticker'?200:presentation==='video'?560:360,maxHeight=presentation==='sticker'?200:presentation==='video'?420:360;if (width > 0 && height > 0) node.width = Math.max(1, Math.floor(Math.min(width, maxWidth, width * maxHeight / height)));if(pinBottom)requestAnimationFrame(scrollBottom); }
   if (node.tagName === 'IMG') { node.alt = media.Name; node.loading = 'lazy'; node.onload = () => fit(node.naturalWidth, node.naturalHeight); }
   else { node.controls = true; node.preload = 'none'; if (node.tagName === 'VIDEO') node.onloadedmetadata = () => fit(node.videoWidth,node.videoHeight); }
   node.onerror = () => node.replaceWith(element('div', label('ReaderKind_' + kind) + ' · ' + label('ReaderCannotPlay'), 'placeholder'));

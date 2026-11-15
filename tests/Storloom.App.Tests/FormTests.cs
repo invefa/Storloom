@@ -16,6 +16,18 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void ReaderUsesSeparateAspectPreservingBoundsForPhotosAndStickers()=>OnUi(()=>{
+        string fixture=Fixture(),archive=Path.Combine(fixture,"archive");Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
+        byte[] Picture(int width,int height){var pixels=new byte[width*height*4];for(int n=3;n<pixels.Length;n+=4)pixels[n]=255;var bitmap=BitmapSource.Create(width,height,96,96,PixelFormats.Bgra32,null,pixels,width*4);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var output=new MemoryStream();encoder.Save(output);return output.ToArray();}
+        string wide="assets/"+new string('a',64)+".png",tall="assets/"+new string('b',64)+".png",small="assets/"+new string('c',64)+".png";
+        using(var store=ArchiveStore.CreateBundle(archive)){using var writer=store.BeginWrite();writer.Add(new("QQ","room","sender",1,1,"fixture"){Id="initial"});writer.Bytes(wide,Picture(1000,500));writer.Bytes(tall,Picture(500,2000));writer.Bytes(small,Picture(32,16));writer.Complete(new(new string('a',64),"complete",0,0,1,3,0));}
+        var window=new ChatReaderWindow(archive,Path.Combine(fixture,"data"),true){ShowInTaskbar=false};try{window.Show();var until=DateTime.UtcNow.AddSeconds(30);while(window.Browser.CoreWebView2==null&&DateTime.UtcNow<until){Pump();Thread.Sleep(10);}Assert.NotNull(window.Browser.CoreWebView2);var core=window.Browser.CoreWebView2!;string Query(string script)=>Wait(core.ExecuteScriptAsync(script));void Until(string expression,string expected){while(DateTime.UtcNow<until&&Query(expression)!=expected){Pump();Thread.Sleep(10);}Assert.Equal(expected,Query(expression));}Until("document.querySelectorAll('.message').length","1");
+            var samples=new[]{("QQ","image",wide),("QQ","sticker",wide),("WeChat","image",tall),("WeChat","sticker",tall),("QQ","image",small)};string items=System.Text.Json.JsonSerializer.Serialize(samples.Select((sample,n)=>new ChatMessage(sample.Item1,"room","sender",1700000000+n,1,""){Id="size"+n,Parts=[new(sample.Item2)],Media=[new(sample.Item3,"image","fixture.png")]}));Query("window.receivePage(window.archiveIndex.conversations[0].id,0,"+items+");true");Query("document.querySelector('#auto-bottom').checked=false;document.querySelector('#page-top').click();true");
+            Until("Array.from(document.querySelectorAll('img.previewable')).filter(img=>img.naturalWidth>0).length","5");
+            Assert.Equal("[[360,180],[200,100],[90,360],[50,200],[32,16]]",Query("Array.from(document.querySelectorAll('img.previewable'),img=>[Math.round(img.getBoundingClientRect().width),Math.round(img.getBoundingClientRect().height)])"));Assert.Equal("2",Query("document.querySelectorAll('img.chat-sticker').length"));
+            Query("document.querySelector('img.chat-sticker').click();true");Until("document.querySelector('#preview-image').naturalWidth","1000");Assert.Equal("true",Query("document.querySelector('#image-preview').open"));
+        }finally{window.Close();Pump();try{Directory.Delete(fixture,true);}catch(IOException){}}
+    });
     [Fact]public void OldQQQuotesRecoverLinksAndMetadataFromTheirWirePayload()=>OnUi(()=>{
         string fixture=Fixture(),archive=Path.Combine(fixture,"archive");Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
         byte[] V(ulong n){var bytes=new List<byte>();do{byte b=(byte)(n&127);n>>=7;bytes.Add((byte)(b|(n>0?128:0)));}while(n>0);return bytes.ToArray();}
