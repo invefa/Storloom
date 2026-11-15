@@ -24,7 +24,7 @@ public static class ControlFeedback {
             Paint(control, control is not TextBox);
         };
         if (control is Thumb thumb) { thumb.DragStarted += (_, _) => Paint(thumb,true); thumb.DragCompleted += (_, _) => Paint(thumb,true); }
-        if (control is ToggleButton toggle) { toggle.Checked += (_, _) => Paint(control, true); toggle.Unchecked += (_, _) => Paint(control, true); }
+        if (control is ToggleButton toggle) { toggle.Checked += (_, _) => Paint(control, true); toggle.Unchecked += (_, _) => Paint(control, true); toggle.Indeterminate += (_, _) => Paint(control, true); }
         if (control is ListBoxItem item) { item.Selected += (_, _) => Paint(control, true); item.Unselected += (_, _) => Paint(control, true); }
     }
     public static void Refresh(DependencyObject root) {
@@ -44,7 +44,7 @@ public static class ControlFeedback {
         if (!GetEnabled(control)) return;
         string name = control is Thumb ? "grip" : control is CheckBox ? "box" : control is ListBoxItem ? "item" : "frame";
         var frame = Frame(control, name); if (frame == null) return;
-        var color = control is Thumb scroll ? Color(scroll.IsDragging ? "ScrollGripDragging" : scroll.IsMouseOver ? "ScrollGripHover" : "ScrollGrip") : control is CheckBox check ? Color(check.IsChecked == true ? "Accent" : "Surface") :
+        var color = control is Thumb scroll ? Color(scroll.IsDragging ? "ScrollGripDragging" : scroll.IsMouseOver ? "ScrollGripHover" : "ScrollGrip") : control is CheckBox check ? Color(check.IsChecked != false ? "Accent" : "Surface") :
             control is ListBoxItem item ? Color(item.IsSelected ? "Selection" : "Sidebar") :
             (control.Background as SolidColorBrush)?.Color ?? Color("Surface");
         bool passiveEditor = control is TextBox editor && (editor.AcceptsReturn || editor.IsReadOnly || editor.IsKeyboardFocusWithin);

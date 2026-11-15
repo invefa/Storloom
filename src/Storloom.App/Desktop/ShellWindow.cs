@@ -72,6 +72,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         Item(file, "ExportLog", ExportOperationLog);
         file.Items.Add(new Separator()); Item(file, "OpenData", () => OpenFolder(dataRoot)); Item(file, "HideToTray", HideToTray); Item(file, "Exit", RequestExit);
         var tools = new MenuItem { Header = L.T("ToolsMenu") }; Item(tools, "Preferences", () => ShowPreferences());
+        Item(tools, "ComponentGallery", () => new ComponentGalleryWindow { Owner = this }.ShowDialog());
         var help = new MenuItem { Header = L.T("HelpMenu") }; Item(help, "QuickStart", () => ShowHelp());
         Item(help, "OpenAiGuide", () => ShowHelp(document: File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docs", L.Language == "zh-CN" ? "ai-rules.zh-CN.md" : "ai-rules.md"))));
         Item(help, "About", () => new AboutWindow { Owner = this }.ShowDialog());

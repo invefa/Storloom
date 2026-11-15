@@ -16,6 +16,39 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Theory][InlineData(AppTheme.Light,"en")][InlineData(AppTheme.Dark,"zh-CN")][InlineData(AppTheme.OneDark,"zh-CN")]
+    public void SharedSelectionComponentsRenderThreeStatesWithoutClippingAndFollowFilteredViews(AppTheme theme,string locale)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});L.SetLanguage(locale);
+        var galleryType=typeof(ShellWindow).Assembly.GetType("Storloom.App.ComponentGalleryWindow")!;
+        var window=(Window)Activator.CreateInstance(galleryType)!;
+        try{
+            window.Show();Pump();window.UpdateLayout();
+            var nodes=Descendants(window).ToArray();
+            foreach(var item in new[]{("gallery_unchecked",Visibility.Collapsed,Visibility.Collapsed),("gallery_checked",Visibility.Visible,Visibility.Collapsed),("gallery_partial",Visibility.Collapsed,Visibility.Visible)}){
+                var check=nodes.OfType<CheckBox>().Single(c=>c.Name==item.Item1);check.ApplyTemplate();
+                Assert.Equal(item.Item2,((FrameworkElement)check.Template.FindName("mark",check)).Visibility);
+                Assert.Equal(item.Item3,((FrameworkElement)check.Template.FindName("partial",check)).Visibility);
+            }
+            var table=nodes.OfType<DataGrid>().Single(t=>t.Name=="gallery_table");var header=(CheckBox)table.Columns[0].Header;
+            Assert.Null(header.IsChecked);Assert.Equal(Visibility.Visible,((FrameworkElement)header.Template.FindName("partial",header)).Visibility);
+            var columnHeader=nodes.OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>().Single(h=>ReferenceEquals(h.Content,header));
+            var box=(Border)header.Template.FindName("box",header);var point=box.TranslatePoint(new Point(),columnHeader);
+            Assert.InRange(point.X,0,columnHeader.ActualWidth-box.ActualWidth);Assert.InRange(point.Y,0,columnHeader.ActualHeight-box.ActualHeight);
+            Assert.Equal(Visibility.Collapsed,((FrameworkElement)header.Template.FindName("label",header)).Visibility);
+            Capture(window,"component-library-"+theme+"-"+locale);
+            header.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.True(header.IsChecked);
+            Assert.Equal(Visibility.Visible,((FrameworkElement)header.Template.FindName("mark",header)).Visibility);
+            Assert.Equal(Visibility.Collapsed,((FrameworkElement)header.Template.FindName("partial",header)).Visibility);
+            header.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.False(header.IsChecked);
+            var filter=nodes.OfType<TextBox>().Single(t=>t.Name=="gallery_filter");filter.Text="1";Pump();Assert.Single(table.Items.Cast<object>());
+            nodes.OfType<Button>().Single(b=>b.Name=="gallery_invert").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));Assert.True(header.IsChecked);
+            filter.Text="";Pump();Assert.Equal(3,table.Items.Count);Assert.Null(header.IsChecked);
+            var detached=table.Items[0];filter.Text="no-match";Pump();Assert.False(header.IsEnabled);Assert.False(header.IsChecked);
+            detached.GetType().GetProperty("Selected")!.SetValue(detached,false);Assert.False(header.IsChecked);
+            filter.Text="";Pump();Assert.False(header.IsChecked);
+            Capture(window,"component-library-"+theme+"-"+locale+"-after-interaction");
+        }finally{window.Close();}
+    });
     [Fact]public void CleanupSelectsScanScopeThenOffersOnlyMatchedResultsAndRestoresScope()=>OnUi(()=>{
         string fixture=Fixture(),data=Path.Combine(fixture,"data");
         var rules=Enumerable.Range(0,3).Select(i=>{string root=Path.Combine(fixture,"cache-"+i);Directory.CreateDirectory(root);File.WriteAllText(Path.Combine(root,"one.tmp"),"synthetic cleanup target");File.WriteAllText(Path.Combine(root,"two.tmp"),"second target");return new CleanupRule{Id="fixture-"+i,Name="Cache "+i,Roots=[root],MinimumAgeHours=0};}).ToList();
