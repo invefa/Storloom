@@ -58,7 +58,7 @@ public sealed class FormTests {
                 var check=nodes.OfType<CheckBox>().Single(c=>c.Name==item.Item1);check.ApplyTemplate();
                 Assert.Equal(item.Item2,((FrameworkElement)check.Template.FindName("mark",check)).Visibility);
                 Assert.Equal(item.Item3,((FrameworkElement)check.Template.FindName("partial",check)).Visibility);
-                if(check.IsChecked==null){var fill=(System.Windows.Shapes.Rectangle)check.Template.FindName("partial",check);Assert.Equal(((SolidColorBrush)Theme.Brush("Accent")).Color,((SolidColorBrush)fill.Fill).Color);Assert.True(fill.ActualWidth>=12);}
+                if(check.IsChecked==null){var fill=(System.Windows.Shapes.Rectangle)check.Template.FindName("partial",check);Assert.Equal(((SolidColorBrush)Theme.Brush("OnAccent")).Color,((SolidColorBrush)fill.Fill).Color);Assert.Equal(8,fill.ActualWidth);Assert.Equal(8,fill.ActualHeight);Assert.Equal(2,fill.RadiusX);Assert.Equal(2,fill.RadiusY);}
             }
             var table=nodes.OfType<DataGrid>().Single(t=>t.Name=="gallery_table");var header=(CheckBox)table.Columns[0].Header;
             Assert.Null(header.IsChecked);Assert.Equal(Visibility.Visible,((FrameworkElement)header.Template.FindName("partial",header)).Visibility);

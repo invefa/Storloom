@@ -35,7 +35,7 @@
    <Grid Background="Transparent"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Border x:Name="box" Width="16" Height="16" CornerRadius="3" BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" Background="{DynamicResource Surface}" VerticalAlignment="Center">
      <Grid><Path x:Name="mark" Width="11" Height="9" Stretch="Fill" Data="M 2,6 L 5,9 L 11,2" Stroke="{DynamicResource OnAccent}" StrokeThickness="1.8" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
-      <Rectangle x:Name="partial" RadiusX="2" RadiusY="2" Fill="{DynamicResource Accent}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Visibility="Collapsed"/></Grid>
+      <Rectangle x:Name="partial" Width="8" Height="8" RadiusX="2" RadiusY="2" Fill="{DynamicResource OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/></Grid>
     </Border>
     <ContentPresenter x:Name="label" Grid.Column="1" Margin="7,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
    </Grid>
