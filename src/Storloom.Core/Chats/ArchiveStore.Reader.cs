@@ -19,7 +19,7 @@ internal sealed partial class ArchiveStore {
     internal static bool NeedsPassword(string directory){string marker=Path.Combine(ResolveRoot(directory),"archive.json");PathPolicy.AssertNoLinks(marker);if(new FileInfo(marker).Length>4096)throw new InvalidDataException("Invalid archive marker.");return JsonFiles.Read<Configuration>(marker).Protected;}
     private Dictionary<string,string>? readerConversations;
     private byte[]? cachedReaderIndex;private string? cachedReaderHead;
-    internal byte[] ReaderIndex(){lock(readGate){if(cachedReaderIndex!=null&&cachedReaderHead==Head)return cachedReaderIndex.ToArray();var bytes=PublishedReaderIndex()??ReaderIndex(query,OpenFile);if(bytes.Length<=16*1024*1024){cachedReaderIndex=bytes.ToArray();cachedReaderHead=Head;}return bytes;}}
+    internal byte[] ReaderIndex(){lock(readGate){if(cachedReaderIndex!=null&&cachedReaderHead==Head)return cachedReaderIndex.ToArray();var bytes=WithMediaRepairs(PublishedReaderIndex()??ReaderIndex(query,OpenFile));if(bytes.Length<=16*1024*1024){cachedReaderIndex=bytes.ToArray();cachedReaderHead=Head;}return bytes;}}
     private byte[]? PublishedReaderIndex(){
         // Reuse the authenticated browser snapshot: one sequential metadata read,
         // rather than resolving every chunk of archive-index.js through the index.
@@ -47,7 +47,7 @@ internal sealed partial class ArchiveStore {
             chats.Add(new JsonObject{["id"]=id,["name"]=name,["count"]=count,["pages"]=(count+299)/300});native[id]=conversation;
         }
         if(ReferenceEquals(query,this.query))readerConversations=conversations;metadata["storeConversationKeys"]=JsonSerializer.SerializeToNode(conversations);metadata["conversations"]=chats;metadata["preferenceScope"]=Id;metadata["nativeStore"]=true;metadata["sourceIdentity"]=query.Cursor?.SourceIdentity;
-        return Encoding.UTF8.GetBytes("window.archiveIndex="+metadata.ToJsonString()+";");
+        return WithMediaRepairs(Encoding.UTF8.GetBytes("window.archiveIndex="+metadata.ToJsonString()+";"),open);
     }
     internal byte[] ReaderPage(string conversation,int page){lock(readGate){
         if(readerConversations==null)_=ReaderIndex();if(!readerConversations!.TryGetValue(conversation,out string? key))throw new FileNotFoundException("Unknown conversation.");

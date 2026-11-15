@@ -61,3 +61,9 @@ Global pages are Account archives, Database key library, and Accounts and client
 The account list moves to a compact selector on narrow windows. Password-protected key files can be selected in task setup or managed on their own page. Editable fields use a subdued hover response. Reading protection and database-key passwords remain separate.
 
 Decrypting a managed reader creates a new unprotected generation and retains the encrypted version. Decrypting a connected standalone reader creates a separate plain copy. Packed stores retain their format-specific backup and password actions; exporting a reader offers independent password protection. Native account changes still reach packed stores through an explicit completed-reader synchronization.
+
+## WXGF animation timing
+
+For recognized version-zero WXGF animations with a verified uniform frame interval, conversion preserves all decoded pictures and restores the container interval instead of relying on the raw HEVC frame rate or dropping frames to 15 fps. Partition counts are not picture counts: reordered P/B pictures may share a partition. The declared picture count and resulting GIF frame count must agree before publication. Other WXGF layouts retain the existing fallback; their timing is not inferred from this layout. Native GIF, APNG and WebP resources retain their source bytes.
+
+Compact reading snapshots can retain corrected animation assets as new content-addressed files, with a protected mapping to their original paths. Native reading, independent HTML, image preview and saving use the corrected asset. Original assets, messages and credentials remain intact; the mapping survives subsequent snapshots and reader export.

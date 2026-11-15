@@ -2,8 +2,10 @@
 (() => {
  const index = window.archiveIndex, labels = {...window.readerCatalogs?.[index.language], ...index.labels}, $ = id => document.getElementById(id);
  const archiveBase = window.archiveContentBase || '', transport=window.archiveTransport;
+ function resolvedAsset(path){const replacement=index.mediaRepairs?.[path];return typeof replacement==='string'&&safeAsset(replacement)?replacement:path;}
  const observedAssets=new Map(),assetObserver=transport?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){assetObserver.unobserve(entry.target);const load=observedAssets.get(entry.target);observedAssets.delete(entry.target);load?.();}}):null;
  function loadAsset(node,path,immediate=false){
+  path=resolvedAsset(path);
   if(!transport){if(node.tagName==='IMG'&&!immediate){node.loading='lazy';node.decoding='async';}node.src=archiveBase+path;return Promise.resolve();}
   const load=()=>transport.asset(path).then(url=>{node.src=url;}).catch(error=>{if(error.message==='StandaloneLargeMedia'){const button=element('button',label('StandaloneLargeMedia'),'placeholder');button.onclick=()=>transport.save(path,node.dataset.name||path.split('/').at(-1));node.replaceWith(button);}else{node.dispatchEvent(new Event('error'));transport.error(error);}});
   for(const target of observedAssets.keys())if(!target.isConnected){assetObserver.unobserve(target);observedAssets.delete(target);}
@@ -606,6 +608,7 @@
  $('image-locate').onclick=locateImage;
  for(const [id,delta,key] of [['rotate-left',-90,'ReaderRotateLeft'],['rotate-right',90,'ReaderRotateRight']]){$(id).title=label(key);$(id).setAttribute('aria-label',label(key));$(id).onclick=()=>{rotation=(rotation+delta+360)%360;fitImage();};}
  async function copyImage(path=imagePath,angle=rotation){
+  path=resolvedAsset(path);
   try{const img=new Image();if(transport)await loadAsset(img,path,true);else img.src=(window.readerImageCopyBase?window.readerImageCopyBase+path.slice(7):archiveBase+path);await img.decode();if(img.naturalWidth*img.naturalHeight>32000000)throw Error('size');
    const canvas=document.createElement('canvas'),sideways=angle%180!==0;canvas.width=sideways?img.naturalHeight:img.naturalWidth;canvas.height=sideways?img.naturalWidth:img.naturalHeight;const ctx=canvas.getContext('2d');ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(angle*Math.PI/180);ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
    const encoded=canvas.toDataURL('image/png').split(',')[1];if(encoded.length>32*1024*1024)throw Error('size');if(hostAction({action:'clipboard-image',data:encoded}))return;
@@ -625,7 +628,7 @@
  function hostAction(message){if(transport&&['save-file','save-image'].includes(message.action)){transport.save(message.path,message.name);return true;}if(window.chrome?.webview){window.chrome.webview.postMessage(message);return true;}return false;}
  let statusTimer;function actionStatus(value){text('action-status',value);clearTimeout(statusTimer);statusTimer=setTimeout(()=>text('action-status',''),4000);}
  window.chrome?.webview?.addEventListener('message',e=>{if(e.data?.action==='reader-status'&&typeof e.data.text==='string')actionStatus(e.data.text);});
- function saveImage(path,name){if(!safeAsset(path))return;if(hostAction({action:'save-image',path,name}))return;const a=element('a');a.href=archiveBase+path;a.download=(name||'image').replace(/[\\/:*?"<>|]/g,'_');document.body.append(a);a.click();a.remove();}
+ function saveImage(path,name){if(!safeAsset(path))return;path=resolvedAsset(path);if(hostAction({action:'save-image',path,name}))return;const a=element('a');a.href=archiveBase+path;a.download=(name||'image').replace(/[\\/:*?"<>|]/g,'_');document.body.append(a);a.click();a.remove();}
  $('image-save').onclick=()=>saveImage(imagePath,imageName);
  async function copyText(value){if(hostAction({action:'copy-text',text:value}))return;try{await navigator.clipboard.writeText(value);actionStatus(label('ReaderCopied'));}catch{actionStatus(label('ReaderCopyFailed'));}}
  const menu=$('reader-menu');function hideMenu(){menu.hidden=true;}
