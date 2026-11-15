@@ -56,7 +56,7 @@ internal sealed partial class ArchiveStore {
     private sealed record SearchCursor(long Time,string Id);
     internal byte[] ReaderReference(string conversation,string reference,bool metadataOnly=false){lock(readGate){
         if(readerConversations==null)_=ReaderIndex();if(reference.Length>1024||!readerConversations!.TryGetValue(conversation,out var key))throw new InvalidDataException("Invalid reference request.");
-        var message=query.Reference(key,reference);if(message==null)return "null"u8.ToArray();var raw=JsonSerializer.Deserialize<ChatMessage>(message.Json)??throw new InvalidDataException("Invalid reference message.");if(!metadataOnly)return JsonSerializer.SerializeToUtf8Bytes(new{page=query.Rank(message)/300,id=raw.Id});return JsonSerializer.SerializeToUtf8Bytes(new{page=(long?)null,id=raw.Id,message=new{raw.Sender,raw.SenderName,raw.Conversation,raw.Timestamp,raw.Identity,raw.IdentityVersion}});
+        var message=query.Reference(key,reference);if(message==null)return "null"u8.ToArray();var raw=JsonSerializer.Deserialize<ChatMessage>(message.Json)??throw new InvalidDataException("Invalid reference message.");if(!metadataOnly)return JsonSerializer.SerializeToUtf8Bytes(new{page=query.Rank(message)/300,id=raw.Id});return JsonSerializer.SerializeToUtf8Bytes(new{page=(long?)null,id=raw.Id,message=new{raw.Sender,raw.SenderName,raw.Conversation,raw.Timestamp,raw.Identity,raw.IdentityVersion,raw.Media}});
     }}
     internal byte[] ReaderSearch(string text,string? cursor=null,bool reverse=false){lock(readGate){
         if(readerConversations==null)_=ReaderIndex();var ids=readerConversations!.ToDictionary(p=>p.Value,p=>p.Key,StringComparer.Ordinal);

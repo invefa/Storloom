@@ -132,3 +132,7 @@ body.dark:not(.palette-qq):not(.palette-wechat){--line:#3b414d}
 #filter-toggle.has-filters{border-color:var(--accent);box-shadow:inset 0 -2px var(--accent)}#filter-clear{display:grid;place-items:center;padding:6px;min-width:28px}#filter-clear[hidden]{display:none}#filter-toggle[aria-busy=true]{cursor:progress}
 
 .quote-meta[hidden],.quote-meta [hidden]{display:none!important}
+
+/* Status occupies its own row, so wrapped notices never cover messages or paging controls. */
+main{grid-template-rows:auto auto auto minmax(0,1fr) auto auto}.chat-header{grid-row:1}#filter-panel{grid-row:2}#notice{grid-row:3}#messages{grid-row:4}#action-status{grid-row:5;position:static;min-width:0;max-height:25vh;overflow:auto;margin:8px 16px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere;pointer-events:auto;font-size:13px;line-height:1.6}.page-footer{grid-row:6}
+.quote .quote-image{display:block;max-width:min(180px,100%);max-height:140px;width:auto;height:auto;object-fit:contain;margin:5px 0;border-radius:4px}.time-separator{display:flex;justify-content:center;margin:18px 0 22px;color:var(--muted);font-size:12px}.time-separator time{padding:2px 10px;border-radius:5px;background:color-mix(in srgb,var(--canvas),var(--surface) 50%)}
