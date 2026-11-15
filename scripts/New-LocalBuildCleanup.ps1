@@ -39,6 +39,10 @@ $taskShortcuts = @(Get-ChildItem -LiteralPath $taskLocal -Filter '*.lnk' -File |
     $_.BaseName -match '^Storloom-(\d+\.\d+\.\d+)$' -and [version]$Matches[1] -lt [version]$KeepVersion
 } | Select-Object -ExpandProperty Name)
 if ($taskShortcuts.Count) { Add-LocalRule 'local-storloom-old-shortcuts' 'Storloom superseded shortcuts' 'Storloom 旧版快捷方式' 'Exact old shortcut filenames only. Current and future shortcuts are retained.' @($taskLocal) $taskShortcuts 0 $false }
+$taskOldTestResults = @(Get-ChildItem -LiteralPath (Join-Path $taskRepo 'artifacts/operations') -Directory | Where-Object {
+    $_.Name -match '^(\d+\.\d+\.\d+)-test-results$' -and [version]$Matches[1] -lt [version]$KeepVersion
+} | Select-Object -ExpandProperty FullName)
+Add-LocalRule 'local-storloom-old-test-dumps' 'Storloom superseded test diagnostic dumps' 'Storloom 旧版测试诊断转储' 'Diagnostic dumps under explicitly older versioned test-result directories only. Logs and other operation data are retained.' $taskOldTestResults @('**/*.dmp') 0 $true @('dotnet','testhost')
 if (!$taskRules.Count) { throw 'No matching build outputs were found.' }
 # This script generates reviewable rules only. It never scans user archives or deletes files.
 $taskOutputPath = [IO.Path]::GetFullPath($Output)

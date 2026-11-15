@@ -140,4 +140,10 @@ main{grid-template-rows:auto auto auto minmax(0,1fr) auto auto}.chat-header{grid
 /* Inline faces follow text size; stickers and photos have separate, aspect-preserving bounds. */
 #messages img.chat-image{max-width:min(100%,360px);max-height:360px;height:auto;object-fit:contain}#messages img.chat-sticker{max-width:min(100%,200px);max-height:200px;height:auto;object-fit:contain}
 
-.quote{white-space:normal}.quote-meta{white-space:normal}.quote .quote-text,.palette-wechat .reference-zone .quote .quote-text{display:block;white-space:pre-wrap}.reference-zone .quote-image{display:block;max-width:min(140px,100%);max-height:110px;width:auto;height:auto;object-fit:contain;margin:4px 0}
+.quote{white-space:normal}.quote-meta{white-space:normal}.quote .quote-text,.palette-wechat .reference-zone .quote .quote-text{display:block;white-space:pre-wrap}.reference-zone .quote-image{display:block;max-width:min(140px,100%);max-height:110px;height:auto;object-fit:contain;margin:4px 0}
+
+/* Keep asynchronous media layout changes anchored to the current reading position. */
+#messages{overflow-anchor:none}.media-pending{background:color-mix(in srgb,var(--muted) 12%,transparent);color:transparent;object-fit:contain}
+:root{--media-muted:#666}body.dark{--media-muted:#b3b3b3}.bubble.visual-only :is(.kind-title,.card-detail,.media-caption),.message.self .bubble.visual-only :is(.kind-title,.card-detail,.media-caption){color:var(--media-muted)}
+.media-caption{display:block;margin-top:5px;line-height:1.5}.kind-file .file-download{display:block;width:fit-content;max-width:100%;margin-top:7px;font-size:12px;font-weight:400}.kind-file>strong{display:block}
+.reader-page-state{min-height:180px;display:flex;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:13px}.reader-spinner{width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:reader-spin .8s linear infinite;flex:none}@keyframes reader-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.reader-spinner{animation:none;border-style:dotted}}
