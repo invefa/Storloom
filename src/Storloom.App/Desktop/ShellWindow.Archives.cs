@@ -49,10 +49,7 @@ public sealed partial class ShellWindow {
     private ChatArchiveProject SelectedArchive()=>selectedHomeSource is {Project:{} project}?archiveProjects[project.Id]:archiveTable?.SelectedItem is ArchiveRow row?archiveProjects[row.Project.Id]:throw new InvalidOperationException(L.T("ArchiveSelect"));
     private void MigrateArchiveReaderPreferences(ChatArchiveProject project){if(project.Reading==null)return;string root=Path.Combine(dataRoot,"reader-preferences"),old=Path.Combine(root,JsonFiles.Hash(PathPolicy.Normalize(project.Reading).ToUpperInvariant())+".json"),target=Path.Combine(root,JsonFiles.Hash(new{archive=project.Id})+".json");if(!File.Exists(target)&&File.Exists(old)){PathPolicy.AssertNoLinks(old);Directory.CreateDirectory(root);File.Copy(old,target,false);}}
     private async Task VerifyArchiveBackup(ChatArchiveProject project){
-        if(project.NativeArchive!=null){await RunStoreAction("verify",new("",project.NativeArchive,"",true));return;}if(project.Manifest==null)return;
-        var progress=Progress();bool completed=false;
-        await RunPausable(async token=>{await Task.Run(()=>ChatExporter.VerifyBackup(project.Manifest,progress,token),token);token.ThrowIfCancellationRequested();completed=true;});
-        if(completed){status.Text=L.T("VerifyBackupComplete");operationView.AddLog(status.Text);}
+        if(project.NativeArchive!=null){await VerifyReadingIntegrity(project.NativeArchive);return;}if(project.Manifest!=null)await VerifyOriginalIntegrity(project.Manifest);
     }
     private ChatArchiveTask? PendingState(ChatArchiveProject project)=>project.TaskFile!=null&&File.Exists(project.TaskFile)?JsonFiles.Read<ChatArchiveTask>(project.TaskFile):null;
     private bool ArchiveNeedsPassword(ChatArchiveProject project,ChatArchiveUpdateRequest request)=>request.CreateCompact?(request.Mode??project.Protection)!=ChatArchiveProtectionMode.None:!request.BackupOnly&&(request.Mode is ChatArchiveProtectionMode.All or ChatArchiveProtectionMode.Selected||PendingState(project)?.Secure==true||project.Protection!=ChatArchiveProtectionMode.None||project.Reading!=null&&(ChatVault.Exists(project.Reading)||ArchiveStore.Exists(project.Reading)&&ArchiveStore.NeedsPassword(project.Reading)));

@@ -22,15 +22,20 @@ An archive should remain identifiable after moving machines, changing directorie
 
 Discovery reads markers, does not parse message packs or obtain keys, refuses links, and bounds directory count/depth. Only confirmed selections change registrations. Directory names do not establish account identity. Native backups continue using their separate verified import flow.
 
+## P1 features implemented in 2.15
+
+- **Configuration packages:** the archive tools menu backs up selected registrations and preferences. Keys are excluded by default. Including keys copies protected key envelopes only and requires package encryption; their own passwords remain unchanged. Restore previews scope and resulting source locations, retains matching registrations by default, optionally updates them, saves recovery copies before writes, and rejects stale previews. Executable paths, custom-theme files, cleanup rules, running jobs and temporary credentials are excluded.
+- **Version comparison:** choose two archives from the material or history view. Compare indexed message/resource counts, bytes, conversation changes, time ranges and recorded unresolved-media/unsupported-message counts. Existing indexes are reused; missing indexes may need cancellable rebuilding. Unrecorded folder-reader fields stay unknown. Equal totals do not prove identical messages.
+- **Integrity reports:** compact archives verify committed records, including history, and resource authentication; protected folder readers verify registered files; plain folders without trusted digests report readability only; original folder backups use existing transfer-receipt verification. Results distinguish verified, partial, failed, locked and cancelled, with scope/time/snapshot and JSON export. Snapshot changes mark previous results stale. A previous successful check does not continuously verify current files.
+
+Configuration packages are separate from chat data. Reports live in local application data and can be explicitly exported. They are not provenance signatures and do not modify archive contents. Export-time missing media or unsupported messages remain visible limitations even when stored ciphertext authenticates.
+
 ## Future priorities
 
 | Priority | Gap | Direction |
 | --- | --- | --- |
-| P1 | Full local configuration still needs its own backup | Explicit configuration packages separating registrations, preferences and keys; exclude secrets by default, encrypt and confirm when included |
-| P1 | Comparing valid archive versions | Reuse indexes to compare message/resource counts, time ranges and missing media without decrypting everything to render a list |
-| P1 | Unified integrity status | Surface existing verification with scope, time and outcome; readable metadata must not imply a fully verified payload |
 | P2 | Bulk original-backup discovery | Typed recovery results using existing manifest verification and unlock flows, never register originals as readers |
 | P2 | Multiple archive operations | A queue preserving per-item configuration, progress and errors with resume/cancel controls |
 | P2 | Stronger provenance trust | Optional signed manifests and offline verification, clearly distinct from public editable labels |
 
-These future priorities are design proposals, not implemented features. See the [Chinese design](archive-experience-design.zh-CN.md) for the full scenario discussion and [archive library](archive-library.md) for current operation details.
+The P1 packages, indexed comparisons and integrity reports are implemented. Per-message text differences, bulk original import, a unified queue and signatures remain future work. See the [Chinese design](archive-experience-design.zh-CN.md) and [archive library](archive-library.md) for current operation details.

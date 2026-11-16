@@ -54,6 +54,7 @@ internal sealed class ArchiveQueryCache:IDisposable {
     internal ArchiveImportCursor? Cursor=>index.Query("SELECT v FROM projection WHERE k='import'").Select(r=>JsonSerializer.Deserialize<ArchiveImportCursor>(r[0])).SingleOrDefault();
     internal string? AssetFor(FileStamp stamp)=>index.Query("SELECT path FROM source_assets WHERE stamp=?",JsonFiles.Hash(stamp)).SingleOrDefault()?[0];
     internal long MessageCount=>long.Parse(index.Query("SELECT count(*) FROM current_messages").Single()[0],CultureInfo.InvariantCulture);
+    internal ArchiveConversationOverview[] OverviewConversations()=>index.Query("SELECT conversation,count(*),min(time),max(time) FROM current_messages GROUP BY conversation ORDER BY conversation").Select(r=>new ArchiveConversationOverview(r[0],long.Parse(r[1],CultureInfo.InvariantCulture),long.Parse(r[2],CultureInfo.InvariantCulture),long.Parse(r[3],CultureInfo.InvariantCulture))).ToArray();
     internal int AssetCount=>int.Parse(index.Query("SELECT count(*) FROM archive_files WHERE path>='assets/' AND path<'assets0'").Single()[0],CultureInfo.InvariantCulture);
     internal bool HasObject(string id)=>index.Query("SELECT 1 FROM archive_objects WHERE id=?",id).Count!=0;
     internal Message? Find(string id)=>!MayContain(id)?null:index.Query("SELECT body FROM current_messages WHERE id=?",id).Select(r=>Read(r[0])).SingleOrDefault();

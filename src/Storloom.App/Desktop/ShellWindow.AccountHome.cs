@@ -66,11 +66,12 @@ public sealed partial class ShellWindow {
         var sourceHeader=View.Stack(headingRow,sourcePicker,sourcePath);View.Add(right,sourceHeader,1);
         var taskBanner=new StackPanel();View.Add(right,taskBanner,2);
         var materialTabs=new TabControl{Name="account_material_tabs",Background=Brushes.Transparent};View.Add(right,materialTabs,3);
-        var readingDetails=new StackPanel{Margin=new Thickness(12,8,12,8)};var backupDetails=new StackPanel{Margin=new Thickness(12,8,12,8)};
+        var readingDetails=new StackPanel{Margin=new Thickness(12,8,12,8)};var backupDetails=new StackPanel{Margin=new Thickness(12,8,12,8)};var integrityDetails=new StackPanel{Margin=new Thickness(12,8,12,8)};
         var scroll=View.FormScroll(readingDetails);scroll.Name="account_details_scroll";
         materialTabs.Items.Add(new TabItem{Header=L.T("ReadingTaskHeading"),Content=scroll,Style=(Style)FindResource("SectionTab")});
         materialTabs.Items.Add(new TabItem{Header=L.T("RawBackupHeading"),Content=View.FormScroll(backupDetails),Style=(Style)FindResource("SectionTab")});
         var historyTab=new TabItem{Header=L.T("HubHistory"),Style=(Style)FindResource("SectionTab")};materialTabs.Items.Add(historyTab);
+        materialTabs.Items.Add(new TabItem{Header=L.T("ArchiveIntegrity"),Content=View.FormScroll(integrityDetails),Style=(Style)FindResource("SectionTab")});
         materialTabs.SelectionChanged+=(_,e)=>{if(ReferenceEquals(e.Source,materialTabs)&&selectedHomeSource!=null)materialTabsBySource[selectedHomeSource.Id]=materialTabs.SelectedIndex;if(ReferenceEquals(e.Source,materialTabs)&&materialTabs.SelectedItem==historyTab&&selectedHomeSource!=null)historyTab.Content=BuildAccountHistory(selectedHomeSource);};
         var details=readingDetails;
         bool changingSource=false;
@@ -78,7 +79,7 @@ public sealed partial class ShellWindow {
         split.SizeChanged+=(_,_)=>{bool compact=split.ActualWidth<620;split.ColumnDefinitions[0].Width=new GridLength(compact?0:238);split.ColumnDefinitions[1].Width=new GridLength(compact?0:14);archiveTable.Visibility=compact?Visibility.Collapsed:Visibility.Visible;picker.Visibility=compact?Visibility.Visible:Visibility.Collapsed;};
         void Selection(bool resetSource=true){
             if(resetSource){changingSource=true;var choices=(archiveTable.SelectedItem as HomeAccountRow)?.Sources;sourcePicker.ItemsSource=choices;sourcePicker.SelectedItem=choices?.FirstOrDefault(r=>r.Id==selectedArchiveId)??choices?.FirstOrDefault();changingSource=false;}
-            readingDetails.Children.Clear();backupDetails.Children.Clear();taskBanner.Children.Clear();historyTab.Content=null;details=readingDetails;selectedHomeSource=null;if(sourcePicker.SelectedItem is not HomeAccountRow item){details.Children.Add(View.Text(L.T("ArchiveSelect"),color:"Muted"));return;}
+            readingDetails.Children.Clear();backupDetails.Children.Clear();integrityDetails.Children.Clear();taskBanner.Children.Clear();historyTab.Content=null;details=readingDetails;selectedHomeSource=null;if(sourcePicker.SelectedItem is not HomeAccountRow item){details.Children.Add(View.Text(L.T("ArchiveSelect"),color:"Muted"));return;}
             selectedHomeSource=item;selectedArchiveId=item.Id;picker.SelectedItem=archiveTable.SelectedItem;var project=item.Project;
             editAliases.IsEnabled=true;sourceHeading.Text=(string.IsNullOrEmpty(item.LocationAlias)?L.T("HubDataSource"):item.LocationAlias)+" / "+L.T(!Directory.Exists(project?.Source??item.Reader)?"AccountSourceOffline":"ArchiveReady");sourcePath.Text=item.SourceLabel;sourcePicker.ToolTip=item.SourceLabel;
             sourcePicker.Visibility=(archiveTable.SelectedItem as HomeAccountRow)?.Sources?.Count>1?Visibility.Visible:Visibility.Collapsed;
@@ -93,6 +94,7 @@ public sealed partial class ShellWindow {
             update.Visibility=readable?Visibility.Visible:Visibility.Collapsed;
             Section("ReadingTaskHeading",readable?item.Reading+(compactReader?" / "+L.T("StorageCompact"):""):L.T("ArchiveReadingPending"),open,update,fromBackup,export);
             if(compactReader){var browser=AsyncButton(File.Exists(Path.Combine(item.Reader!,ArchiveStore.StandaloneEntry))?"StandaloneEnable":"StandalonePrepare",()=>EnableBrowserReading(item.Reader!));browser.Name="archive_browser_enable";browser.IsEnabled=!pending;browser.ToolTip=L.T("StandaloneEnableHelp");details.Children.Add(View.Row(browser));}
+            if(readable){var inspect=AsyncButton("ArchiveIntegrityVerify",()=>VerifyReadingIntegrity(item.Reader!));inspect.Name="archive_integrity_verify";inspect.IsEnabled=!pending;var report=Button("ArchiveIntegrityPrevious",()=>ShowIntegrityReport(JsonFiles.Read<ArchiveIntegrityReport>(IntegrityFile(item.Reader!))));report.IsEnabled=File.Exists(IntegrityFile(item.Reader!));var compare=AsyncButton("ArchiveCompare",()=>CompareArchive(item.Reader!));compare.Name="archive_compare";compare.IsEnabled=!pending;details=integrityDetails;Section("ArchiveIntegrityReading",IntegritySummary(item.Reader!),inspect,report,compare);details=readingDetails;}
             var protect=AsyncButton(encrypted?"HubAdjustProtection":"HubEncrypt",async()=>{if(project!=null)await ConfigureArchiveProtection(project);else if(item.Store!=null)await RunStoreAction("password",item.Store);else await ProtectConnectedReader(item.Reader!);});protect.Name="archive_protection";if(compactReader&&encrypted)protect.Visibility=Visibility.Collapsed;protect.IsEnabled=readable&&!pending&&(project!=null||item.Store==null||encrypted);
             if(item.Store!=null&&project==null)protect.Content=L.T("StoreChangePassword");
             var decrypt=AsyncButton("HubDecrypt",async()=>{if(project!=null)await RemoveArchiveProtection(project);else await DecryptConnectedReader(item.Reader!);});decrypt.Name="archive_decrypt";decrypt.IsEnabled=readable&&encrypted&&!pending&&(project!=null||item.Store==null);
@@ -109,6 +111,8 @@ public sealed partial class ShellWindow {
             var copy=AsyncButton("CompactCopy",()=>RunStoreAction("backup",new StoreEntry("",project!.NativeArchive!,"",true)));copy.Visibility=project?.NativeArchive!=null?Visibility.Visible:Visibility.Collapsed;
             var nativeStats=AsyncButton("CompactStatistics",()=>CompactStatistics(project!.NativeArchive!));nativeStats.Visibility=project?.NativeArchive!=null?Visibility.Visible:Visibility.Collapsed;
             Section(project==null&&item.Store!=null?"HubPackedBackup":"RawBackupHeading",item.Backup+(project?.NativeArchive!=null?" / "+L.T("StorageCompact"):""),backup,verify,restore,copy,nativeStats);
+            if(project?.NativeArchive is {} originalArchive||project?.Manifest is {} rawManifest){string identity=project.NativeArchive??project.Manifest!;var previous=Button("ArchiveIntegrityPrevious",()=>ShowIntegrityReport(JsonFiles.Read<ArchiveIntegrityReport>(IntegrityFile(identity))));previous.IsEnabled=File.Exists(IntegrityFile(identity));var check=AsyncButton("ArchiveIntegrityVerify",()=>VerifyArchiveBackup(project));check.IsEnabled=!pending;details=integrityDetails;Section("ArchiveIntegrityOriginal",IntegritySummary(identity,project.NativeArchive==null),check,previous);details=backupDetails;}
+            if(integrityDetails.Children.Count==0)integrityDetails.Children.Add(View.Text(L.T("ArchiveIntegrityUnavailable"),color:"Muted"));
 
             var format=AsyncButton(item.NeedsStoreSync?"SyncPackedReading":"ReadingStorageFormat",()=>MigrateStore(project?.Reading??item.Reader,item.NeedsStoreSync?item.Store?.Directory:null));format.IsEnabled=readable&&!pending&&(item.Store==null||item.NeedsStoreSync);
             var packed=Button("HubOpenPacked",()=>new ChatReaderWindow(item.Store!.Directory,dataRoot,preferences.ReduceMotion,project?.Id){Owner=this}.Show());packed.Visibility=item.Store!=null?Visibility.Visible:Visibility.Collapsed;packed.IsEnabled=item.Store?.Complete==true&&!item.NeedsStoreSync;
@@ -143,7 +147,8 @@ public sealed partial class ShellWindow {
         View.Add(layout,summary,0);var table=View.Table(("MaterialKind","Kind",110),("ArchiveHistoryRecordedAt","Time",140),("Path","Path",0));table.ItemsSource=rows.OrderByDescending(r=>r.Updated).ToArray();View.Add(layout,table,1);
         var read=View.Button("OpenReading",()=>{if(table.SelectedItem is MaterialHistoryRow {Manifest:null,Openable:true} row)new ChatReaderWindow(row.Path,dataRoot,preferences.ReduceMotion){Owner=this}.Show();});
         var restore=View.Button("RestoreChatBackup",async()=>{if(table.SelectedItem is MaterialHistoryRow {Manifest:{} manifest}){await RestoreChatBackupFrom(manifest);}});
-        table.SelectionChanged+=(_,_)=>{read.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:null,Openable:true};restore.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:not null};};read.IsEnabled=restore.IsEnabled=false;
-        var actions=View.Row(read,restore);actions.HorizontalAlignment=HorizontalAlignment.Right;actions.Margin=new Thickness(0,14,0,0);View.Add(layout,actions,2);return layout;
+        var compare=AsyncButton("ArchiveCompare",()=>table.SelectedItem is MaterialHistoryRow{Manifest:null,Openable:true} selected?CompareArchive(account.Reader,selected.Path):Task.CompletedTask);compare.IsEnabled=false;
+        table.SelectionChanged+=(_,_)=>{read.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:null,Openable:true};compare.IsEnabled=read.IsEnabled&&account.Reader!=null;restore.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:not null};};read.IsEnabled=restore.IsEnabled=false;
+        var actions=View.Row(read,compare,restore);actions.HorizontalAlignment=HorizontalAlignment.Right;actions.Margin=new Thickness(0,14,0,0);View.Add(layout,actions,2);return layout;
     }
 }

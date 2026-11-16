@@ -16,6 +16,29 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void ConfigurationBackupDefaultsExcludeKeysAndRequireEncryptionWhenIncluded()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=true});L.SetLanguage("zh-CN");
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ConfigurationBackupWindow")!;var window=(ThemeWindow)Activator.CreateInstance(type,[null,null])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();var layout=(Grid)window.Body.Children[0];var checks=layout.Children.OfType<StackPanel>().Single().Children.OfType<CheckBox>().ToDictionary(c=>c.Name);var accept=layout.Children.OfType<WrapPanel>().Single().Children.OfType<Button>().Single(b=>b.Name=="configuration_accept");
+            Assert.False(checks["config_keys"].IsChecked);Assert.True(checks["config_encrypt"].IsChecked);checks["config_keys"].IsChecked=true;Assert.False(checks["config_encrypt"].IsEnabled);Assert.True(checks["config_encrypt"].IsChecked);
+            checks["config_keys"].IsChecked=false;checks["config_registrations"].IsChecked=false;checks["config_preferences"].IsChecked=false;Assert.False(accept.IsEnabled);Capture(window,"configuration-backup-selection");
+        }finally{window.Close();}
+    });
+    [Fact]public void ConfigurationRestorePreviewDoesNotWriteBeforeConfirmation()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=true});L.SetLanguage("zh-CN");
+        string fixture=Fixture(),source=Path.Combine(fixture,"source"),target=Path.Combine(fixture,"target");Directory.CreateDirectory(source);Directory.CreateDirectory(target);JsonFiles.Write(Path.Combine(source,"connected-readers.json"),new[]{Path.Combine(fixture,"reader")});
+        var snapshot=ConfigurationBackup.Capture(source,ConfigurationScope.Registrations);var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ConfigurationBackupWindow")!;var window=(ThemeWindow)Activator.CreateInstance(type,[target,snapshot])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();var layout=(Grid)window.Body.Children[0];var table=layout.Children.OfType<DataGrid>().Single();Assert.Single(table.Items.Cast<object>());Assert.True(table.ActualHeight>100);Assert.Empty(Directory.GetFileSystemEntries(target));Capture(window,"configuration-restore-preview");}
+        finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]public void ArchiveComparisonDisplaysConversationDifferencesAndUnknownFields()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=true});L.SetLanguage("zh-CN");
+        var left=new ArchiveOverview("fixture-left",Guid.NewGuid().ToString("N"),null,"reading",ChatPlatform.QQ,"fixture-account",2,1,3,null,null,true,[new("QQ/room",2,100,101)]);
+        var right=left with{Directory="fixture-right",Messages=3,MissingMedia=1,Conversations=[new("QQ/room",3,100,102)]};var comparison=ArchiveDiagnostics.Compare(left,right);
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ArchiveComparisonWindow")!;var window=(ThemeWindow)Activator.CreateInstance(type,[comparison])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();var layout=(Grid)window.Body.Children[0];Assert.Single(layout.Children.OfType<DataGrid>().Single(t=>t.Name=="archive_comparison_conversations").Items.Cast<object>());Capture(window,"archive-comparison-overview");}
+        finally{window.Close();}
+    });
     [Fact]public void ReconnectingAMovedArchiveRelinksTheMissingProjectLocationAndRetainsSourceIdentity()=>OnUi(()=>{
         string fixture=Fixture(),data=Path.Combine(fixture,"data"),archive=Path.Combine(fixture,"original"),moved=Path.Combine(fixture,"moved"),source=Path.Combine(fixture,"client");Directory.CreateDirectory(source);
         var project=ChatArchiveProject.Create("fixture-account",ChatPlatform.QQ,source,Path.Combine(fixture,"backups")) with{Reading=archive};

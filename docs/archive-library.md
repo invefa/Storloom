@@ -8,6 +8,18 @@ Open **Chat archives > Tools > Storage maintenance** to manage the packed storag
 
 **Find archived data** scans a selected backup root for compatible completed readers, then lets you review and select registrations. Skipped paths and scan limits are reported. Original backups still use the verified **Connect existing data** flow. Reconnecting moved metadata relinks a matching registration when its previous path is missing, retaining other valid copies. See [archive experience design](archive-experience-design.md) for scenarios and future priorities.
 
+## Configuration packages, comparisons and reports
+
+Use **Tools → Back up configuration** for a `.storloom-config` package containing selected registrations, aliases, application/reader preferences and optionally protected database-key files. Chat data, cleanup rules and unsaved forms remain separate. Package encryption defaults on and is mandatory for keys. Protected key files retain their original passwords; the package password does not replace them.
+
+**Restore configuration** unlocks the package and previews selected scope and source locations. Matching registrations are retained by default, or explicitly updated while unrelated entries remain. Selected preferences update; machine executable paths, rule-set selection and custom-theme files are not imported. Pre-restore copies live in local `configuration-recovery`. Stale previews are rejected; cancellation/failure during writes attempts rollback. Import never executes jobs, moves archives or unlocks chat data.
+
+**Compare archive versions** is available on material and history views. Pick the other archive entry. A supplied credential is reused when possible, with another local prompt for a different credential. Reports compare indexed counts and time ranges, not every message or resource byte, and do not establish integrity. Unknown folder-reader fields remain unknown.
+
+The material **Integrity report** tab provides **Check archive integrity**, the previous report and version comparison. Checks explicitly scan data and report scope, outcome, time and checked amounts, with cancellation and JSON export. Original-backup verification uses the same report view. Plain folders lacking trusted original digests remain partial. Authenticating stored records cannot recover missing original media. Changed snapshots are flagged. Reports default to local `archive-reports`, preserving read-only archives; export explicitly when a report should travel with the archive.
+
+Configuration packages include reader preferences saved by the desktop application, not standalone HTML state stored inside a browser. Original backups without a reading index have unknown message counts, rather than being reported as empty conversations.
+
 ## Protocol and provenance
 
 `archive.metadata` is JSON beside `index.html`. `version` identifies metadata schema (currently 2); `exportProtocolVersion` identifies the independent Storloom export protocol (currently 1); `storageFormatVersion` identifies internal storage; `exporterVersion` records the exporting/converting application version. Protocol 1 represents the existing export pipeline and compatible reading format. Unknown schema/protocol versions are rejected without rewriting the archive.

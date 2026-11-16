@@ -67,6 +67,9 @@ public sealed partial class ShellWindow {
         var more=new ContextMenu();var moreButton=Button("ArchiveTools",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
         void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
         Entry("StoreMaintenance",()=>{chatStep=5;RenderChatStage();});Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
+        more.Items.Add(new Separator());
+        void AsyncEntry(string key,Func<Task> action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=async(_,_)=>{try{await action();}catch(Exception ex){Error(ex);}};more.Items.Add(entry);}
+        AsyncEntry("ConfigurationExport",ExportConfiguration);AsyncEntry("ConfigurationImport",ImportConfiguration);AsyncEntry("ArchiveCompare",()=>CompareArchive(selectedHomeSource?.Reader));
         chatWorkspace=View.Grid(View.Auto,View.Fill,View.Auto);chatWorkspace.Margin=new Thickness(0,12,0,0);
         chatTaskTitle=View.Text("",14);chatTaskTitle.Margin=new Thickness(0,6,0,12);View.Add(chatWorkspace,chatTaskTitle,0);
         chatContent=new Grid();var chatCard=View.Card(chatContent,14);chatCard.Name="chat_task_card";View.Add(chatWorkspace,chatCard,1);
