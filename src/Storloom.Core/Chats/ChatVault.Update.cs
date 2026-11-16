@@ -28,7 +28,7 @@ public sealed partial class ChatVault {
         });
         var transcript=entries.SingleOrDefault(e=>e.Path=="messages.jsonl");
         if(transcript!=null)ChatReadingUpdate.RebindVerifiedCopy(directory,transcript.Stamp);
-        if(File.Exists(Path.Combine(root,ArchiveMetadata.FileName)))ArchiveMetadata.CopyIdentity(root,directory);
+        if(ArchiveMetadata.Existing(root)!=null)ArchiveMetadata.CopyIdentity(root,directory,"decrypt");
     }
     private void ImportProtectedMedia(ChatVault previous,IProgress<ScanProgress>? progress,CancellationToken cancellation){
         var added=new List<Entry>();foreach(var entry in previous.entries.Where(e=>e.Path.StartsWith("assets/",StringComparison.Ordinal)&&!paths.ContainsKey(e.Path))){

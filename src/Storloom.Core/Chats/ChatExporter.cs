@@ -44,7 +44,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
     private readonly int parallelism = maximumParallelism is >= 1 and <= 32 ? maximumParallelism : throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
     internal ChatExportResult ExportReadLockedSource(ChatSourceLease source,string destination,ChatPlatform platform,
         byte[]? secret,IProgress<ScanProgress>? progress,CancellationToken cancellation,Func<ChatMessage,ChatMessage?>? selectMessage=null,Func<string,bool>? includeDatabase=null,bool resume=false)=>
-        ExportCore(source.Root,destination,platform,secret,progress,cancellation,false,null,accountName:Path.GetFileName(source.IdentityRoot),resume:resume,selectMessage:selectMessage,includeDatabase:includeDatabase,sourceProof:JsonFiles.Hash(new{Pipeline=1,Language=L.Language,LocalImages=useLocalImageConfiguration,SourceIdentity=source.IdentityRoot,Databases=source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}),sourceIdentityRoot:source.IdentityRoot);
+        ExportCore(source.Root,destination,platform,secret,progress,cancellation,false,null,accountName:Path.GetFileName(source.IdentityRoot),resume:resume,selectMessage:selectMessage,includeDatabase:includeDatabase,sourceProof:JsonFiles.Hash(new{Pipeline=ArchiveMetadata.CurrentExportProtocolVersion,Language=L.Language,LocalImages=useLocalImageConfiguration,SourceIdentity=source.IdentityRoot,Databases=source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()}),sourceIdentityRoot:source.IdentityRoot);
     internal ChatExportResult ExportCompact(ChatSourceLease source,string workspace,ChatPlatform platform,byte[]? secret,ArchiveStore.Writer writer,IProgress<ScanProgress>? progress,CancellationToken cancellation,Func<string,bool>? includeDatabase=null,string? accountName=null){
         string path=Path.Combine(workspace,"export-progress.json");if(File.Exists(path)&&JsonFiles.Read<ChatExportProgress>(path).Finished){PathPolicy.AssertNoLinks(path);File.Delete(path);}
         return ExportCore(source.Root,workspace,platform,secret,progress,cancellation,false,null,accountName:accountName,sourceProof:JsonFiles.Hash(source.Hashes.OrderBy(p=>p.Key,StringComparer.OrdinalIgnoreCase).ToArray()),includeDatabase:includeDatabase,compact:writer,resume:File.Exists(path));
@@ -78,7 +78,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         }
         if (verifyBackup) VerifyBackupContents(manifest, progress, cancellation);
         return ExportCore(manifest.Plan.Destination, destination, platform, secret, progress, cancellation, false,
-            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume, selectMessage, includeDatabase);
+            manifest.Receipts.ToDictionary(e => e.RelativePath, StringComparer.OrdinalIgnoreCase), Path.GetFileName(manifest.Plan.Source), verificationClock.Elapsed.TotalSeconds, verifyBackup, resume, selectMessage, includeDatabase, metadataSource:manifest.Plan.Source);
     }
 
     /// <summary>Recheck the immutable raw backup against its receipts without exporting or unlocking databases.</summary>
@@ -126,7 +126,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
 
     private ChatExportResult ExportCore(string source, string destination, ChatPlatform platform,
         byte[]? secret, IProgress<ScanProgress>? progress, CancellationToken cancellation,
-        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null, string? sourceProof=null,ArchiveStore.Writer? compact=null,string? sourceIdentityRoot=null) {
+        bool requireClosedClient, Dictionary<string, TransferReceipt>? verified, string? accountName = null, double verificationSeconds = 0, bool backupReverified = false, bool resume = false, Func<ChatMessage, ChatMessage?>? selectMessage = null, Func<string, bool>? includeDatabase = null, string? sourceProof=null,ArchiveStore.Writer? compact=null,string? sourceIdentityRoot=null,string? metadataSource=null) {
         bool checkpointing=verified!=null||sourceProof!=null;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         source = PathPolicy.Normalize(source); destination = PathPolicy.Normalize(destination);
@@ -146,7 +146,7 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
         string lockPath = Path.Combine(destination, ".export.lock"); if (File.Exists(lockPath)) PathPolicy.AssertNoLinks(lockPath);
         using var lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         string progressPath = Path.Combine(destination, "export-progress.json");
-        string identity = verified == null ? sourceProof??"" : JsonFiles.Hash(new { Pipeline = 1, Language = L.Language, LocalImages = useLocalImageConfiguration,
+        string identity = verified == null ? sourceProof??"" : JsonFiles.Hash(new { Pipeline = ArchiveMetadata.CurrentExportProtocolVersion, Language = L.Language, LocalImages = useLocalImageConfiguration,
             Receipts = verified.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).ToArray() });
         var checkpoint = resume ? JsonFiles.Read<ChatExportProgress>(progressPath) : new ChatExportProgress {
             Source = source, SourceIdentityRoot=sourceIdentityRoot, Platform = platform, Identity = identity, Work = ".work-" + Guid.NewGuid().ToString("N") };
@@ -274,7 +274,13 @@ public sealed class ChatExporter(int maximumParallelism = 2, bool useLocalImageC
             CanResume = checkpointing && !checkpoint.Finished,
             PhaseSeconds = new() { ["backupVerification"] = verificationSeconds, ["databaseProcessing"] = databaseSeconds,
                 ["readerIndex"] = readerStarted > 0 ? clock.Elapsed.TotalSeconds - readerStarted : 0 } };
-        JsonFiles.Write(Path.Combine(destination, "export-report.json"), result); return result;
+        JsonFiles.Write(Path.Combine(destination, "export-report.json"), result);
+        if(compact==null&&readerFinished){
+            string identitySource=metadataSource??sourceIdentityRoot??source;
+            var project=ChatArchiveProject.Create(accountName??Path.GetFileName(identitySource),platform,identitySource,"");
+            ArchiveMetadata.RecordExport(destination,project,"reading-export",verified!=null?source:null);
+        }
+        return result;
     }
     private static bool ExportFailure(Exception ex) => ex is IOException or InvalidDataException or CryptographicException or
         UnauthorizedAccessException or FormatException or OverflowException or ZstdSharp.ZstdException or ArgumentException;

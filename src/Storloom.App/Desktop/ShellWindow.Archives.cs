@@ -42,7 +42,7 @@ public sealed partial class ShellWindow {
     }
     private sealed record ArchiveRow(ChatArchiveProject Project){
         public string Account=>Project.Account;public string Backup=>Project.BackedUpAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")??L.T("ArchiveNotYet");
-        public string Reading=>Project.ReadableAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")??L.T("ArchiveReadingPending");
+        public string Reading=>Project.ReadableAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")??L.T(Project.Reading==null?"ArchiveReadingPending":"ArchiveReady");
         public string Protection=>!Project.ProtectionKnown?L.T("ArchiveProtectionLocked"):L.T(Project.Protection==ChatArchiveProtectionMode.None?"ArchiveProtectionNone":Project.Protection==ChatArchiveProtectionMode.Selected?"ArchiveProtectionSelected":Project.IncludeMedia?"ArchiveProtectionAll":"ArchiveProtectionMetadata");
         public string Task=>L.T(Project.TaskFile!=null&&File.Exists(Project.TaskFile)?"ArchiveContinue":"ArchiveReady");
     }

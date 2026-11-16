@@ -4,17 +4,29 @@ New accounts in 2.7 default to direct compact archives. See [Compact archives](c
 
 Open **Chat archives > Tools > Storage maintenance** to manage the packed storage format. Existing backups and reading copies remain available through their original entries. Nothing is migrated automatically.
 
+## Bulk recovery and relocation
+
+**Find archived data** scans a selected backup root for compatible completed readers, then lets you review and select registrations. Skipped paths and scan limits are reported. Original backups still use the verified **Connect existing data** flow. Reconnecting moved metadata relinks a matching registration when its previous path is missing, retaining other valid copies. See [archive experience design](archive-experience-design.md) for scenarios and future priorities.
+
+## Protocol and provenance
+
+`archive.metadata` is JSON beside `index.html`. `version` identifies metadata schema (currently 2); `exportProtocolVersion` identifies the independent Storloom export protocol (currently 1); `storageFormatVersion` identifies internal storage; `exporterVersion` records the exporting/converting application version. Protocol 1 represents the existing export pipeline and compatible reading format. Unknown schema/protocol versions are rejected without rewriting the archive.
+
+`origin` describes the original client source; `history` records export, native backup, import, copy, repack and decryption events and their direct parents. Conversion inherits history and appends an event; retrying the same revision does not duplicate it. History is visible in the material history tab. Existing `archive.storloom.json` entries remain readable and migrate to the new filename after validation on save.
+
+Recovered registrations record only verified provenance and carry a `recovered` flag. Their timestamp is the recovery time; an unknown original exporter version remains empty. Original export dates and missing task logs are not invented. Reconnecting metadata after configuration loss recovers account grouping, source descriptions and saved operation history.
+
 ## File entry points and recovering registrations
 
 Choose **Chat archives > Connect existing data**, then select a file rather than deciding which directory level to use:
 
-- New reading copies, compact original backups, and compact imports/copies/repacked archives expose `archive.storloom.json` at the outer level. Prepared independent HTML also provides `index.html`; internal objects remain in `archive-data`.
+- New reading copies, compact original backups, and compact imports/copies/repacked archives expose `archive.metadata` at the outer level. Prepared independent HTML also provides `index.html`; internal objects remain in `archive-data`.
 - For an older compact archive, select its internal `archive.json` or outer `index.html`. Storloom resolves `archive-data` to the outer archive and avoids duplicate registration.
 - For an older folder reader, select `messages.html` or `vault.storloom.json`. Folder-based original backups continue to use their existing backup-manifest JSON.
 
 Metadata identifies the client and account for grouping. Older readers without that information offer an association form: enter the QQ account or WeChat account-directory identifier, or leave it blank to keep independent material. Right-click an existing independent entry and choose **Associate account** to amend it. Saving writes portable metadata without re-exporting, re-encrypting or requesting the reading password; actual reading still uses the existing password.
 
-Metadata contains registration labels such as version, archive ID, material kind, client, account and relative location. It contains no passwords, keys, chat content, absolute source paths or machine task settings. Client/account labels are public metadata. The entry remains usable after moving the archive. Association does not turn a reader into original client data: updating still requires the real client source or an original backup.
+Metadata contains archive identity, client/account labels, relative data location, original provenance and operation history. It contains no passwords, keys, chat content or complete machine task settings. Provenance may include the original client path: it is public descriptive data, never restore/update authorization. Relative data lookup survives moves and does not depend on the old source path. Association does not turn a reader into original client data: updating still requires the real client source or an original backup.
 
 The list is an **Archive library**: known client/account combinations group their sources, while unassigned material remains independent. Internal directory names are not treated as accounts. The context menu edits display aliases or removes the current source/group registration. **Removing a registration retains archive, backup and reading files on disk.** Complete or abandon an unfinished task before removing its registration.
 

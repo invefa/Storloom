@@ -127,7 +127,7 @@ public static class ChatArchiveWorkflow {
             }
             if(state.Phase!="published")throw new InvalidDataException("Unknown archive task phase.");
             VerifyGeneration(state.Generation,policy.Mode,password);
-            ArchiveMetadata.Write(state.Generation,project.Platform,project.Account);
+            ArchiveMetadata.RecordExport(state.Generation,project,"reading-export",state.SourceSnapshot??(state.DirectReading?project.Source:state.Manifest));
             project=project with{Manifest=state.DirectReading?project.Manifest:state.Manifest,Reading=state.Generation,ReadableAt=DateTimeOffset.UtcNow,TaskFile=null,Protection=policy.Settings.Selection!=null&&policy.Mode!=ChatArchiveProtectionMode.None?ChatArchiveProtectionMode.Selected:policy.Mode,IncludeMedia=policy.Settings.IncludeMedia,ProtectionKnown=true};checkpoint(project);
             File.Delete(taskFile);
             if(state.WorkspaceRoot!=null&&Directory.Exists(state.Work)&&Path.GetDirectoryName(state.Work)==state.WorkspaceRoot){

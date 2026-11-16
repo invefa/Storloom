@@ -69,8 +69,8 @@ internal sealed partial class ArchiveStore {
         Bytes("archive-index.js",Encoding.UTF8.GetBytes("window.archiveIndex="+index.ToJsonString()+";"));
         ChatExportResult report;try{using var input=OpenFile("export-report.json");report=JsonSerializer.Deserialize<ChatExportResult>(input,JsonFiles.Options)??throw new InvalidDataException("Invalid report.");}catch(FileNotFoundException){report=new(destination,messages,0,[],true);}
         Bytes("export-report.json",JsonSerializer.SerializeToUtf8Bytes(report with{Directory=destination,Messages=messages,CanResume=false},JsonFiles.Options));
-        OperationPause.Check(cancellation);ArchiveMetadata.CopyIdentity(root,destination);File.Delete(taskPath);journal.Dispose();File.Delete(journalPath);Report();
+        OperationPause.Check(cancellation);ArchiveMetadata.CopyIdentity(root,destination,"export");File.Delete(taskPath);journal.Dispose();File.Delete(journalPath);Report();
     }
     private static void EnsureParent(string destination,string relative){string current=destination;foreach(var part in relative.Split('/')[..^1]){current=Path.Combine(current,part);if(!Directory.Exists(current))Directory.CreateDirectory(current);PathPolicy.AssertNoLinks(current);}}
-    private static bool Generated(string path)=>path.StartsWith('.')||path.StartsWith("conversations/",StringComparison.Ordinal)||path is ArchiveMetadata.FileName or "messages.html" or "reader.js" or "reader.css" or "archive-index.js" or "messages.jsonl" or "export-report.json";
+    private static bool Generated(string path)=>path.StartsWith('.')||path.StartsWith("conversations/",StringComparison.Ordinal)||path is ArchiveMetadata.FileName or ArchiveMetadata.LegacyFileName or "messages.html" or "reader.js" or "reader.css" or "archive-index.js" or "messages.jsonl" or "export-report.json";
 }

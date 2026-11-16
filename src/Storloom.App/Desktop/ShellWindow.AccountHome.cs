@@ -47,11 +47,12 @@ public sealed partial class ShellWindow {
         archiveTable=View.Table(("ArchiveLibrary","GroupLabel",0));archiveTable.RowHeight=56;archiveTable.Name="managed_archives";archiveTable.ItemsSource=groups;
         var context=new ContextMenu();
         var associate=new MenuItem{Header=L.T("ArchiveIdentity")};associate.Click+=(_,_)=>Guard(AssociateArchiveIdentity);
+        var locate=new MenuItem{Header=L.T("ArchiveOpenLocation")};locate.Click+=(_,_)=>Guard(()=>{if(selectedHomeSource?.Reader is {} path&&Directory.Exists(path)){PathPolicy.AssertNoLinks(path);OpenFile(path);}});
         var aliasesMenu=new MenuItem{Header=L.T("AccountAliases")};aliasesMenu.Click+=(_,_)=>Guard(EditAccountAliases);
         var forgetSource=new MenuItem{Header=L.T("ForgetArchiveSource")};forgetSource.Click+=(_,_)=>Guard(()=>{if(selectedHomeSource is {} source&&Confirm(L.T("ForgetArchiveConfirm",source.DisplayAccount,1))){ForgetArchiveRegistrations([source]);RenderChatStage();}});
         var forget=new MenuItem{Header=L.T("ForgetArchiveGroup")};forget.Click+=(_,_)=>Guard(()=>{if(archiveTable.SelectedItem is HomeAccountRow row)ForgetArchiveGroup(row);});
-        context.Items.Add(associate);context.Items.Add(aliasesMenu);context.Items.Add(new Separator());context.Items.Add(forgetSource);context.Items.Add(forget);archiveTable.ContextMenu=context;
-        archiveTable.ContextMenuOpening+=(_,e)=>{if(e.OriginalSource is DependencyObject target&&TableInteraction.IsColumnHeader(target))return;if(archiveTable.SelectedItem is not HomeAccountRow row){e.Handled=true;return;}associate.IsEnabled=selectedHomeSource is {Project:null,Reader:not null};forgetSource.IsEnabled=row.Sources?.Count>1;aliasesMenu.IsEnabled=selectedHomeSource!=null;};
+        context.Items.Add(locate);context.Items.Add(associate);context.Items.Add(aliasesMenu);context.Items.Add(new Separator());context.Items.Add(forgetSource);context.Items.Add(forget);archiveTable.ContextMenu=context;
+        archiveTable.ContextMenuOpening+=(_,e)=>{if(e.OriginalSource is DependencyObject target&&TableInteraction.IsColumnHeader(target))return;if(archiveTable.SelectedItem is not HomeAccountRow row){e.Handled=true;return;}locate.IsEnabled=selectedHomeSource?.Reader is {} path&&Directory.Exists(path);associate.IsEnabled=selectedHomeSource is {Project:null,Reader:not null};forgetSource.IsEnabled=row.Sources?.Count>1;aliasesMenu.IsEnabled=selectedHomeSource!=null;};
         TableInteraction.SelectContextRow(archiveTable);
         var accountStyle=new Style(typeof(TextBlock));accountStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty,TextWrapping.NoWrap));accountStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty,TextTrimming.CharacterEllipsis));accountStyle.Setters.Add(new Setter(TextBlock.MarginProperty,new Thickness(0,6,0,6)));((DataGridTextColumn)archiveTable.Columns[0]).ElementStyle=accountStyle;View.Add(split,archiveTable,0);
         var right=View.Grid(View.Auto,View.Auto,View.Auto,View.Fill);View.Add(split,right,0,2);
@@ -123,7 +124,7 @@ public sealed partial class ShellWindow {
         archiveTable.SelectionChanged+=(_,_)=>Selection();archiveTable.SelectedItem=groups.FirstOrDefault(g=>g.Sources!.Any(r=>r.Id==selectedArchiveId))??groups.FirstOrDefault();Selection();
     }
     private static string TaskStage(ChatArchiveTask task)=>L.T(task.Phase switch{"source"=>"ChatSourceLock","backup"=>"PhaseArchiveBackup","workspace"=>"PhaseArchiveWorkspace","reading"=>"PhaseArchiveReading","protection"=>"PhaseArchiveProtect","publish" or "published"=>"PhaseArchivePublish",_=>"ArchiveContinue"});
-    private sealed record MaterialHistoryRow(string Kind,string Path,string? Manifest,DateTime Updated){public string Time=>Updated.ToString("yyyy-MM-dd HH:mm");}
+    private sealed record MaterialHistoryRow(string Kind,string Path,string? Manifest,DateTime Updated){public string Time=>Updated.ToString("yyyy-MM-dd HH:mm");public bool Openable{get;init;}=true;}
     private FrameworkElement BuildAccountHistory(HomeAccountRow account){
         var rows=new List<MaterialHistoryRow>();if(account.Project is {} project){var manifests=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach(var origin in archiveProjects.Values.Where(p=>p.Platform==project.Platform&&p.Account==project.Account)){if(origin.Manifest!=null&&File.Exists(origin.Manifest))manifests.Add(origin.Manifest);string parent=Path.Combine(origin.BackupRoot,origin.Platform.ToString(),origin.Account);if(Directory.Exists(parent))foreach(string file in Directory.GetFiles(parent,"*.storloom-*.json"))manifests.Add(file);}
@@ -134,11 +135,15 @@ public sealed partial class ShellWindow {
             var known=ReadConnectedReaders().Concat(stores.Select(s=>s.Directory)).Append(account.Reader!).Where(Directory.Exists).Select(InspectRegisteredReader).Where(r=>r!=null).Cast<ArchiveReference>();
             rows.AddRange(known.Where(r=>r.Directory.Equals(account.Reader,StringComparison.OrdinalIgnoreCase)||account.Platform!=null&&r.Metadata.Platform==account.Platform&&r.Metadata.Account==account.Account).DistinctBy(r=>r.Directory,StringComparer.OrdinalIgnoreCase).Select(r=>new MaterialHistoryRow(L.T("ReadingTaskHeading"),r.Directory,null,Directory.GetLastWriteTime(r.Directory))));
         }
+        var metadata=account.Reference?.Metadata;
+        if(metadata!=null)rows.AddRange(metadata.History.Select(entry=>new MaterialHistoryRow(L.T("ArchiveHistory"+(entry.Recovered?"Recovered":entry.Action switch{"reading-export"=>"Reading","native-backup"=>"Native","import"=>"Import","export"=>"Export","repack"=>"Repack","decrypt"=>"Decrypt",_=>"Copy"})),entry.Source?.Location??entry.Source?.ArchiveId??"",null,entry.RecordedAt.LocalDateTime){Openable=false}));
         var layout=View.Grid(View.Auto,View.Fill,View.Auto);layout.Margin=new Thickness(12,10,12,8);
-        View.Add(layout,View.Text(L.T(account.Project==null?"RecoveredArchiveHistoryHelp":"HubHistoryScope"),color:"Muted"),0);var table=View.Table(("MaterialKind","Kind",110),("Updated","Time",140),("Path","Path",0));table.ItemsSource=rows.OrderByDescending(r=>r.Updated).ToArray();View.Add(layout,table,1);
-        var read=View.Button("OpenReading",()=>{if(table.SelectedItem is MaterialHistoryRow {Manifest:null} row)new ChatReaderWindow(row.Path,dataRoot,preferences.ReduceMotion){Owner=this}.Show();});
+        var summary=View.Stack(View.Text(L.T(account.Project==null?"RecoveredArchiveHistoryHelp":"HubHistoryScope"),color:"Muted"));
+        if(metadata!=null)summary.Children.Add(View.Text(L.T("ArchiveOriginSummary",metadata.Origin?.Location??L.T("ArchiveOriginUnknown"),metadata.ExportProtocolVersion,metadata.ExporterVersion??L.T("ArchiveOriginUnknown")),12,"Muted"));
+        View.Add(layout,summary,0);var table=View.Table(("MaterialKind","Kind",110),("ArchiveHistoryRecordedAt","Time",140),("Path","Path",0));table.ItemsSource=rows.OrderByDescending(r=>r.Updated).ToArray();View.Add(layout,table,1);
+        var read=View.Button("OpenReading",()=>{if(table.SelectedItem is MaterialHistoryRow {Manifest:null,Openable:true} row)new ChatReaderWindow(row.Path,dataRoot,preferences.ReduceMotion){Owner=this}.Show();});
         var restore=View.Button("RestoreChatBackup",async()=>{if(table.SelectedItem is MaterialHistoryRow {Manifest:{} manifest}){await RestoreChatBackupFrom(manifest);}});
-        table.SelectionChanged+=(_,_)=>{read.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:null};restore.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:not null};};read.IsEnabled=restore.IsEnabled=false;
+        table.SelectionChanged+=(_,_)=>{read.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:null,Openable:true};restore.IsEnabled=table.SelectedItem is MaterialHistoryRow{Manifest:not null};};read.IsEnabled=restore.IsEnabled=false;
         var actions=View.Row(read,restore);actions.HorizontalAlignment=HorizontalAlignment.Right;actions.Margin=new Thickness(0,14,0,0);View.Add(layout,actions,2);return layout;
     }
 }

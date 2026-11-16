@@ -16,6 +16,26 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void ReconnectingAMovedArchiveRelinksTheMissingProjectLocationAndRetainsSourceIdentity()=>OnUi(()=>{
+        string fixture=Fixture(),data=Path.Combine(fixture,"data"),archive=Path.Combine(fixture,"original"),moved=Path.Combine(fixture,"moved"),source=Path.Combine(fixture,"client");Directory.CreateDirectory(source);
+        var project=ChatArchiveProject.Create("fixture-account",ChatPlatform.QQ,source,Path.Combine(fixture,"backups")) with{Reading=archive};
+        using(var store=ArchiveStore.CreateBundle(archive)){using var writer=store.BeginWrite();writer.Complete(new(new string('a',64),"complete",0,0,0,0,0));}
+        ArchiveMetadata.RecordExport(archive,project,"reading-export");JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});Directory.Move(archive,moved);
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};
+        try{window.Show();window.Navigate("chats");Pump();var register=typeof(ShellWindow).GetMethod("RegisterArchiveFile",BindingFlags.Instance|BindingFlags.NonPublic)!;
+            Wait(AsResult((Task)register.Invoke(window,[Path.Combine(moved,ArchiveMetadata.FileName),false])!));Pump();
+            var restored=Assert.Single(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")));Assert.Equal(project.Id,restored.Id);Assert.Equal(source,restored.Source);Assert.Equal(moved,restored.Reading);Assert.Null(restored.ReadableAt);
+            Assert.Single(Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives").Items.Cast<object>());
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]public void ArchiveRecoveryReviewRequiresASelectionAndDoesNotRegisterBeforeConfirmation()=>OnUi(()=>{
+        var reference=new ArchiveReference("fixture-root","fixture-data",new ArchiveDescriptor(2,Guid.NewGuid().ToString("N"),"reading","archive-data"){Platform=ChatPlatform.QQ,Account="fixture-account"},true);
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ArchiveRecoveryWindow")!;var window=(ThemeWindow)Activator.CreateInstance(type,[new ArchiveDiscoveryResult([reference],[],true)])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();var layout=(Grid)window.Body.Children[0];var header=(CheckBox)layout.Children.OfType<DataGrid>().Single().Columns[0].Header;var apply=layout.Children.OfType<WrapPanel>().Single().Children.OfType<Button>().Single(b=>b.Name=="archive_recovery_apply");
+            Assert.True(apply.IsEnabled);Assert.True(header.IsChecked);header.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.False(apply.IsEnabled);Assert.False(header.IsChecked);
+            header.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();Assert.True(apply.IsEnabled);Assert.Empty((ArchiveReference[])type.GetProperty("SelectedArchives")!.GetValue(window)!);
+        }finally{window.Close();}
+    });
     [Fact]public void PortableReaderRegistrationGroupsByAccountDeduplicatesInnerDirectoriesAndForgetsOnlyRecords()=>OnUi(()=>{
         string fixture=Fixture(),data=Path.Combine(fixture,"data"),archive=Path.Combine(fixture,"reading"),source=Path.Combine(fixture,"source");Directory.CreateDirectory(source);
         var project=ChatArchiveProject.Create("fixture-account",ChatPlatform.QQ,source,Path.Combine(fixture,"backup"));JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});

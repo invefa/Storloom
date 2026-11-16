@@ -52,7 +52,7 @@ internal sealed partial class ArchiveStore {
         OperationPause.Check(cancellation);
         PublishBackupText(destination,"archive.json",task.Configuration);if(task.Keyring!=null)PublishBackupText(destination,"keyring.json",task.Keyring);
         CopyBrowserSnapshot(destination,task.Head,progress,cancellation);
-        target.PublishCopiedHead(target.Head,task.Head);ArchiveMetadata.CopyIdentity(root,destination);File.Delete(taskPath);
+        target.PublishCopiedHead(target.Head,task.Head);ArchiveMetadata.CopyIdentity(root,destination,"copy");File.Delete(taskPath);
         return new(task.Head,copied,reused,bytes);
     }
     private static void PublishBackupText(string root,string relative,string text){

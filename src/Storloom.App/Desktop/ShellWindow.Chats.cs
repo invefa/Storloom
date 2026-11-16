@@ -63,6 +63,7 @@ public sealed partial class ShellWindow {
         var importMenu=new ContextMenu();var import=AsyncButton("ConnectExisting",ConnectArchive);importMenu.PlacementTarget=import;import.ContextMenu=importMenu;
         void ImportEntry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);importMenu.Items.Add(entry);}
         ImportEntry("ConnectArchiveFile",()=>ConnectReader());importMenu.Items.Add(new Separator());ImportEntry("OpenChatBackup",OpenChatBackup);ImportEntry("ConnectReader",ConnectReader);ImportEntry("StoreLoad",ConnectStore);entries.Children.Add(import);
+        var recover=AsyncButton("RecoverArchiveLibrary",RecoverArchiveLibrary);recover.Name="archive_recover";entries.Children.Add(recover);
         var more=new ContextMenu();var moreButton=Button("ArchiveTools",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
         void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
         Entry("StoreMaintenance",()=>{chatStep=5;RenderChatStage();});Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);
