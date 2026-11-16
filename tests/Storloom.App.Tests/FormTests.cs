@@ -16,6 +16,25 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void PortableReaderRegistrationGroupsByAccountDeduplicatesInnerDirectoriesAndForgetsOnlyRecords()=>OnUi(()=>{
+        string fixture=Fixture(),data=Path.Combine(fixture,"data"),archive=Path.Combine(fixture,"reading"),source=Path.Combine(fixture,"source");Directory.CreateDirectory(source);
+        var project=ChatArchiveProject.Create("fixture-account",ChatPlatform.QQ,source,Path.Combine(fixture,"backup"));JsonFiles.Write(Path.Combine(data,"chat-archives.json"),new[]{project});
+        using(var store=ArchiveStore.CreateBundle(archive,"fixture-only-password")){using var writer=store.BeginWrite();writer.Add(new("QQ","room","sender",1,1,"private synthetic fixture"){Id="one"});writer.Complete(new(new string('a',64),"complete",0,0,1,0,0));}
+        string marker=ArchiveMetadata.Write(archive,ChatPlatform.QQ,"fixture-account"),inner=Path.Combine(archive,"archive-data");byte[] keyring=File.ReadAllBytes(Path.Combine(inner,"keyring.json"));string head=File.ReadAllText(Path.Combine(inner,"HEAD"));
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;var type=typeof(ShellWindow);
+        try{
+            window.Show();window.Navigate("chats");Pump();Task Register(string path)=>(Task)type.GetMethod("RegisterArchiveFile",flags)!.Invoke(window,[path,false])!;
+            Wait(AsResult(Register(marker)));Wait(AsResult(Register(Path.Combine(inner,"archive.json"))));Pump();
+            var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="managed_archives");Assert.Equal(L.T("ArchiveLibrary"),table.Columns[0].Header);Assert.Single(table.Items.Cast<object>());
+            var row=table.Items[0];Assert.Equal("fixture-account",row.GetType().GetProperty("Account")!.GetValue(row));var sources=row.GetType().GetProperty("Sources")!.GetValue(row)!;Assert.Equal(2,((System.Collections.IEnumerable)sources).Cast<object>().Count());
+            Assert.Single(JsonFiles.Read<System.Text.Json.JsonElement[]>(Path.Combine(data,"archive-stores.json")));Assert.Empty(JsonFiles.Read<string[]>(Path.Combine(data,"connected-readers.json")));
+            Assert.NotNull(table.ContextMenu);Assert.Contains(table.ContextMenu.Items.OfType<MenuItem>(),item=>Equals(item.Header,L.T("ForgetArchiveGroup")));
+            var details=Descendants(window).OfType<ScrollViewer>().Single(s=>s.Name=="account_details_scroll");Assert.True(((FrameworkElement)details.Content).Margin.Left>=12);
+            type.GetMethod("ForgetArchiveRegistrations",flags)!.Invoke(window,[sources]);
+            Assert.Empty(JsonFiles.Read<ChatArchiveProject[]>(Path.Combine(data,"chat-archives.json")));Assert.Empty(JsonFiles.Read<System.Text.Json.JsonElement[]>(Path.Combine(data,"archive-stores.json")));
+            Assert.Equal(head,File.ReadAllText(Path.Combine(inner,"HEAD")));Assert.Equal(keyring,File.ReadAllBytes(Path.Combine(inner,"keyring.json")));Assert.True(File.Exists(marker));Assert.True(Directory.Exists(source));
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
     [Fact]public void TablesFitPopulatedContentButRespectManualOverflowUntilTheSourceChanges()=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
         var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.AdaptiveTable")!;var table=(DataGrid)Activator.CreateInstance(type)!;

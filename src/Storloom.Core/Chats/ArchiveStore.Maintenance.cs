@@ -19,6 +19,6 @@ internal sealed partial class ArchiveStore {
         done=0;foreach(var file in files){OperationPause.Check(cancellation);if(file.Path=="native-current.json"||file.Path.StartsWith("native-snapshots/",StringComparison.Ordinal)||file.Path.StartsWith("native-history/",StringComparison.Ordinal)||file.Path.StartsWith("native-manifest-pages/",StringComparison.Ordinal))continue;using var input=OpenFile(file.Path);writer.Put(file.Path,input,file.SourceStamp,advance:n=>{bytes+=n;progress?.Report(new("archive-repack-files",done,bytes,total,files.Count,file.Path));});done++;}
         foreach(var snapshot in snapshots){var updated=snapshot with{Files=snapshot.Files.Select(f=>versions[f.Version] with{Path=f.Path}).ToArray()};WriteNativeSnapshot(writer,updated,files.Any(f=>f.Path=="native-current.json")&&NativeCurrent().Id==snapshot.Id);}
         writer.Complete(new(JsonFiles.Hash(new{Id,Head}).ToLowerInvariant(),"complete",files.Count,0,query.MessageCount,files.Count,total,ImportCursor?.SourceIdentity));
-        if(snapshots.Count>0)destination.MarkNative();progress?.Report(new("archive-repack-files",files.Count,total,total,files.Count));
+        if(snapshots.Count>0)destination.MarkNative();ArchiveMetadata.CopyIdentity(root,destination.root);progress?.Report(new("archive-repack-files",files.Count,total,total,files.Count));
     }
 }

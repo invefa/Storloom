@@ -488,6 +488,7 @@ public sealed class StorageAndChatTests : IDisposable {
         if(interrupt)using(var writer=new ChatArchiveWriter(source,target,Path.Combine(target,"work"),new(),null,default,"fixture",resumable:true,pageParallelism:2))writer.Finish(null);
         foreach(string file in Directory.GetFiles(baseline,"*",SearchOption.AllDirectories).Where(p=>!PathPolicy.Under(p,Path.Combine(baseline,"work")))) {
             string relative=Path.GetRelativePath(baseline,file);
+            if(relative==ArchiveMetadata.FileName){var left=ArchiveMetadata.Inspect(file).Metadata;var right=ArchiveMetadata.Inspect(Path.Combine(target,relative)).Metadata;Assert.NotEqual(left.Id,right.Id);Assert.Equal(left with{Id=right.Id},right);continue;}
             Assert.Equal(SHA256.HashData(File.ReadAllBytes(file)),SHA256.HashData(File.ReadAllBytes(Path.Combine(target,relative))));
         }
     }

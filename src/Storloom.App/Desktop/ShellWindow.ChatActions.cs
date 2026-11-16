@@ -12,9 +12,12 @@ public sealed partial class ShellWindow {
     private async void OpenChatBackup() {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Storloom backup manifest|*.json", Title = L.T("OpenChatBackup") };
         if (PickerHistory.Show(dialog,this,"backup-open") != true) return;
+        await OpenChatBackupFrom(dialog.FileName);
+    }
+    private async Task OpenChatBackupFrom(string manifestFile){
         await Run(async token => {
         var selected = await Task.Run(() => {
-        var manifest = JsonFiles.Read<TransferJournal>(dialog.FileName);
+        var manifest = JsonFiles.Read<TransferJournal>(manifestFile);
         string directory = PathPolicy.Normalize(manifest.Plan.Destination);
         if (directory.Length <= 3) throw new InvalidDataException("A backup must be a specific account directory.");
         PathPolicy.AssertNoLinks(directory);
@@ -25,9 +28,9 @@ public sealed partial class ShellWindow {
         string source = PathPolicy.Normalize(manifest.Plan.Source);
         var account = new ChatLocation(platform, source, Path.GetFileName(source),
             TransferService.Child(source, Path.GetRelativePath(directory, database)), new FileInfo(database).Length);
-        return (account, archive: ReadChatArchive(dialog.FileName, account, manifest));
+        return (account, archive: ReadChatArchive(manifestFile, account, manifest));
         }, token);
-        directChatSource=false; activeChat = selected.account; activeManifest = dialog.FileName; preparedArchive = selected.archive; SetCapturedKey(null);
+        directChatSource=false; activeChat = selected.account; activeManifest = manifestFile; preparedArchive = selected.archive; SetCapturedKey(null);
         readingDirectory = exportReport = null;RegisterCurrentArchive();chatStep = -1; RenderChatStage(); Navigate("chats");
         });
     }

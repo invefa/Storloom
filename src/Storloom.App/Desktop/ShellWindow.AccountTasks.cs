@@ -10,9 +10,5 @@ public sealed partial class ShellWindow {
         SaveArchive(project);pendingArchive=project;pendingArchiveRequest=new(DirectReading:true);activeChat=account;directChatSource=true;preparedArchive=null;SetCapturedKey(null);chatStep=4;RenderChatStage();return Task.CompletedTask;
     }
     private async void ConnectStore(){try{var picker=new Microsoft.Win32.OpenFileDialog{Filter="Storloom archive|archive.json"};if(PickerHistory.Show(picker,this,"store-load")!=true)return;string directory=Path.GetDirectoryName(picker.FileName)!;if(ArchiveStore.IsNative(directory))await ConnectCompactNative(directory);else SaveStore(new("",directory,"",true));chatStep=-1;RenderChatStage();}catch(Exception ex){Error(ex);}}
-    private void ConnectReader(){
-        var picker=new Microsoft.Win32.OpenFileDialog{Filter="Storloom reading copy|messages.html;vault.storloom.json"};if(PickerHistory.Show(picker,this,"connect-reader")!=true)return;
-        string path=Path.GetDirectoryName(picker.FileName)!;var locationsFile=Path.Combine(dataRoot,"connected-readers.json");var entries=File.Exists(locationsFile)?JsonFiles.Read<string[]>(locationsFile).ToList():[];
-        if(!entries.Contains(path,StringComparer.OrdinalIgnoreCase))entries.Add(path);JsonFiles.Write(locationsFile,entries);chatStep=-1;RenderChatStage();
-    }
+    private async void ConnectReader(){try{await ConnectArchive();}catch(Exception ex){Error(ex);}}
 }

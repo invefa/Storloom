@@ -11,6 +11,7 @@ internal static class CompactArchiveWorkflow {
         if(ArchiveStore.Exists(target))keyMode=ArchiveStore.ReadKeyMode(target);
         JsonFiles.Write(taskFile,new ChatArchiveTask(2,project.Id,work,target,project.Reading,null,"backup",!string.IsNullOrEmpty(password),BackupOnly:true){WorkspaceRoot=workBase==account?null:workBase,KeyMode=keyMode});project=project with{TaskFile=taskFile};checkpoint(project);
         using var store=ArchiveStore.Exists(target)?ArchiveStore.Open(target,password.AsSpan(),progress,cancellation):ArchiveStore.CreateBundle(target,password.AsSpan(),keyMode);store.Workers=workers;if(work!=target){Directory.CreateDirectory(work);PathPolicy.AssertNoLinks(work);store.WriteWorkspace=Path.Combine(work,"query-writing");}store.BackupNative(project.Source,project.Platform,progress,cancellation,checkClients);
+        ArchiveMetadata.Write(target,project.Platform,project.Account);
         var completed=project with{NativeArchive=target,TaskFile=null,BackedUpAt=DateTimeOffset.UtcNow};checkpoint(completed);File.Delete(taskFile);if(work!=target)CleanWork(work,workBase,".native-work-"+project.Id[..12],progress);return completed;
     }
     internal sealed record SourceProof(string Identity,Dictionary<string,string> Databases);
@@ -49,6 +50,7 @@ internal static class CompactArchiveWorkflow {
             writer.Flush();result=result with{Messages=writer.MessageCount,MediaFiles=writer.AssetCount};writer.Bytes("export-report.json",JsonSerializer.SerializeToUtf8Bytes(result,JsonFiles.Options));writer.Bytes(".source.json",JsonSerializer.SerializeToUtf8Bytes(proof));
             writer.Complete(new(identity,"complete",0,0,result.Messages,result.MediaFiles,writer.WrittenBytes,project.Id));
         }
+        ArchiveMetadata.Write(target,project.Platform,project.Account);
         var completed=project with{Reading=target,ReadingStorage=ChatStorageFormat.Compact,ReadableAt=DateTimeOffset.UtcNow,TaskFile=null,Protection=secure?ChatArchiveProtectionMode.All:ChatArchiveProtectionMode.None,ProtectionKnown=true,IncludeMedia=true};checkpoint(completed);if(File.Exists(taskFile))File.Delete(taskFile);
         // This directory contains only this task's derived spools and conversions.
         CleanWork(work,workBase,".compact-work-"+project.Id[..12],progress);return completed;

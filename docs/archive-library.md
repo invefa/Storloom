@@ -4,6 +4,23 @@ New accounts in 2.7 default to direct compact archives. See [Compact archives](c
 
 Open **Chat archives > Tools > Storage maintenance** to manage the packed storage format. Existing backups and reading copies remain available through their original entries. Nothing is migrated automatically.
 
+## File entry points and recovering registrations
+
+Choose **Chat archives > Connect existing data**, then select a file rather than deciding which directory level to use:
+
+- New reading copies, compact original backups, and compact imports/copies/repacked archives expose `archive.storloom.json` at the outer level. Prepared independent HTML also provides `index.html`; internal objects remain in `archive-data`.
+- For an older compact archive, select its internal `archive.json` or outer `index.html`. Storloom resolves `archive-data` to the outer archive and avoids duplicate registration.
+- For an older folder reader, select `messages.html` or `vault.storloom.json`. Folder-based original backups continue to use their existing backup-manifest JSON.
+
+Metadata identifies the client and account for grouping. Older readers without that information offer an association form: enter the QQ account or WeChat account-directory identifier, or leave it blank to keep independent material. Right-click an existing independent entry and choose **Associate account** to amend it. Saving writes portable metadata without re-exporting, re-encrypting or requesting the reading password; actual reading still uses the existing password.
+
+Metadata contains registration labels such as version, archive ID, material kind, client, account and relative location. It contains no passwords, keys, chat content, absolute source paths or machine task settings. Client/account labels are public metadata. The entry remains usable after moving the archive. Association does not turn a reader into original client data: updating still requires the real client source or an original backup.
+
+The list is an **Archive library**: known client/account combinations group their sources, while unassigned material remains independent. Internal directory names are not treated as accounts. The context menu edits display aliases or removes the current source/group registration. **Removing a registration retains archive, backup and reading files on disk.** Complete or abandon an unfinished task before removing its registration.
+
+Reconnecting restores library entries and account grouping. Existing historical readers and original backups can be connected individually; material history shows registered versions. A reader alone cannot reproduce lost task logs, export settings or the database key library. Those require a backup of the application's local data directory.
+
+
 ## Import and update
 
 Choose **Import reading copy**, select a completed reading copy and a new archive directory, then review the source and destination. The source is preserved. To resume an interrupted import, select the same source and archive directory. A changed source is rejected while an import is incomplete.

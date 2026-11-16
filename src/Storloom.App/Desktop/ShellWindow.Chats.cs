@@ -60,9 +60,9 @@ public sealed partial class ShellWindow {
         foreach(var pair in new[]{("AccountArchivesTab","archive_home_tab"),("KeyLibrary","database_keys_tab"),("AccountClientsTab","account_clients_tab")})chatSections.Items.Add(new TabItem{Header=L.T(pair.Item1),Name=pair.Item2,Style=(Style)FindResource("SectionTab")});
         host.Children.Add(chatSections);
         var entries=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left};archiveUtilities=entries;
-        var importMenu=new ContextMenu();var import=Button("ConnectExisting",()=>importMenu.IsOpen=true);importMenu.PlacementTarget=import;import.ContextMenu=importMenu;
+        var importMenu=new ContextMenu();var import=AsyncButton("ConnectExisting",ConnectArchive);importMenu.PlacementTarget=import;import.ContextMenu=importMenu;
         void ImportEntry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);importMenu.Items.Add(entry);}
-        ImportEntry("OpenChatBackup",OpenChatBackup);ImportEntry("ConnectReader",ConnectReader);ImportEntry("StoreLoad",ConnectStore);entries.Children.Add(import);
+        ImportEntry("ConnectArchiveFile",()=>ConnectReader());importMenu.Items.Add(new Separator());ImportEntry("OpenChatBackup",OpenChatBackup);ImportEntry("ConnectReader",ConnectReader);ImportEntry("StoreLoad",ConnectStore);entries.Children.Add(import);
         var more=new ContextMenu();var moreButton=Button("ArchiveTools",()=>more.IsOpen=true);more.PlacementTarget=moreButton;moreButton.ContextMenu=more;
         void Entry(string key,Action action){var entry=new MenuItem{Header=L.T(key)};entry.Click+=(_,_)=>Guard(action);more.Items.Add(entry);}
         Entry("StoreMaintenance",()=>{chatStep=5;RenderChatStage();});Entry("OpenReaderArchive",OpenReaderArchive);Entry("VaultManage",EncryptReaderArchive);entries.Children.Add(moreButton);

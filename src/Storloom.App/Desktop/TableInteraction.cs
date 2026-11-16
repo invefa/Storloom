@@ -4,6 +4,17 @@ using System.Windows.Data;
 namespace Storloom.App;
 
 internal static class TableInteraction {
+    public static bool IsColumnHeader(DependencyObject source) => Ancestor<DataGridColumnHeader>(source) != null;
+    public static void SelectContextRow(DataGrid table) {
+        bool blank = false;
+        table.PreviewMouseRightButtonDown += (_, args) => {
+            var source = args.OriginalSource as DependencyObject;
+            var row = source == null ? null : Ancestor<DataGridRow>(source);
+            blank = row == null && (source == null || !IsColumnHeader(source));
+            if (row != null && ItemsControl.ItemsControlFromItemContainer(row) == table) table.SelectedItem = row.Item;
+        };
+        table.ContextMenuOpening += (_, args) => { if (blank && System.Windows.Input.Mouse.RightButton == System.Windows.Input.MouseButtonState.Pressed) args.Handled = true; };
+    }
     // Selection tables use the same command for mouse, keyboard, and the visible action.
     public static void Activate(DataGrid table,Button action){
         table.PreviewMouseDoubleClick+=(_,args)=>{

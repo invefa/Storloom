@@ -424,6 +424,8 @@ internal sealed class ChatArchiveWriter : IDisposable {
             using var stream = typeof(ChatArchiveWriter).Assembly.GetManifestResourceStream("Storloom.Core.Chats.Reader." + asset) ?? throw new IOException("Missing reader asset.");
             using var output = File.Create(Path.Combine(destination, asset)); stream.CopyTo(output);
         }
+        ChatPlatform? platform=defaultReaderPalette=="qq"?ChatPlatform.QQ:defaultReaderPalette=="wechat"?ChatPlatform.WeChat:null;
+        ArchiveMetadata.Write(destination,platform,platform.HasValue?account:null);
     }
     private static void PrepareOutput(string path) {
         PathPolicy.AssertNoLinks(Path.GetDirectoryName(path)!);

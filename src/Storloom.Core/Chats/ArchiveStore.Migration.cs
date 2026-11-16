@@ -48,8 +48,8 @@ internal sealed partial class ArchiveStore {
     // The source is never modified or removed. Each committed batch includes its exact cursor.
     internal ArchiveImportCursor ImportReader(string directory,IProgress<ScanProgress>? progress=null,CancellationToken cancellation=default,ReadOnlySpan<char> sourcePassword=default){
         directory=PathPolicy.Normalize(directory);if(directory.Equals(root,StringComparison.OrdinalIgnoreCase)||PathPolicy.Under(root,directory)||PathPolicy.Under(directory,root))throw new InvalidOperationException("Source and archive directories must be separate.");
-        if(SnapshotReads(root)){using var writer=BeginWrite(cancellation,"reader-import:"+PathPolicy.Normalize(directory).ToUpperInvariant(),progress);var cursor=ImportReaderCore(directory,progress,cancellation,sourcePassword,writer.Log,writer.Query);writer.Complete(cursor);return cursor;}
-        using var operation=Lease();return ImportReaderCore(directory,progress,cancellation,sourcePassword,log,query);
+        if(SnapshotReads(root)){using var writer=BeginWrite(cancellation,"reader-import:"+PathPolicy.Normalize(directory).ToUpperInvariant(),progress);var cursor=ImportReaderCore(directory,progress,cancellation,sourcePassword,writer.Log,writer.Query);writer.Complete(cursor);if(cursor.Stage=="complete")ArchiveMetadata.CopyIdentity(directory,root);return cursor;}
+        using var operation=Lease();var result=ImportReaderCore(directory,progress,cancellation,sourcePassword,log,query);if(result.Stage=="complete")ArchiveMetadata.CopyIdentity(directory,root);return result;
     }
     private ArchiveImportCursor ImportReaderCore(string directory,IProgress<ScanProgress>? progress,CancellationToken cancellation,ReadOnlySpan<char> sourcePassword,ArchiveCommitLog importLog,ArchiveQueryCache projection){
         directory=PathPolicy.Normalize(directory);

@@ -46,6 +46,7 @@ public sealed partial class ChatVault : IDisposable {
             if(stamp.Links!=1)throw new IOException("Shared files cannot be encrypted in place.");
             string relative=Path.GetRelativePath(directory,file).Replace('\\','/');
             if(relative==".export.lock")continue;
+            if(relative==ArchiveMetadata.FileName){_ = ArchiveMetadata.Inspect(directory);continue;}
             if(relative.Split('/').SkipLast(1).Any(p=>p.StartsWith(".work-",StringComparison.Ordinal)||p.StartsWith(".reading-update-",StringComparison.Ordinal)))throw new IOException("An unfinished task remains in this reading copy.");
             plan.Add(new(relative,Guid.NewGuid().ToString("N"),stamp));plannedBytes+=stamp.Bytes;
             if(clock.Elapsed.TotalSeconds-lastReport>=.5){progress?.Report(new("chat-encryption-plan",plan.Count,plannedBytes));lastReport=clock.Elapsed.TotalSeconds;}
@@ -135,6 +136,7 @@ public sealed partial class ChatVault : IDisposable {
     private IEnumerable<string> UnplannedFiles(){
         foreach(string path in EnumeratePlainFiles(root,store)){
             string relative=Path.GetRelativePath(root,path).Replace('\\','/');
+            if(relative==ArchiveMetadata.FileName){_ = ArchiveMetadata.Inspect(root);continue;}
             if(relative!=Marker&&relative!=".export.lock"&&!paths.ContainsKey(relative))yield return path;
         }
     }
