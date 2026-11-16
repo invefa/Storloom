@@ -2,27 +2,27 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows.Controls.Primitives;
 
-namespace Storloom.App;
+namespace Storloom.Wpf;
 
-internal interface ISelectableRow : INotifyPropertyChanged {
+public interface ISelectableRow : INotifyPropertyChanged {
     bool Selected { get; set; }
 }
 
 // Owns aggregate selection for the current view, including filtered rows and ItemsSource replacements.
-internal sealed class TableSelection {
+public sealed class TableSelection {
     private readonly DataGrid table;
     private readonly HashSet<ISelectableRow> observed = [];
     public CheckBox Header { get; }
     public bool IsChanging { get; private set; }
     public event Action? SelectionChanged;
 
-    public TableSelection(DataGrid table, string name) {
+    public TableSelection(DataGrid table, string name, string selectAllText = "Select all") {
         this.table = table;
         Header = new CheckBox { Name = name, Margin = new Thickness(0), Padding = new Thickness(0), MinWidth = 0,
             Width = 20, Height = 20, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = L.T("SelectAll"), IsThreeState = false };
-        System.Windows.Automation.AutomationProperties.SetName(Header, L.T("SelectAll"));
-        var style = new Style(typeof(DataGridColumnHeader), (Style)Application.Current.FindResource(typeof(DataGridColumnHeader)));
+            ToolTip = selectAllText, IsThreeState = false };
+        System.Windows.Automation.AutomationProperties.SetName(Header, selectAllText);
+        var style = new Style(typeof(DataGridColumnHeader), table.TryFindResource(typeof(DataGridColumnHeader)) as Style);
         // Balance the header's trailing 1-DIP separator so its glyph center matches row cells.
         style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(1, 0, 0, 0)));
         style.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Center));

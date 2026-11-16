@@ -1,3 +1,4 @@
+using Storloom.Wpf;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -16,6 +17,21 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void StatusBannerAnimatesOnlyWhileBusyAndVisible()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=false});
+        var type=typeof(Storloom.Wpf.StatusBanner);var tone=typeof(Storloom.Wpf.StatusTone);
+        var banner=(FrameworkElement)Activator.CreateInstance(type,["Working",Enum.Parse(tone,"Busy")])!;
+        var window=new Window{Content=banner,Width=320,Height=140,ShowInTaskbar=false};
+        try{window.Show();Pump();var icon=Descendants(banner).OfType<System.Windows.Shapes.Path>().Single();var rotation=(RotateTransform)icon.RenderTransform;
+            Assert.True(rotation.HasAnimatedProperties);double first=rotation.Angle;var until=DateTime.UtcNow.AddMilliseconds(180);while(DateTime.UtcNow<until){Pump();Thread.Sleep(5);}Assert.NotEqual(first,rotation.Angle);
+            banner.Visibility=Visibility.Collapsed;Pump();Assert.False(rotation.HasAnimatedProperties);
+            banner.Visibility=Visibility.Visible;Pump();Assert.True(rotation.HasAnimatedProperties);
+            type.GetMethod("Show")!.Invoke(banner,["Done",Enum.Parse(tone,"Success")]);Assert.False(rotation.HasAnimatedProperties);Assert.Equal(0,rotation.Angle);
+            Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=true});type.GetMethod("Show")!.Invoke(banner,["Working",Enum.Parse(tone,"Busy")]);Assert.False(rotation.HasAnimatedProperties);
+            Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=false});type.GetMethod("Show")!.Invoke(banner,["Working",Enum.Parse(tone,"Busy")]);Assert.True(rotation.HasAnimatedProperties);
+            window.Close();Pump();Assert.False(rotation.HasAnimatedProperties);
+        }finally{window.Close();}
+    });
     [Fact]public void ConfigurationBackupDefaultsExcludeKeysAndRequireEncryptionWhenIncluded()=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=true});L.SetLanguage("zh-CN");
         var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.ConfigurationBackupWindow")!;var window=(ThemeWindow)Activator.CreateInstance(type,[null,null])!;window.ShowInTaskbar=false;
@@ -80,7 +96,7 @@ public sealed class FormTests {
     });
     [Fact]public void TablesFitPopulatedContentButRespectManualOverflowUntilTheSourceChanges()=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=AppTheme.OneDark,ReduceMotion=true});L.SetLanguage("en");
-        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.AdaptiveTable")!;var table=(DataGrid)Activator.CreateInstance(type)!;
+        var type=typeof(Storloom.Wpf.AdaptiveTable);var table=(DataGrid)Activator.CreateInstance(type)!;
         table.Columns.Add(new DataGridTextColumn{Header="",Width=28,MinWidth=28,CanUserResize=false});
         foreach(string key in new[]{"Name","Path","State"})table.Columns.Add(new DataGridTextColumn{Header=key,Binding=new System.Windows.Data.Binding(key),MinWidth=48});
         var window=new ThemeWindow("Synthetic table layout",720,460){ShowInTaskbar=false};table.Margin=new Thickness(16);window.Body.Children.Add(table);
@@ -102,7 +118,7 @@ public sealed class FormTests {
         }finally{window.Close();}
     });
     [Fact]public void TableWidthAllocationCompressesLongestColumnsFirstAndPreservesMinimums(){
-        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.AdaptiveTable")!;var fit=type.GetMethod("Distribute",BindingFlags.Static|BindingFlags.NonPublic)!;
+        var type=typeof(Storloom.Wpf.AdaptiveTable);var fit=type.GetMethod("Distribute",BindingFlags.Static|BindingFlags.NonPublic)!;
         double[] Allocate(double available,double[] desired,double[] minimum,bool[] flexible)=>(double[])fit.Invoke(null,[available,desired,minimum,desired.Select(_=>double.PositiveInfinity).ToArray(),flexible])!;
         var widths=Allocate(600,[28,90,800,100],[28,48,60,48],[false,true,true,true]);Assert.Equal(28,widths[0]);Assert.Equal(90,widths[1]);Assert.InRange(widths[2],381.99,382.01);Assert.Equal(100,widths[3]);
         var balanced=Allocate(600,[500,400,100],[48,48,48],[true,true,true]);Assert.InRange(balanced[0],249.99,250.01);Assert.InRange(balanced[1],249.99,250.01);Assert.Equal(100,balanced[2]);
@@ -275,7 +291,7 @@ public sealed class FormTests {
     [Fact]public void SelectionTablesActivateRowsWithDoubleClickAndEnterButIgnoreHeadersAndDisabledActions()=>OnUi(()=>{
         Theme.Apply(new AppPreferences{ReduceMotion=true});var window=new ThemeWindow("Selection fixture",700,420){ShowInTaskbar=false};
         var table=new DataGrid{AutoGenerateColumns=false,IsReadOnly=true};table.Columns.Add(new DataGridTextColumn{Header="Account",Binding=new System.Windows.Data.Binding("Account")});table.ItemsSource=new[]{new{Account="first"},new{Account="second"}};int calls=0;var accept=new Button{Content="Apply"};accept.Click+=(_,_)=>calls++;var layout=new Grid();layout.RowDefinitions.Add(new RowDefinition());layout.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});layout.Children.Add(table);Grid.SetRow(accept,1);layout.Children.Add(accept);window.Body.Children.Add(layout);
-        typeof(ShellWindow).Assembly.GetType("Storloom.App.TableInteraction")!.GetMethod("Activate")!.Invoke(null,[table,accept]);
+        TableInteraction.Activate(table,accept);
         try{window.Show();Pump();var row=(DataGridRow)table.ItemContainerGenerator.ContainerFromIndex(1)!;var cell=Descendants(row).OfType<DataGridCell>().First();
             void Click(object source)=>table.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=Control.PreviewMouseDoubleClickEvent,Source=source});
             Click(cell);Assert.Equal(1,calls);Assert.Equal(row.Item,table.SelectedItem);
@@ -345,7 +361,7 @@ public sealed class FormTests {
             Assert.Equal(3,Descendants(window).OfType<ListBox>().Single(l=>l.Name=="navigation").Items.Count);
             Assert.False(Descendants(window).OfType<Button>().Single(b=>b.Name=="review_cleanup").IsEnabled);
             Assert.NotNull(window.Icon);
-            var title=Descendants(window).OfType<Wpf.Ui.Controls.TitleBar>().Single();
+            var title=Descendants(window).OfType<global::Wpf.Ui.Controls.TitleBar>().Single();
             Assert.Equal(((SolidColorBrush)Application.Current.Resources["Surface"]).Color,((SolidColorBrush)title.Background).Color);
             foreach(string page in new[]{"overview","cleanup","chats"}) {
                 window.Navigate(page);Pump();Capture(window,locale+"-"+theme+"-"+page);
@@ -393,7 +409,7 @@ public sealed class FormTests {
                 ("HelpWindow",new object?[]{2,null}),("AboutWindow",Array.Empty<object?>())}) {
                 var window=(Window)Activator.CreateInstance(assembly.GetType("Storloom.App."+entry.Item1)!,entry.Item2)!;
                 try {window.ShowInTaskbar=false;window.Show();Pump();Capture(window,locale+"-"+theme+"-"+entry.Item1);
-                    Assert.Single(Descendants(window).OfType<Wpf.Ui.Controls.TitleBar>());
+                    Assert.Single(Descendants(window).OfType<global::Wpf.Ui.Controls.TitleBar>());
                 } finally {window.Close();}
             }
         } finally {Directory.Delete(fixture,true);}
@@ -672,7 +688,7 @@ public sealed class FormTests {
         var window=new ShellWindow(automaticDiscovery:false,dataDirectory:fixture){ShowInTaskbar=false};
         try {
             window.Show();Pump();window.UpdateLayout();
-            var nodes=Descendants(window).ToArray();var caption=nodes.OfType<Wpf.Ui.Controls.TitleBar>().Single();
+            var nodes=Descendants(window).ToArray();var caption=nodes.OfType<global::Wpf.Ui.Controls.TitleBar>().Single();
             Assert.Equal(((SolidColorBrush)Theme.Brush("Ink")).Color,((SolidColorBrush)caption.ButtonsForeground).Color);
             var menu=nodes.OfType<Menu>().Single();
             Assert.InRange(menu.TranslatePoint(new Point(0,0),caption).Y,0,caption.ActualHeight-menu.ActualHeight);
@@ -1223,7 +1239,7 @@ public sealed class FormTests {
                 _=Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,new Action(()=>{
                     var dialog=Application.Current.Windows.Cast<Window>().Single(w=>w.Owner==owner);dialog.UpdateLayout();
                     Assert.InRange(dialog.ActualWidth,340,520);Assert.InRange(dialog.ActualHeight,130,owner.ActualHeight*.9+.1);
-                    var caption=Descendants(dialog).OfType<Wpf.Ui.Controls.TitleBar>().Single();Assert.False(caption.ShowMaximize);Assert.False(caption.ShowMinimize);
+                    var caption=Descendants(dialog).OfType<global::Wpf.Ui.Controls.TitleBar>().Single();Assert.False(caption.ShowMaximize);Assert.False(caption.ShowMinimize);
                     if(!longText){shortHeight=dialog.ActualHeight;Assert.True(shortHeight<280);}else Assert.True(dialog.ActualHeight>shortHeight);
                     var footer=Descendants(dialog).OfType<Border>().Single(b=>b.Child is WrapPanel);
                     Assert.Equal(((SolidColorBrush)Application.Current.Resources["Canvas"]).Color,((SolidColorBrush)footer.Background).Color);

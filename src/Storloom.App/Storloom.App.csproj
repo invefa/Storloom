@@ -13,6 +13,7 @@
     <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <ProjectReference Include="../Storloom.Core/Storloom.Core.csproj" />
+    <ProjectReference Include="../Storloom.Wpf/Storloom.Wpf.csproj" />
     <Content Include="../../rules/*.json" Link="rules/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Assets/storloom.ico" />
     <Content Include="../../docs/*.md" Link="docs/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

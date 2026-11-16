@@ -42,7 +42,7 @@ internal sealed class ComponentGalleryWindow : ThemeWindow {
         Card("GallerySelection", "GallerySelectionHelp", states, 1, 0);
         var table = View.Table(("Rule", "Name", 0), ("State", "State", 82)); table.Name = "gallery_table"; View.Checks(table); table.Height = 132;
         var rows = new ObservableCollection<GalleryRow>(Enumerable.Range(0, 3).Select(i => new GalleryRow(L.T("GallerySampleRow", i + 1), i == 0)));
-        table.ItemsSource = rows; var selection = new TableSelection(table, "gallery_select_all");
+        table.ItemsSource = rows; var selection = new TableSelection(table, "gallery_select_all", L.T("SelectAll"));
         var summary = View.Text("", 12, "Muted");
         void UpdateSummary() => summary.Text = L.T("GallerySelectedCount", rows.Count(row => row.Selected), rows.Count);
         selection.SelectionChanged += UpdateSummary; UpdateSummary();

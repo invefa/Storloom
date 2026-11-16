@@ -5,10 +5,10 @@ using System.Windows.Threading;
 using System.Windows.Data;
 using System.Globalization;
 
-namespace Storloom.App;
+namespace Storloom.Wpf;
 
 // Automatic layout belongs to populated views. A user's explicit column resize takes precedence.
-internal sealed class AdaptiveTable : DataGrid {
+public sealed class AdaptiveTable : DataGrid {
     private bool pending, fitting, manual;
     public AdaptiveTable() {
         SetResourceReference(StyleProperty, typeof(DataGrid));

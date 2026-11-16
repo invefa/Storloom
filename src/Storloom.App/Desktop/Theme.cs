@@ -1,7 +1,7 @@
 using System.Windows.Media.Animation;
 using Storloom.Core;
-using Wpf.Ui.Appearance;
-using Wpf.Ui.Markup;
+using global::Wpf.Ui.Appearance;
+using global::Wpf.Ui.Markup;
 
 namespace Storloom.App;
 
@@ -12,6 +12,7 @@ public static class Theme {
     private static readonly string[] names = ["Canvas", "Surface", "Sidebar", "Ink", "Muted", "Line", "Accent", "OnAccent", "Selection", "Hover", "Danger", "TextSelection", "SelectedText", "AccentText", "ControlBorder"];
     public static void Apply(AppPreferences preferences) {
         Current = preferences.Theme; ReduceMotion = preferences.ReduceMotion;
+        ComponentTheme.SetReduceMotion(ReduceMotion);
         var resources = Application.Current.Resources;
         // Track uses half these metrics as its minimum thumb length. Match the 24-DIP templates.
         resources[SystemParameters.VerticalScrollBarButtonHeightKey] = 48d;
@@ -19,11 +20,13 @@ public static class Theme {
         if (!resources.MergedDictionaries.OfType<ControlsDictionary>().Any()) {
             resources.MergedDictionaries.Add(new ThemesDictionary { Theme = ApplicationTheme.Light });
             resources.MergedDictionaries.Add(new ControlsDictionary());
-            resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Storloom;component/Desktop/Styles.xaml", UriKind.Relative) });
-            resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Storloom;component/Desktop/CompactControls.xaml", UriKind.Relative) });
+            resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Storloom.Wpf;component/Styles.xaml", UriKind.Relative) });
+            resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Storloom.Wpf;component/CompactControls.xaml", UriKind.Relative) });
+            var caption = new Style(typeof(global::Wpf.Ui.Controls.TitleBarButton), resources[typeof(global::Wpf.Ui.Controls.TitleBarButton)] as Style);
+            caption.Setters.Add(new Setter(FrameworkElement.HeightProperty, 36d)); resources[typeof(global::Wpf.Ui.Controls.TitleBarButton)] = caption;
         }
         ApplicationThemeManager.Apply(IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light,
-            Wpf.Ui.Controls.WindowBackdropType.None, false);
+            global::Wpf.Ui.Controls.WindowBackdropType.None, false);
         string[] colors = Current == AppTheme.Dark ?
             ["#202020", "#2a2a2a", "#191919", "#eeeeee", "#b5b5b5", "#414141", "#dedede", "#202020", "#424242", "#353535", "#eeeeee", "#666666", "#ffffff", "#eeeeee", "#414141"] : Current == AppTheme.OneDark ?
             ["#23272e", "#282c34", "#1e2227", "#c4ccd8", "#aeb8c8", "#343a44", "#426bb7", "#ffffff", "#34445d", "#303640", "#ef8d96", "#4e658a", "#ffffff", "#a5c2ff", "#343a44"] :

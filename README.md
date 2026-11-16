@@ -86,3 +86,5 @@ The close button can hide the app to its notification icon when enabled in Prefe
 The reading toolbar offers several compact chat layouts, each with light and dark variants. Layout choice is remembered separately from brightness.
 
 The desktop preview supplies the current reader interface for existing exports without changing their files. Re-export is needed for new parsing or to refresh standalone HTML.
+
+Reusable WPF components are available in [Storloom.Wpf](src/Storloom.Wpf/README.md), with an independent [demo](samples/ComponentDemo).

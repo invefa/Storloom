@@ -1,5 +1,5 @@
 using System.Windows.Data;
-using Wpf.Ui.Controls;
+using global::Wpf.Ui.Controls;
 using Button = System.Windows.Controls.Button;
 using TextBlock = System.Windows.Controls.TextBlock;
 using TextBox = System.Windows.Controls.TextBox;
@@ -56,7 +56,7 @@ internal static class View {
             Header = L.T(key), Binding = new Binding(property), SortMemberPath = property switch { "Size" or "Amount" => "Bytes", "Share" => "Fraction", "Before" => "BeforeBytes", "After" => "AfterBytes", "Freed" => "FreedBytes", _ => property },
             ElementStyle = textStyle,
             Width = width == 0 ? new DataGridLength(1, DataGridLengthUnitType.Star) : new DataGridLength(width), MinWidth = 48 });
-        TableInteraction.Configure(table);
+        TableInteraction.Configure(table, key => L.T(key));
         return table;
     }
     public static Button IconButton(string geometry, string tooltip, Action action) {
@@ -71,27 +71,8 @@ internal static class View {
         var view = CollectionViewSource.GetDefaultView(table.ItemsSource); if (view == null || !view.CanSort) return;
         view.SortDescriptions.Clear(); view.SortDescriptions.Add(new(column.SortMemberPath, direction)); column.SortDirection = direction;
     }
-    public static System.Windows.Shapes.Path Icon(string geometry, double size = 16) {
-        var data=Geometry.Parse(geometry);var bounds=data.Bounds;double longest=Math.Max(bounds.Width,bounds.Height);
-        var icon = new System.Windows.Shapes.Path { Data = data, Width = longest>0?Math.Max(1,size*bounds.Width/longest):size, Height = longest>0?Math.Max(1,size*bounds.Height/longest):size, Stretch = Stretch.Fill, HorizontalAlignment=HorizontalAlignment.Center,
-            StrokeThickness = 1.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, VerticalAlignment = VerticalAlignment.Center };
-        icon.SetResourceReference(System.Windows.Shapes.Path.StrokeProperty, "Ink"); return icon;
-    }
-    public static void Checks(DataGrid table, string property = "Selected") {
-        table.IsReadOnly = false;
-        foreach (var column in table.Columns) column.IsReadOnly = true;
-        var template = new DataTemplate(); var check = new FrameworkElementFactory(typeof(System.Windows.Controls.CheckBox));
-        check.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new Binding(property) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
-        check.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-        check.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        check.SetValue(FrameworkElement.MarginProperty, new Thickness(0)); template.VisualTree = check;
-        check.SetValue(FrameworkElement.MinWidthProperty, 0d); check.SetValue(FrameworkElement.WidthProperty, 20d);
-        check.SetValue(Control.PaddingProperty, new Thickness(0));
-        var cellStyle = new Style(typeof(DataGridCell), (Style)Application.Current.FindResource(typeof(DataGridCell)));
-        cellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
-        table.Columns.Insert(0, new DataGridTemplateColumn { CellTemplate = template, CellStyle = cellStyle, Width = 28, MinWidth = 28, CanUserResize = false, CanUserSort = false });
-        TableInteraction.EnableChecks(table, property);
-    }
+    public static System.Windows.Shapes.Path Icon(string geometry, double size = 16) => ComponentVisuals.Icon(geometry, size);
+    public static void Checks(DataGrid table, string property = "Selected") => ComponentVisuals.AddSelectionColumn(table, property);
     public static string Size(long bytes) {
         string[] units = ["B", "KiB", "MiB", "GiB", "TiB"]; double number = bytes; int index = 0;
         while (number >= 1024 && index < units.Length - 1) { number /= 1024; index++; }

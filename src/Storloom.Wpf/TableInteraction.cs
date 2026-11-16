@@ -1,9 +1,9 @@
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 
-namespace Storloom.App;
+namespace Storloom.Wpf;
 
-internal static class TableInteraction {
+public static class TableInteraction {
     public static bool IsColumnHeader(DependencyObject source) => Ancestor<DataGridColumnHeader>(source) != null;
     public static void SelectContextRow(DataGrid table) {
         bool blank = false;
@@ -29,21 +29,21 @@ internal static class TableInteraction {
             args.Handled=true;action.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         };
     }
-    public static void Configure(DataGrid table) {
+    public static void Configure(DataGrid table, Func<string, string>? translate = null) {
         var original = table.Columns.ToDictionary(column => column, column => column.Width);
         foreach (var column in table.Columns) {
             var menu = new ContextMenu();
             void Command(string key, Action action) {
-                var item = new MenuItem { Header = L.T(key) }; item.Click += (_, _) => action(); menu.Items.Add(item);
+                var item = new MenuItem { Header = translate?.Invoke(key) ?? key switch { "FitColumn" => "Fit column", "FitAllColumns" => "Fit all columns", "ResetColumns" => "Reset columns", _ => key } }; item.Click += (_, _) => action(); menu.Items.Add(item);
             }
             Command("FitColumn", () => { (table as AdaptiveTable)?.UseManualWidths(); column.Width = DataGridLength.Auto; });
             Command("FitAllColumns", () => { (table as AdaptiveTable)?.UseManualWidths(); foreach (var entry in table.Columns.Where(c => c.CanUserResize)) entry.Width = DataGridLength.Auto; });
             menu.Items.Add(new Separator());
             Command("ResetColumns", () => { foreach (var entry in original) entry.Key.Width = entry.Value; (table as AdaptiveTable)?.FitToViewport(); });
-            var headerStyle = new Style(typeof(DataGridColumnHeader), (Style)Application.Current.FindResource(typeof(DataGridColumnHeader)));
+            var headerStyle = new Style(typeof(DataGridColumnHeader), table.TryFindResource(typeof(DataGridColumnHeader)) as Style);
             headerStyle.Setters.Add(new Setter(FrameworkElement.ContextMenuProperty, menu)); column.HeaderStyle = headerStyle;
             if (column is DataGridBoundColumn { Binding: Binding binding }) {
-                var cellStyle = new Style(typeof(DataGridCell), (Style)Application.Current.FindResource(typeof(DataGridCell)));
+                var cellStyle = new Style(typeof(DataGridCell), table.TryFindResource(typeof(DataGridCell)) as Style);
                 cellStyle.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(binding.Path.Path)));
                 cellStyle.Setters.Add(new Setter(ToolTipService.InitialShowDelayProperty, 400));
                 cellStyle.Setters.Add(new Setter(ToolTipService.ShowDurationProperty, 30000)); column.CellStyle = cellStyle;

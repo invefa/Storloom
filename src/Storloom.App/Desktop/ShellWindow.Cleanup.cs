@@ -28,7 +28,7 @@ public sealed partial class ShellWindow {
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) }); split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.6,GridUnitType.Star), MinWidth = 200 });
         split.SizeChanged+=(_,_)=>split.ColumnDefinitions[0].Width=new GridLength(Math.Clamp(split.ActualWidth*.4,180,350));
         ruleList = View.Table(("Rule", "Name", 0), ("Action", "Action", 62), ("Bytes", "Size", 80)); View.Checks(ruleList); ruleList.Name = "cleanup_rules";
-        ruleSelection = new TableSelection(ruleList, "select_all_cleanup_rules");
+        ruleSelection = new TableSelection(ruleList, "select_all_cleanup_rules", L.T("SelectAll"));
         var left = View.Grid(View.Auto, View.Auto, View.Auto, View.Fill); var header = layout.Children[0]; layout.Children.RemoveAt(0);
         cleanupStage = View.Text("", color: "Muted"); cleanupStage.Name = "cleanup_stage";
         View.Add(left, header, 0); View.Add(left, bar, 1); View.Add(left, cleanupStage, 2); View.Add(left, ruleList, 3);
@@ -41,7 +41,7 @@ public sealed partial class ShellWindow {
         var tabs = new TabControl(); var files = View.Grid(View.Auto, View.Fill);
         filter = View.Input(); filter.ToolTip = L.T("Filter"); filter.Margin = new Thickness(6, 6, 6, 6);
         candidateNotice = View.Text(L.T("NoCandidates"), color: "Muted"); candidateList = View.Table(("Path", "Path", 0), ("Bytes", "Size", 110)); View.Checks(candidateList); candidateList.Name = "cleanup_files";
-        fileSelection = new TableSelection(candidateList, "select_all_cleanup_files");
+        fileSelection = new TableSelection(candidateList, "select_all_cleanup_files", L.T("SelectAll"));
         var invertFiles = Button("InvertSelection", () => fileSelection.Invert()); invertFiles.Name = "invert_cleanup_files";
         var fileBar = new DockPanel(); DockPanel.SetDock(invertFiles, Dock.Right); fileBar.Children.Add(invertFiles); fileBar.Children.Add(filter);
         View.Add(files, fileBar, 0); View.Add(files, candidateList, 1);

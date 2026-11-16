@@ -2,7 +2,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
 
-namespace Storloom.App;
+namespace Storloom.Wpf;
 
 public static class ControlFeedback {
     public static readonly DependencyProperty EnabledProperty = DependencyProperty.RegisterAttached("Enabled", typeof(bool), typeof(ControlFeedback), new PropertyMetadata(false, Changed));
@@ -39,7 +39,7 @@ public static class ControlFeedback {
         }
         return null;
     }
-    private static Color Color(string key) => ((SolidColorBrush)Theme.Brush(key)).Color;
+    private static Color Color(string key) => ComponentTheme.Brush(key) is SolidColorBrush brush ? brush.Color : Colors.Transparent;
     private static void Paint(Control control, bool animate) {
         if (!GetEnabled(control)) return;
         string name = control is Thumb ? "grip" : control is CheckBox ? "box" : control is ListBoxItem ? "item" : "frame";
@@ -69,7 +69,7 @@ public static class ControlFeedback {
         if (previous.A == 0) previous = System.Windows.Media.Color.FromArgb(0, color.R, color.G, color.B);
         if (color.A == 0) color = System.Windows.Media.Color.FromArgb(0, previous.R, previous.G, previous.B);
         var brush = new SolidColorBrush(color);
-        if (animate && !Theme.ReduceMotion && SystemParameters.ClientAreaAnimation)
+        if (animate && !ComponentTheme.ReduceMotion && SystemParameters.ClientAreaAnimation)
             brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(previous, color, TimeSpan.FromMilliseconds((bool)control.GetValue(PressedProperty) ? 65 : 100)));
         frame.Background = brush;
     }
