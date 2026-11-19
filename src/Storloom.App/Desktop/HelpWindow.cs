@@ -9,7 +9,10 @@ internal sealed class HelpWindow : ThemeWindow {
     public HelpWindow(int topic,string? document,string? dataRoot):base(L.T("QuickStart"),1050,760) {
         var grid=View.Grid(View.Auto,View.Fill,View.Auto);grid.Margin=new Thickness(22);Body.Children.Add(grid);
         var search=View.Input();search.Name="help_search";search.ToolTip=L.T("HelpSearch");System.Windows.Automation.AutomationProperties.SetName(search,L.T("HelpSearch"));
-        View.Add(grid,View.Row(View.Text(L.T("HelpSearch")),search),0);search.MinWidth=320;
+        var searchRow=new Grid{Name="help_search_row",Margin=new Thickness(0,0,0,8)};
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});searchRow.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        var searchLabel=new Label{Content=L.T("HelpSearch"),Target=search,Padding=new Thickness(0),Margin=new Thickness(0,0,12,0),VerticalContentAlignment=VerticalAlignment.Center};
+        View.Add(searchRow,searchLabel,0);View.Add(searchRow,search,0,1);search.VerticalAlignment=VerticalAlignment.Center;search.MaxWidth=440;search.HorizontalAlignment=HorizontalAlignment.Left;search.MinWidth=280;View.Add(grid,searchRow,0);
         var split=new Grid();split.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(210)});split.ColumnDefinitions.Add(new ColumnDefinition());
         var navigation=new ListBox{Name="help_topics",Margin=new Thickness(0,6,14,0)};var content=new ContentControl{Name="help_content",Margin=new Thickness(0,6,0,0)};
         View.Add(split,navigation,0);View.Add(split,content,0,1);View.Add(grid,split,1);
@@ -22,7 +25,7 @@ internal sealed class HelpWindow : ThemeWindow {
         navigation.DisplayMemberPath=nameof(Topic.Title);navigation.SelectionChanged+=(_,_)=>{manual.IsEnabled=navigation.SelectedItem!=null;if(navigation.SelectedItem is Topic selected)content.Content=Document(selected.Title,selected.Text);};
         void Filter(){var chosen=navigation.SelectedItem as Topic;var visible=topics.Where(t=>(t.Title+" "+t.Text).Contains(search.Text.Trim(),StringComparison.CurrentCultureIgnoreCase)).ToArray();navigation.ItemsSource=visible;navigation.SelectedItem=visible.Contains(chosen)?chosen:visible.FirstOrDefault();if(visible.Length==0)content.Content=View.Text(L.T("HelpNoResults"),color:"Muted");}
         search.TextChanged+=(_,_)=>Filter();Filter();navigation.SelectedIndex=Math.Clamp(topic,0,topics.Count-1);
-        View.Add(grid,View.Row(logs,manual,View.Button("Close",Close)),2);
+        var actions=View.DialogActions(logs,manual,View.Button("Close",Close));actions.Name="help_actions";actions.Margin=new Thickness(0,12,0,0);View.Add(grid,actions,2);
         void Open(string path){try{Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}catch(Exception ex){Notice.Show(this,L.T("Error"),ex.Message);}}
     }
     private static FlowDocumentScrollViewer Document(string title,string text) {

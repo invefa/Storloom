@@ -31,6 +31,15 @@ internal static class View {
     public static WrapPanel Row(params UIElement[] elements) {
         var row = new WrapPanel { VerticalAlignment = VerticalAlignment.Center }; foreach (var element in elements) { if(element is Button button)button.Margin=new Thickness(0,3,8,3);row.Children.Add(element); } return row;
     }
+    public static WrapPanel DialogActions(params Button[] buttons) {
+        var panel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        for (int index = 0; index < buttons.Length; index++) {
+            buttons[index].Margin = new Thickness(index == 0 ? 0 : 8, 0, 0, 0);
+            buttons[index].MinHeight = 32; buttons[index].VerticalAlignment = VerticalAlignment.Center;
+            panel.Children.Add(buttons[index]);
+        }
+        return panel;
+    }
     public static Grid Grid(params GridLength[] heights) {
         var grid = new Grid(); foreach (var height in heights) grid.RowDefinitions.Add(new RowDefinition { Height = height }); return grid;
     }

@@ -1,5 +1,7 @@
 # Storloom
 
+开发规范：[English](AGENTS.md) · [简体中文](AGENTS.zh-CN.md)。自动更新可在“工具 → 首选项 → 更新”中关闭，详见[更新方式与故障恢复](docs/quickstart.zh-CN.md#软件更新)。
+
 用于审核清理、归档缓存、分析存储空间、保存聊天客户端聊天备份的Windows工具。C# / WPF实现，支持中英文。
 
 从“工具 → 组件库”打开共用控件的交互展示，设计与复用规则见[桌面组件指南](docs/components.zh-CN.md)。

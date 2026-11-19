@@ -1,5 +1,7 @@
 # Storloom
 
+Development conventions: [English](AGENTS.md) · [简体中文](AGENTS.zh-CN.md). Automatic application updates can be disabled in **Tools > Preferences > Updates**; see [update behavior and recovery](docs/quickstart.md#application-updates).
+
 A Windows storage manager for reviewing cleanup, archiving selected cache files, understanding disk usage, and keeping local chat clients archives. C# and WPF, English and Simplified Chinese.
 
 **Tools > Component library** opens the interactive shared-control gallery. See the [desktop component guide](docs/components.md).

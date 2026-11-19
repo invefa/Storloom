@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '2.15.2',
+    [string] $Version = '2.16.0',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -68,7 +68,7 @@ New-Item -ItemType Directory -Path $archiveLicenses -Force | Out-Null
 foreach ($notice in @('SQLite3MultipleCiphers.txt', 'SQLite3MC.PCLRaw.txt', 'SQLite3MC-components.txt', 'SQLitePCLRaw.txt', 'Microsoft.Data.Sqlite.txt', 'CC0-1.0.txt')) {
     Copy-Item -LiteralPath (Join-Path $repo "docs/licenses/$notice") -Destination $archiveLicenses
 }
-foreach ($file in @('README.md', 'README.zh-CN.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
+foreach ($file in @('README.md', 'README.zh-CN.md', 'AGENTS.md', 'AGENTS.zh-CN.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $package
 }
 foreach ($folder in @('rules', 'docs')) {
@@ -131,6 +131,13 @@ foreach ($file in $ownFiles) {
         }
     }
 }
+$files = [ordered]@{}
+foreach ($file in Get-ChildItem -LiteralPath $package -Recurse -File | Sort-Object FullName) {
+    $relative = [IO.Path]::GetRelativePath($package, $file.FullName).Replace('\', '/')
+    $files[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+@{ version = $Version; runtime = 'win-x64'; files = $files } | ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath (Join-Path $package 'package-manifest.json') -Encoding utf8
 $zip = Join-Path $run "$name.zip"
 Compress-Archive -LiteralPath $package -DestinationPath $zip -CompressionLevel Optimal
 $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()

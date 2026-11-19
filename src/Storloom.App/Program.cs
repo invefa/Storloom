@@ -3,6 +3,7 @@ namespace Storloom.App;
 internal static class Program {
     [STAThread]
     private static int Main(string[] args) {
+        if (args.Length == 2 && args[0] == "--apply-update") return Storloom.Core.Updates.UpdateInstaller.Run(args[1], AppContext.BaseDirectory);
         if (args.SequenceEqual(new[] { "--capture-worker" })) return CaptureWorker.Run();
         AppContext.SetSwitch("Switch.System.Windows.Controls.Text.UseAdornerForTextboxSelectionRendering", false);
         string? dataDirectory = args.Length == 2 && args[0] == "--data-dir" ? args[1] : null;
@@ -10,7 +11,16 @@ internal static class Program {
             MessageBox.Show("Usage: Storloom.exe [--data-dir DIRECTORY]", "Storloom"); return 2;
         }
         var application = new System.Windows.Application();
-        try { return application.Run(new ShellWindow(dataDirectory)); }
+        try {
+            // Shared leases allow multiple windows, while the updater requires exclusive access.
+            using var lease = InstallationLease();
+            return application.Run(new ShellWindow(dataDirectory));
+        }
         catch (Exception ex) { System.Windows.MessageBox.Show(ex.Message, "Storloom"); return 1; }
+    }
+    private static System.IO.FileStream? InstallationLease() {
+        string path=System.IO.Path.Combine(AppContext.BaseDirectory,".update.lock");
+        try{return new System.IO.FileStream(path,System.IO.FileMode.OpenOrCreate,System.IO.FileAccess.Read,System.IO.FileShare.Read);}
+        catch(UnauthorizedAccessException)when(!System.IO.File.Exists(path)){return null;} // Read-only installations still run; updates will report the permission error.
     }
 }

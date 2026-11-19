@@ -1,5 +1,15 @@
 # Getting started
 
+## Application updates
+
+In **Tools > Preferences > Updates**, automatic updates are enabled by default. The app checks the project's stable GitHub Releases (linked from **Help > About > Release history**) at most once a day, downloads the Windows x64 package in the background, verifies its SHA-256 digest and file manifest, and installs after a normal exit. Tasks are never cancelled for an update. Hiding to the tray does not exit; use **File > Exit**. A downloaded update can also be installed with **Restart and install** after tasks finish.
+
+Disable the checkbox and save to stop automatic checks, downloads and installation, including installation of an already prepared update. **Check and download updates** remains available for manual use. Download percentage and verification status appear on this page; failures include their reason. Offline checks retry later and leave the running version intact. Only stable releases are accepted; development builds without `build-info.json` cannot install in place.
+
+Updates replace packaged application files in the existing installation directory, so shortcuts keep working. User data, archive registrations, database key libraries and archives are not part of the update payload. Installing requires write access to the installation directory and all other Storloom windows using it must be closed. No automatic elevation is attempted. Failed file replacements attempt to restore the previous files. Update results are recorded at `updates/result.json` beneath the data directory (open it through **File > Open data directory**); staged files and rollback copies are kept for the two most recent completed update transactions. Do not remove a prepared transaction manually while updating.
+
+Checksums detect corrupted or substituted downloads; release authenticity relies on HTTPS and access control of the official GitHub repository. The package is not an independently signed Windows installer. GitHub's [release asset API](https://docs.github.com/en/rest/releases/assets) supplies the SHA-256 digest. The release workflow publishes versioned packages on stable version tags.
+
 After selecting an account, create a reading copy or raw backup independently. Automatic account search and client locations are configurable from the picker or Preferences. The chat More actions menu provides the database key library and raw backup restore. See [chat backup and export](chat-exporters.md).
 
 ## Account archives

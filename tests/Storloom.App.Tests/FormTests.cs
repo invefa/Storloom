@@ -17,6 +17,33 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Theory][InlineData("zh-CN",AppTheme.Light)][InlineData("zh-CN",AppTheme.Dark)][InlineData("en",AppTheme.Light)][InlineData("en",AppTheme.Dark)]
+    public void HelpSearchAndFooterStayAligned(string locale,AppTheme theme)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});L.SetLanguage(locale);string fixture=Fixture();
+        var window=(Window)Activator.CreateInstance(typeof(ShellWindow).Assembly.GetType("Storloom.App.HelpWindow")!,[0,null,fixture])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();var nodes=Descendants(window).ToArray();var input=nodes.OfType<TextBox>().Single(t=>t.Name=="help_search");var label=nodes.OfType<Label>().Single(l=>l.Target==input);
+            var a=input.TranslatePoint(new Point(0,input.ActualHeight/2),window);var b=label.TranslatePoint(new Point(0,label.ActualHeight/2),window);Assert.InRange(Math.Abs(a.Y-b.Y),0,1.1);
+            Assert.InRange(a.X-label.TranslatePoint(new Point(label.ActualWidth,0),window).X,11,13);
+            var actions=nodes.OfType<WrapPanel>().Single(p=>p.Name=="help_actions");Assert.Equal(HorizontalAlignment.Right,actions.HorizontalAlignment);var buttons=actions.Children.OfType<Button>().ToArray();
+            Assert.Equal(3,buttons.Length);double baseline=buttons[0].TranslatePoint(new Point(0,buttons[0].ActualHeight),window).Y;
+            Assert.All(buttons,button=>Assert.InRange(Math.Abs(button.TranslatePoint(new Point(0,button.ActualHeight),window).Y-baseline),0,1.1));
+            Assert.Equal(0,buttons[^1].Margin.Right);Assert.InRange(Math.Abs(actions.ActualWidth-(buttons[^1].TranslatePoint(new Point(buttons[^1].ActualWidth,0),actions).X)),0,1.1);
+            Capture(window,"help-aligned-"+locale+"-"+theme);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory][InlineData("zh-CN")][InlineData("en")]
+    public void AutomaticUpdatesCanBeDisabledAndManualCheckHasFeedback(string locale)=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Light,ReduceMotion=true});L.SetLanguage(locale);string fixture=Fixture();
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.PreferencesWindow")!;var window=(Window)Activator.CreateInstance(type,[new AppPreferences{Language=locale},Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false])!;
+        bool ready=false;type.GetProperty("CheckUpdates")!.SetValue(window,(Func<IProgress<string>,Task>)(progress=>{progress.Report("Fixture update is ready");ready=true;return Task.CompletedTask;}));type.GetProperty("HasPreparedUpdate")!.SetValue(window,(Func<bool>)(()=>ready));
+        window.ShowInTaskbar=false;window.Dispatcher.BeginInvoke(new Action(()=>{
+            var tabs=Descendants(window).OfType<TabControl>().First();tabs.SelectedIndex=3;Pump();var nodes=Descendants(window).ToArray();var automatic=nodes.OfType<CheckBox>().Single(c=>c.Name=="automatic_updates");Assert.True(automatic.IsChecked);automatic.IsChecked=false;
+            nodes.OfType<Button>().Single(b=>b.Name=="update_check").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();
+            Assert.Contains("Fixture",nodes.OfType<TextBlock>().Single(t=>t.Name=="update_status").Text);Assert.True(nodes.OfType<Button>().Single(b=>b.Name=="update_restart").IsEnabled);
+            Capture(window,"updates-settings-"+locale);nodes.OfType<Button>().Single(b=>Equals(b.Content,L.T("Apply"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }));
+        try{Assert.True(window.ShowDialog());Assert.False(((AppPreferences)type.GetProperty("Result")!.GetValue(window)!).AutomaticUpdates);}finally{window.Close();Directory.Delete(fixture,true);}
+    });
     [Fact]public void PartialCleanupShowsReasonsAndCanReopenItsPersistedReport()=>OnUi(()=>{
         string fixture=Fixture(),cache=Path.Combine(fixture,"cache"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(cache);
         string empty=Path.Combine(cache,"empty.tmp"),locked=Path.Combine(cache,"locked.tmp");File.WriteAllText(empty,"");File.WriteAllText(locked,"keep");
@@ -1845,7 +1872,7 @@ public sealed class FormTests {
                 foreach(string page in new[]{"overview","cleanup","chats"}){window.Navigate(page);Pump();Assert.All(Descendants(window).OfType<Button>().Where(b=>b.IsVisible),b=>Assert.True(b.TranslatePoint(new Point(b.ActualWidth,b.ActualHeight),window).X<=window.ActualWidth+1));}
             }
             var dialog=(Window)Activator.CreateInstance(type.Assembly.GetType("Storloom.App.PreferencesWindow")!,[prefs,Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),false])!;
-            try{dialog.ShowInTaskbar=false;dialog.Show();Pump();var tabs=Descendants(dialog).OfType<TabControl>().Single();Assert.Equal(3,tabs.Items.Count);for(int tab=0;tab<2;tab++){tabs.SelectedIndex=tab;Pump();Assert.All(Descendants(dialog).OfType<ScrollViewer>().Where(v=>v.IsVisible&&v.Content is Grid),v=>Assert.InRange(v.ScrollableHeight,0,1));Capture(dialog,"grouped-preferences-"+tab+"-"+theme);}}finally{dialog.Close();}
+            try{dialog.ShowInTaskbar=false;dialog.Show();Pump();var tabs=Descendants(dialog).OfType<TabControl>().Single();Assert.Equal(4,tabs.Items.Count);Assert.Equal(L.T("Updates"),((TabItem)tabs.Items[3]).Header);for(int tab=0;tab<2;tab++){tabs.SelectedIndex=tab;Pump();Assert.All(Descendants(dialog).OfType<ScrollViewer>().Where(v=>v.IsVisible&&v.Content is Grid),v=>Assert.InRange(v.ScrollableHeight,0,1));Capture(dialog,"grouped-preferences-"+tab+"-"+theme);}}finally{dialog.Close();}
         }finally{window.Close();Directory.Delete(fixture,true);}
     });
 

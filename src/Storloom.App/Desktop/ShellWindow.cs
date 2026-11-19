@@ -54,7 +54,8 @@ public sealed partial class ShellWindow : ThemeWindow {
         if (File.Exists(backups)) foreach (var pair in JsonFiles.Read<Dictionary<string, string>>(backups)) verifiedBackups[pair.Key] = pair.Value;
         L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
         WindowGeometry.Attach(this,dataRoot,"main",640,480);
-        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;accessDrafts.Clear();retainedChatSections.Clear();tray?.Dispose();};
+        Closing += HandleClosing; Closed += (_, _) => {windowClosed=true;accessDrafts.Clear();retainedChatSections.Clear();tray?.Dispose();if(automaticDiscovery)LaunchUpdateOnExit();};
+        if(automaticDiscovery)Loaded += (_,_) => StartUpdates();
         if (preferences.CloseToTray) EnsureTray();
         InputBindings.Add(new KeyBinding(new ActionCommand(() => operationView.ToggleFollowing()), new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new ActionCommand(() => ShowHelp()), new KeyGesture(Key.F1)));
@@ -288,13 +289,19 @@ public sealed partial class ShellWindow : ThemeWindow {
             File.Exists(settings) ? JsonFiles.Read<CleanerSettings>(settings) : new()); cleanupPlan = null; excluded.Clear();
     }
     private void ShowPreferences(bool ruleSets = false) {
-        var dialog = new PreferencesWindow(preferences, rulesDirectory, dataRoot, engine.Settings, ruleSets) { Owner = this };
-        if (dialog.ShowDialog() != true) return;
+        var dialog = new PreferencesWindow(preferences, rulesDirectory, dataRoot, engine.Settings, ruleSets) { Owner = this,
+            UpdateMessage=updateMessage, UpdateReady=preparedUpdate!=null, CheckUpdates=feedback=>CheckForUpdates(true,feedback), HasPreparedUpdate=()=>preparedUpdate!=null };
+        bool applied;updateStatusChanged=dialog.ShowUpdateStatus;
+        try{applied=dialog.ShowDialog()==true;}finally{updateStatusChanged=null;}
+        if(!applied)return;
         var history=operationView;
         preferences = dialog.Result; JsonFiles.Write(Path.Combine(dataRoot, "preferences.json"), preferences);
+        if(!preferences.AutomaticUpdates)updateCancellation?.Cancel();
+        if(dialog.RestartForUpdate&&preparedUpdate!=null){restartForUpdate=true;RequestExit();return;}
         SetCapturedKey(null); L.SetLanguage(preferences.Language); Theme.Apply(preferences); ReloadEngine(); BuildUi();
         operationView.RestoreHistory(history);operationView.AddLog(L.T(preferences.DebugLogging?"DebugEnabled":"DebugDisabled"));
         if (preferences.CloseToTray) EnsureTray(); tray?.Refresh();
+        if(automaticDiscovery&&preferences.AutomaticUpdates)_=CheckForUpdates(false);
     }
     private void ShowHelp(int? topic = null, string? document = null) => new HelpWindow(topic ?? (currentPage == "chats" ? 2 : currentPage == "overview" ? 5 : 0), document, dataRoot) { Owner = this }.ShowDialog();
     private void ImportRules() {

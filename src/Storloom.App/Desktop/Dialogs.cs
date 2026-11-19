@@ -6,6 +6,12 @@ namespace Storloom.App;
 
 internal sealed class PreferencesWindow : ThemeWindow {
     public AppPreferences Result { get; private set; }
+    public Func<IProgress<string>,Task>? CheckUpdates { get; init; }
+    public Func<bool>? HasPreparedUpdate { get; init; }
+    public string UpdateMessage { get; init; } = "";
+    public bool UpdateReady { get; init; }
+    public bool RestartForUpdate { get; private set; }
+    public Action<string,bool>? ShowUpdateStatus { get; private set; }
     public PreferencesWindow(AppPreferences preferences, string rulesDirectory, string dataRoot, CleanerSettings settings, bool rulesPage = false)
         : base(L.T("Preferences"), 830, 560) {
         Result = preferences; var chatPreferences=preferences; ShowInTaskbar = false;
@@ -76,6 +82,21 @@ internal sealed class PreferencesWindow : ThemeWindow {
         }));
         local.Margin = new Thickness(0, 10, 0, 0); View.Add(rules, local, 3); tabs.Items.Add(new TabItem { Header = L.T("RuleSets"), Content = rules });
         tabs.SelectedIndex = rulesPage ? 2 : 0;
+        var updates=View.Stack();updates.Margin=new Thickness(18);
+        var automaticUpdates=new CheckBox{Name="automatic_updates",Content=L.T("AutomaticUpdates"),IsChecked=preferences.AutomaticUpdates};
+        updates.Children.Add(automaticUpdates);updates.Children.Add(View.Text(L.T("AutomaticUpdatesHelp"),color:"Muted"));
+        updates.Children.Add(View.Text(L.T("Version")+": "+ProductInfo.Version));
+        var updateStatus=View.Text(L.T("UpdateIdle"));updateStatus.Name="update_status";updates.Children.Add(updateStatus);
+        var updateProgress=new ProgressBar{Name="update_progress",Height=3,IsIndeterminate=true,Visibility=Visibility.Collapsed,Margin=new Thickness(0,8,0,12)};updates.Children.Add(updateProgress);
+        var restart=View.Button("UpdateRestart",()=>{});restart.Name="update_restart";restart.IsEnabled=false;
+        ShowUpdateStatus=(message,ready)=>{updateStatus.Text=message;restart.IsEnabled=ready;};
+        var check=View.Button("UpdateCheckNow",()=>{});check.Name="update_check";
+        check.Click+=async(_,_)=>{if(CheckUpdates==null)return;check.IsEnabled=false;updateProgress.Visibility=Visibility.Visible;
+            try {await CheckUpdates(new Progress<string>(message=>updateStatus.Text=message));}
+            finally{check.IsEnabled=true;updateProgress.Visibility=Visibility.Collapsed;restart.IsEnabled=HasPreparedUpdate?.Invoke()==true;}};
+        var updateActions=View.DialogActions(check,restart);updateActions.Margin=new Thickness(0,16,0,0);updates.Children.Add(updateActions);
+        tabs.Items.Add(new TabItem{Header=L.T("Updates"),Content=View.FormScroll(updates)});
+        Loaded+=(_,_)=>{if(UpdateMessage!="")updateStatus.Text=UpdateMessage;restart.IsEnabled=UpdateReady;};
         var actions = View.Row(View.Button("Cancel", () => DialogResult = false), View.Button("Apply", () => {
             try {
                 foreach (string path in new[] { backup.Text, archive.Text }) if (!string.IsNullOrWhiteSpace(path)) _ = PathPolicy.Normalize(path);
@@ -86,7 +107,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                     File.Exists(localRules) ? JsonFiles.Read<RuleCatalog>(localRules) : null);
                 if (catalog.Rules.Count == 0) throw new InvalidDataException(L.T("NoRuleSets")); _ = new CleanupEngine(catalog, settings);
                 if (!string.IsNullOrWhiteSpace(custom.Text)) _ = Theme.ReadCustom(custom.Text);
-                Result = chatPreferences with { Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = themeValues[themes.SelectedIndex],
+                Result = chatPreferences with { AutomaticUpdates=automaticUpdates.IsChecked==true, Language = language.SelectedIndex == 0 ? "en" : "zh-CN", Theme = themeValues[themes.SelectedIndex],
                     BackupRoot = backup.Text.Trim(), ArchiveRoot = archive.Text.Trim(), ChatWorkRoot=working.Text.Trim(), ChatParallelism = workers.SelectedValue is int n&&n>0?n:preferences.ChatParallelism, ChatWorkersAutomatic=workers.SelectedValue is 0,
                     LogAutoShow=logAutoShow.IsChecked==true, ReduceMotion = motion.IsChecked == true, CloseToTray = closeToTray.IsChecked == true, DebugLogging = debugLogging.IsChecked == true, CustomThemeFile = string.IsNullOrWhiteSpace(custom.Text) ? null : Path.GetFullPath(custom.Text), EnabledRuleSets = selection };
                 foreach (var choice in choices.Where(c => pending.ContainsKey(c.Info.Id))) JsonFiles.Write(Path.Combine(customSets, choice.Info.File), pending[choice.Info.Id]);
@@ -94,6 +115,7 @@ internal sealed class PreferencesWindow : ThemeWindow {
                 DialogResult = true;
             } catch (Exception ex) { Notice.Show(this, L.T("Error"), ex.Message); }
         }, true)); actions.HorizontalAlignment = HorizontalAlignment.Right; actions.Margin = new Thickness(0, 16, 0, 0); View.Add(layout, actions, 1);
+        restart.Click+=(_,_)=>{RestartForUpdate=true;actions.Children.OfType<Button>().Last().RaiseEvent(new RoutedEventArgs(Button.ClickEvent));if(DialogResult!=true)RestartForUpdate=false;};
     }
     private sealed class RuleSetChoice(RuleSetInfo info, bool selected) {
         public RuleSetInfo Info => info;

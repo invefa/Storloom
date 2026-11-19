@@ -1127,5 +1127,20 @@
   "CleanupOutputTruncated": "Showing the first 16000 characters. Open this item's journal for complete output.",
   "CleanupLastReport": "Last cleanup results",
   "CleanupNoReport": "No local cleanup report yet. After cleanup, reopen its results here. Journals from older versions are available through the help log-folder button.",
-  "CleanupReportSaveFailed": "Could not save this report. Export the live operation log before closing: {0}"
+  "CleanupReportSaveFailed": "Could not save this report. Export the live operation log before closing: {0}",
+  "Updates": "Updates",
+  "AutomaticUpdates": "Automatically check, download and install updates",
+  "AutomaticUpdatesHelp": "Check stable releases daily in the background, verify downloads and install on normal exit without interrupting tasks. Disable to stop automatic checks, downloads and installation. Hiding to the tray does not install; use File > Exit. Configuration, key libraries and archive registrations are retained.",
+  "UpdateIdle": "Not checked yet. Source: the project’s GitHub Releases.",
+  "UpdateCheckNow": "Check and download updates",
+  "UpdateRestart": "Restart and install",
+  "UpdateChecking": "Checking for updates…",
+  "UpdateLatest": "No newer stable release is available. Current version: {0}.",
+  "UpdateDownloading": "Downloading {0}: {1}",
+  "UpdateVerifying": "Verifying and preparing the update…",
+  "UpdateReady": "{0} is downloaded and verified. Restart to install now; with automatic updates enabled it also installs on normal exit.",
+  "UpdateInstalled": "Updated to {0}.",
+  "UpdateFailed": "Update did not complete: {0}. Retry in Settings > Updates.",
+  "UpdateCancelled": "Update download stopped.",
+  "UpdateTimeout": "The network request timed out"
 }
