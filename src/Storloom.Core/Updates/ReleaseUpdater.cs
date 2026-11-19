@@ -9,19 +9,38 @@ public sealed record UpdateRelease(string Version, string Asset, string Url, str
 public sealed record UpdateProgress(string Phase, long Bytes = 0, long Total = 0);
 public sealed record UpdatePackage(string Version, string Runtime, Dictionary<string, string> Files);
 public sealed record PreparedUpdate(string Directory, string Version);
+public sealed record UpdateFeed(int Protocol, string Version, string Runtime, string Asset,
+    string Url, string Sha256, long Size);
+public sealed class UpdateRateLimitException(DateTimeOffset retryAt)
+    : HttpRequestException("The update service rate limit was exceeded.") {
+    public DateTimeOffset RetryAt { get; } = retryAt;
+}
 
 /// <summary>Only stable Windows x64 releases from the public product repository are accepted.</summary>
 public sealed class ReleaseUpdater(HttpClient client, string repository) {
     private string Repository => ValidRepository(repository) ? repository : throw new InvalidDataException("Invalid GitHub repository.");
     private string Latest => "https://api.github.com/repos" + new Uri(Repository).AbsolutePath + "/releases/latest";
+    private string Feed => Repository + "/releases/latest/download/update.json";
     private const long MaxPackage = 2L * 1024 * 1024 * 1024;
     public async Task<UpdateRelease?> CheckAsync(string current, CancellationToken token = default) {
+        using (var feedRequest = new HttpRequestMessage(HttpMethod.Get, Feed)) {
+            feedRequest.Headers.UserAgent.ParseAdd("Storloom/" + current);
+            using var feedResponse = await client.SendAsync(feedRequest, HttpCompletionOption.ResponseHeadersRead, token);
+            if (feedResponse.StatusCode != HttpStatusCode.NotFound) {
+                EnsureAvailable(feedResponse);
+                return ParseFeed(await ReadMetadata(feedResponse, token), current, Repository);
+            }
+        }
+        // Older releases did not publish the feed asset. Keep their API metadata readable.
         using var request = new HttpRequestMessage(HttpMethod.Get, Latest);
         request.Headers.UserAgent.ParseAdd("Storloom/" + current);
         request.Headers.Accept.ParseAdd("application/vnd.github+json");
-        using var response = await client.SendAsync(request, token);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        EnsureAvailable(response);
+        return Parse(await ReadMetadata(response, token), current, Repository);
+    }
+    private static async Task<string> ReadMetadata(HttpResponseMessage response, CancellationToken token) {
         if (response.Content.Headers.ContentLength > 2 * 1024 * 1024) throw new InvalidDataException("Release response is too large.");
         using var buffer = new MemoryStream(); await using var stream = await response.Content.ReadAsStreamAsync(token);
         byte[] chunk = new byte[8192]; int count;
@@ -29,8 +48,38 @@ public sealed class ReleaseUpdater(HttpClient client, string repository) {
             if (buffer.Length + count > 2 * 1024 * 1024) throw new InvalidDataException("Release response is too large.");
             buffer.Write(chunk, 0, count);
         }
-        string json = System.Text.Encoding.UTF8.GetString(buffer.ToArray());
-        return Parse(json, current, Repository);
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray()).TrimStart('\uFEFF');
+    }
+    internal static UpdateRelease? ParseFeed(string json, string current, string repository) {
+        var feed = JsonSerializer.Deserialize<UpdateFeed>(json, JsonFiles.Options)
+            ?? throw new InvalidDataException("Empty update feed.");
+        if (feed.Protocol != 1 || feed.Runtime != "win-x64" || !ValidRepository(repository) ||
+            !ValidVersion(feed.Version) || feed.Asset != $"Storloom-{feed.Version}-win-x64.zip" ||
+            feed.Url != $"{repository}/releases/download/v{feed.Version}/{feed.Asset}" ||
+            feed.Sha256 == null || !ValidHash(feed.Sha256) || feed.Size <= 0 || feed.Size > MaxPackage)
+            throw new InvalidDataException("Invalid update feed.");
+        if (!Version.TryParse(current, out var installed)) throw new InvalidDataException("Invalid installed version.");
+        return Version.Parse(feed.Version) > installed
+            ? new(feed.Version, feed.Asset, feed.Url, feed.Sha256.ToLowerInvariant(), feed.Size) : null;
+    }
+    private static void EnsureAvailable(HttpResponseMessage response) {
+        bool limited = response.StatusCode == HttpStatusCode.TooManyRequests ||
+            response.StatusCode == HttpStatusCode.Forbidden && (
+                response.Headers.RetryAfter != null ||
+                response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) && remaining.Contains("0") ||
+                response.ReasonPhrase?.Contains("rate limit", StringComparison.OrdinalIgnoreCase) == true);
+        if (limited) {
+            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset retry = response.Headers.RetryAfter?.Date ?? now.AddHours(1);
+            if (response.Headers.RetryAfter?.Delta is TimeSpan delta) retry = now.AddSeconds(Math.Clamp(delta.TotalSeconds, 60, 86400));
+            else if (response.Headers.RetryAfter?.Date == null &&
+                response.Headers.TryGetValues("X-RateLimit-Reset", out var resets) &&
+                long.TryParse(resets.FirstOrDefault(), out long stamp) && stamp > 0 && stamp < 253402300800)
+                retry = DateTimeOffset.FromUnixTimeSeconds(stamp).AddSeconds(5);
+            retry = retry < now.AddMinutes(1) ? now.AddMinutes(1) : retry > now.AddDays(1) ? now.AddDays(1) : retry;
+            throw new UpdateRateLimitException(retry);
+        }
+        response.EnsureSuccessStatusCode();
     }
     internal static UpdateRelease? Parse(string json, string current, string repository) {
         if (!ValidRepository(repository)) throw new InvalidDataException("Invalid GitHub repository.");
@@ -63,7 +112,7 @@ public sealed class ReleaseUpdater(HttpClient client, string repository) {
         try {
             using var request = new HttpRequestMessage(HttpMethod.Get, release.Url);
             request.Headers.UserAgent.ParseAdd("Storloom/" + release.Version);
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); response.EnsureSuccessStatusCode();
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); EnsureAvailable(response);
             if (response.RequestMessage?.RequestUri?.Scheme != "https") throw new InvalidDataException("Update download must use HTTPS.");
             if (response.Content.Headers.ContentLength is long length && length != release.Size) throw new InvalidDataException("Package size mismatch.");
             await using (var input = await response.Content.ReadAsStreamAsync(token))

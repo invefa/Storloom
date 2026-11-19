@@ -8,7 +8,9 @@ using Storloom.Core.Updates;
 namespace Storloom.App;
 
 public sealed partial class ShellWindow {
-    private sealed record UpdateSchedule(DateTimeOffset NextCheck);
+    private sealed record UpdateSchedule(DateTimeOffset NextCheck) {
+        public DateTimeOffset? LimitedUntil { get; init; }
+    }
     private CancellationTokenSource? updateCancellation;
     private DispatcherTimer? updateTimer;
     private PreparedUpdate? preparedUpdate;
@@ -46,7 +48,13 @@ public sealed partial class ShellWindow {
         if (preparedUpdate != null) { Say(L.T("UpdateReady", preparedUpdate.Version)); return; }
         try {
             string schedule = Path.Combine(UpdatesRoot, "schedule.json");
-            if (!manual && File.Exists(schedule)) {var next=JsonFiles.Read<UpdateSchedule>(schedule).NextCheck;if(next>DateTimeOffset.UtcNow&&next<=DateTimeOffset.UtcNow.AddDays(1))return;}
+            if (File.Exists(schedule)) {
+                var saved = JsonFiles.Read<UpdateSchedule>(schedule); var now = DateTimeOffset.UtcNow;
+                if (saved.LimitedUntil is DateTimeOffset until && until > now && until <= now.AddDays(1)) {
+                    Say(L.T("UpdateRateLimited", until.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))); return;
+                }
+                if (!manual && saved.NextCheck > now && saved.NextCheck <= now.AddDays(1)) return;
+            }
         } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { /* A corrupt schedule must not disable updates. */ }
         updateChecking = true; updateCancellation = new CancellationTokenSource(); var token = updateCancellation.Token;
         try {
@@ -72,8 +80,18 @@ public sealed partial class ShellWindow {
             Say(L.T("UpdateReady", prepared.Version)); operationView.AddLog(updateMessage);
             if (operation == null) status.Text = updateMessage;
         } catch (OperationCanceledException) when (token.IsCancellationRequested) { if (!windowClosed) Say(L.T("UpdateCancelled")); }
+        catch (UpdateRateLimitException ex) {
+            if (!windowClosed) { Say(L.T("UpdateRateLimited", ex.RetryAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))); operationView.AddLog(updateMessage); }
+            try { JsonFiles.Write(Path.Combine(UpdatesRoot, "schedule.json"), new UpdateSchedule(ex.RetryAt) { LimitedUntil = ex.RetryAt }); }
+            catch (Exception save) when (save is IOException or UnauthorizedAccessException) { }
+        }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or OperationCanceledException or ArgumentException) {
-            if (!windowClosed) { Say(L.T("UpdateFailed", ex is OperationCanceledException ? L.T("UpdateTimeout") : ex.Message)); operationView.AddLog(updateMessage); }
+            if (!windowClosed) {
+                string reason = ex is OperationCanceledException ? L.T("UpdateTimeout") :
+                    ex is HttpRequestException http && http.StatusCode is { } code ? L.T("UpdateHttpError", (int)code) :
+                    ex is HttpRequestException ? L.T("UpdateNetworkError") : ex.Message;
+                Say(L.T("UpdateFailed", reason)); operationView.AddLog(updateMessage); operationView.AddLog(ex.Message);
+            }
             try { JsonFiles.Write(Path.Combine(UpdatesRoot, "schedule.json"), new UpdateSchedule(DateTimeOffset.UtcNow.AddHours(1))); } catch (Exception save) when (save is IOException or UnauthorizedAccessException) { }
         } finally { updateChecking = false; updateCancellation?.Dispose(); updateCancellation = null; }
     }

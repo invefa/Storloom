@@ -61,7 +61,9 @@ internal sealed class PreferencesWindow : ThemeWindow {
         var choices = sets.Select(set => new RuleSetChoice(set, enabled.Contains(set.Id))).ToList();
         var pending = new Dictionary<string, RuleCatalog>();
         var setList = View.Table(("RuleSetName", "Name", 0), ("RuleSetSource", "Source", 100), ("RuleSetFile", "File", 180));
-        View.Checks(setList); setList.Name = "rule_sets"; setList.ItemsSource = choices; View.Add(rules, setList, 2);
+        View.Checks(setList); setList.Name = "rule_sets";
+        _ = new TableSelection(setList, "select_all_rule_sets", L.T("SelectAll"));
+        setList.ItemsSource = choices; View.Add(rules, setList, 2);
         void RefreshSets() { setList.ItemsSource = null; setList.ItemsSource = choices; }
         var setActions = View.Row(View.Button("ImportRuleSet", () => {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Rule catalog JSON|*.json" }; if (PickerHistory.Show(picker,this,"rule-catalog-import") != true) return;
@@ -117,12 +119,17 @@ internal sealed class PreferencesWindow : ThemeWindow {
         }, true)); actions.HorizontalAlignment = HorizontalAlignment.Right; actions.Margin = new Thickness(0, 16, 0, 0); View.Add(layout, actions, 1);
         restart.Click+=(_,_)=>{RestartForUpdate=true;actions.Children.OfType<Button>().Last().RaiseEvent(new RoutedEventArgs(Button.ClickEvent));if(DialogResult!=true)RestartForUpdate=false;};
     }
-    private sealed class RuleSetChoice(RuleSetInfo info, bool selected) {
+    private sealed class RuleSetChoice(RuleSetInfo info, bool selected) : ISelectableRow {
+        private bool isSelected = selected;
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public RuleSetInfo Info => info;
         public string Name => info.Names.GetValueOrDefault(L.Language, info.Name);
         public string Source => L.T(info.IsCustom ? "RuleSetImported" : "RuleSetPackaged");
         public string File => info.File;
-        public bool Selected { get; set; } = selected;
+        public bool Selected {
+            get => isSelected;
+            set { if (isSelected == value) return; isSelected = value; PropertyChanged?.Invoke(this, new(nameof(Selected))); }
+        }
     }
 }
 

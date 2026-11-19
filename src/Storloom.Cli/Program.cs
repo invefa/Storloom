@@ -10,7 +10,7 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
 try {
     if (args.Length == 0 || args[0] is "help" or "--help") {
         Console.WriteLine("""
-            Storloom — storage analysis, verified transfers, rules, and local chat archives.
+            Storloom - storage analysis, verified transfers, rules, and local chat archives.
             analyze --root FOLDER [--out REPORT.json]
             rules [--catalog FILE] [--language en|zh-CN]
             scan [--catalog FILE] [--settings FILE] [--rules ID,ID] [--out PLAN.json]

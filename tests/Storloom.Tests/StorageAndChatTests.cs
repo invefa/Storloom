@@ -327,6 +327,18 @@ public sealed class StorageAndChatTests : IDisposable {
         L.SetLanguage("zh-CN"); Assert.Equal("空间概览", L.T("Overview"));
     }
 
+    [Theory]
+    [InlineData("en")]
+    [InlineData("zh-CN")]
+    public void InterfaceResourcesAvoidDecorativeUnicodeCharacters(string locale) {
+        using var stream = typeof(L).Assembly.GetManifestResourceStream(
+            $"Storloom.Core.Localization.Locales.{locale}.json")!;
+        var strings = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(stream)!;
+        foreach (var pair in strings)
+            Assert.False(pair.Value.IndexOfAny("\u2192\u2190\u2026\u2014\u00b7".ToCharArray()) >= 0,
+                "Unexpected decorative character in " + pair.Key);
+    }
+
     [Fact]
     public void CancelledExportRetainsResumeProgressButRemovesDecryptedDatabases() {
         string source = Dir("account");

@@ -17,6 +17,29 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Theory][InlineData("en",AppTheme.Light)][InlineData("zh-CN",AppTheme.Dark)]
+    public void RuleSetsShareTheThreeStateSelectionHeader(string locale,AppTheme theme)=>OnUi(()=>{
+        string fixture=Fixture();L.SetLanguage(locale);Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});
+        var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.PreferencesWindow")!;
+        var window=(Window)Activator.CreateInstance(type,[new AppPreferences{Theme=theme,Language=locale},Path.Combine(AppContext.BaseDirectory,"rules"),fixture,new CleanerSettings(),true])!;
+        try{window.ShowInTaskbar=false;window.Show();Pump();var table=Descendants(window).OfType<DataGrid>().Single(t=>t.Name=="rule_sets");
+            var header=Descendants(window).OfType<CheckBox>().Single(c=>c.Name=="select_all_rule_sets");
+            header.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));Pump();Assert.True(header.IsChecked);Assert.All(table.Items.Cast<ISelectableRow>(),r=>Assert.True(r.Selected));
+            header.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));Pump();Assert.False(header.IsChecked);Assert.All(table.Items.Cast<ISelectableRow>(),r=>Assert.False(r.Selected));
+            ((ISelectableRow)table.Items[0]).Selected=true;Pump();Assert.Null(header.IsChecked);Capture(window,"rule-sets-partial-"+locale);
+            header.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));Pump();Assert.True(header.IsChecked);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Theory][InlineData("en")][InlineData("zh-CN")]
+    public void ManualUpdateCheckRespectsPersistedRateLimitCooldown(string locale)=>OnUi(()=>{
+        string fixture=Fixture();JsonFiles.Write(Path.Combine(fixture,"preferences.json"),new AppPreferences{Language=locale,ReduceMotion=true});
+        var until=DateTimeOffset.UtcNow.AddMinutes(20);JsonFiles.Write(Path.Combine(fixture,"updates/schedule.json"),new{NextCheck=until,LimitedUntil=until});
+        var window=new ShellWindow(dataDirectory:fixture,automaticDiscovery:false){ShowInTaskbar=false};
+        try{window.Show();Pump();string? message=null;var method=typeof(ShellWindow).GetMethod("CheckForUpdates",BindingFlags.Instance|BindingFlags.NonPublic)!;
+            var check=(Task)method.Invoke(window,[true,new Progress<string>(value=>message=value)])!;Wait(AsResult(check));Pump();
+            Assert.Equal(L.T("UpdateRateLimited",until.ToLocalTime().ToString("yyyy-MM-dd HH:mm")),message);Assert.False((bool)typeof(ShellWindow).GetField("updateChecking",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!);
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
     [Theory][InlineData("zh-CN",AppTheme.Light)][InlineData("zh-CN",AppTheme.Dark)][InlineData("en",AppTheme.Light)][InlineData("en",AppTheme.Dark)]
     public void HelpSearchAndFooterStayAligned(string locale,AppTheme theme)=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=theme,ReduceMotion=true});L.SetLanguage(locale);string fixture=Fixture();

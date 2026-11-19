@@ -75,7 +75,7 @@ public sealed partial class ShellWindow {
                     var result=await Task.Run(()=>engine.Apply(snapshot,[id],journal,paths,progress,token));
                     processed+=result.Deleted;issues+=result.Skipped;
                     string detail=L.T("CleanupDeleteCounts",result.Deleted,result.Skipped,result.Pending)+"\n"+L.T(result.LogicalBytes==0&&result.Deleted>0?"CleanupEmptyFiles":result.Deleted==0?"CleanupNothingDeleted":"CleanupLogicalSize")+"\n"+
-                        string.Join("\n",result.Failures.Select(f=>f.Path+"\n"+L.T("CleanupReason"+f.Code)+" · "+f.Reason+" (0x"+f.HResult.ToString("X8")+")"));
+                        string.Join("\n",result.Failures.Select(f=>f.Path+"\n"+L.T("CleanupReason"+f.Code)+" / "+f.Reason+" (0x"+f.HResult.ToString("X8")+")"));
                     Record(id,results[id] with { Freed=result.LogicalBytes,State=L.T(result.Cancelled?"TaskStopped":result.Skipped>0?"Incomplete":"Complete"),Detail=detail,Journal=result.Journal });
                     token.ThrowIfCancellationRequested();current=null;
                 }
@@ -101,7 +101,7 @@ public sealed partial class ShellWindow {
         try {
             using var json=System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));var root=json.RootElement;
             var detail=new List<string>();foreach(string stage in new[]{"before","after"})if(root.TryGetProperty(stage,out var measurement)&&measurement.ValueKind==System.Text.Json.JsonValueKind.Object&&measurement.TryGetProperty("issues",out var entries))
-                foreach(var issue in entries.EnumerateArray())detail.Add(stage+": "+issue.GetProperty("path").GetString()+" · "+issue.GetProperty("reason").GetString());
+                foreach(var issue in entries.EnumerateArray())detail.Add(stage+": "+issue.GetProperty("path").GetString()+" / "+issue.GetProperty("reason").GetString());
             if(root.TryGetProperty("output",out var output)){string text=output.GetString()??"";detail.Add(text.Length>16000?text[..16000]+"\n"+L.T("CleanupOutputTruncated"):text);}
             return string.Join("\n",detail);
         } catch(Exception ex) when(ex is IOException or System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException) { return L.T("CleanupJournalAt",path); }

@@ -14,6 +14,40 @@ public sealed class UpdateTests : IDisposable {
     private readonly string root=Path.Combine(AppContext.BaseDirectory,"fixtures","update-"+Guid.NewGuid().ToString("N"));
     public UpdateTests()=>Directory.CreateDirectory(root);
     public void Dispose()=>Directory.Delete(root,true);
+    private static string FeedJson()=>JsonSerializer.Serialize(new UpdateFeed(1,"9.0.0","win-x64",
+        "Storloom-9.0.0-win-x64.zip",Repository+"/releases/download/v9.0.0/Storloom-9.0.0-win-x64.zip",new string('a',64),123),JsonFiles.Options);
+    [Fact]public async Task PublishedFeedDoesNotConsumeTheApiQuota(){
+        var requests=new List<string>();using var client=new HttpClient(new Handler(r=>{
+            requests.Add(r.RequestUri!.AbsoluteUri);return new(HttpStatusCode.OK){Content=new StringContent("\uFEFF"+FeedJson())};}));
+        var release=await new ReleaseUpdater(client,Repository).CheckAsync("1.0.0");Assert.Equal("9.0.0",release!.Version);
+        Assert.Equal(Repository+"/releases/latest/download/update.json",Assert.Single(requests));
+    }
+    [Fact]public async Task LegacyApiIsUsedOnlyWhenTheFeedAssetDoesNotExist(){
+        int requests=0;using var client=new HttpClient(new Handler(r=>{
+            requests++;return r.RequestUri!.Host=="github.com"?new(HttpStatusCode.NotFound):new(HttpStatusCode.OK){Content=new StringContent(Metadata())};}));
+        Assert.Equal("9.0.0",(await new ReleaseUpdater(client,Repository).CheckAsync("1.0.0"))!.Version);Assert.Equal(2,requests);
+    }
+    [Theory][InlineData(403)][InlineData(429)]
+    public async Task LimitsExposeTheServersResetTime(int status){
+        var reset=DateTimeOffset.UtcNow.AddMinutes(35);using var client=new HttpClient(new Handler(_=>{
+            var response=new HttpResponseMessage((HttpStatusCode)status);response.Headers.Add("X-RateLimit-Remaining","0");response.Headers.Add("X-RateLimit-Reset",reset.ToUnixTimeSeconds().ToString());return response;}));
+        var error=await Assert.ThrowsAsync<UpdateRateLimitException>(()=>new ReleaseUpdater(client,Repository).CheckAsync("1.0.0"));Assert.InRange((error.RetryAt-reset).TotalSeconds,4,6);
+    }
+    [Fact]public async Task RetryAfterOverridesTheApiResetHeader(){
+        using var client=new HttpClient(new Handler(_=>{var response=new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.RetryAfter=new(TimeSpan.FromMinutes(2));response.Headers.Add("X-RateLimit-Reset",DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds().ToString());return response;}));
+        var error=await Assert.ThrowsAsync<UpdateRateLimitException>(()=>new ReleaseUpdater(client,Repository).CheckAsync("1.0.0"));Assert.InRange((error.RetryAt-DateTimeOffset.UtcNow).TotalSeconds,118,121);
+    }
+    [Fact]public async Task NonRateLimitForbiddenErrorsAreNotMisclassified(){
+        using var client=new HttpClient(new Handler(_=>new(HttpStatusCode.Forbidden)));
+        var error=await Assert.ThrowsAsync<HttpRequestException>(()=>new ReleaseUpdater(client,Repository).CheckAsync("1.0.0"));Assert.Equal(HttpStatusCode.Forbidden,error.StatusCode);
+    }
+    [Fact]public void FeedCannotChangeDownloadHostPlatformOrProtocol(){
+        Assert.Throws<InvalidDataException>(()=>ReleaseUpdater.ParseFeed(FeedJson().Replace("\"protocol\": 1","\"protocol\": 2"),"1.0.0",Repository));
+        Assert.Throws<InvalidDataException>(()=>ReleaseUpdater.ParseFeed(FeedJson().Replace("win-x64","linux-x64"),"1.0.0",Repository));
+        Assert.Throws<InvalidDataException>(()=>ReleaseUpdater.ParseFeed(FeedJson().Replace("https://github.com/","https://example.invalid/"),"1.0.0",Repository));
+        Assert.Null(ReleaseUpdater.ParseFeed(FeedJson(),"9.0.0",Repository));
+    }
     private static string Metadata(string version="9.0.0",bool preview=false,string? url=null,string? digest=null)=>JsonSerializer.Serialize(new {
         draft=false,prerelease=preview,tag_name="v"+version,assets=new[]{new{name=$"Storloom-{version}-win-x64.zip",size=123,
         browser_download_url=url??$"{Repository}/releases/download/v{version}/Storloom-{version}-win-x64.zip",digest=digest??"sha256:"+new string('a',64)}}});

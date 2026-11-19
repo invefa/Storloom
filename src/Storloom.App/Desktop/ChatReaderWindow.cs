@@ -50,7 +50,7 @@ public sealed class ChatReaderWindow : ThemeWindow {
                     try{if(packed)store=await Task.Run(()=>ArchiveStore.Open(directory,secret.AsSpan()));else vault=await Task.Run(()=>ChatVault.Open(directory,secret.AsSpan()));}finally{secret=null;}
                     if(closed){vault?.Dispose();store?.Dispose();return;}
                     bool complete=store!=null||(await Task.Run(()=>vault!.Status)).Complete;
-                    Title=L.T("ChatArchive")+" — "+L.T(complete?"VaultReaderProtected":"VaultReaderPartial");Caption.Title=Title;
+                    Title=L.T("ChatArchive")+" - "+L.T(complete?"VaultReaderProtected":"VaultReaderPartial");Caption.Title=Title;
                 }
                 else if(packed)store=await Task.Run(()=>ArchiveStore.Open(directory));
                 if(closed){store?.Dispose();return;}

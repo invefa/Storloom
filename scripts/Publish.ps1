@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$')]
-    [string] $Version = '2.16.0',
+    [string] $Version = '2.16.1',
     [string] $DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -142,5 +142,9 @@ $zip = Join-Path $run "$name.zip"
 Compress-Archive -LiteralPath $package -DestinationPath $zip -CompressionLevel Optimal
 $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $name.zip" | Set-Content -LiteralPath ($zip + '.sha256') -Encoding ascii
+@{ protocol = 1; version = $Version; runtime = 'win-x64'; asset = "$name.zip";
+    url = "$publicRepository/releases/download/v$Version/$name.zip"; sha256 = $hash;
+    size = (Get-Item -LiteralPath $zip).Length } | ConvertTo-Json |
+    Set-Content -LiteralPath (Join-Path $run 'update.json') -Encoding utf8
 Write-Output $zip
 Write-Output "SHA256 $hash"

@@ -29,7 +29,7 @@ public sealed partial class ShellWindow {
         var history=operationView;activeChat=null;selectedArchiveId=keyAccountId=null;pendingArchiveRequest=null;LoadArchiveProjects();chatStep=-1;L.SetLanguage(preferences.Language);Theme.Apply(preferences);ReloadEngine();BuildUi();operationView.RestoreHistory(history);Navigate("chats");
     }
     private static bool NeedsArchiveSecret(string directory)=>ArchiveStore.Exists(directory)?ArchiveStore.NeedsPassword(directory):ChatVault.Exists(directory);
-    private string? AskArchiveSecret(string directory){if(!NeedsArchiveSecret(directory))return "";var unlock=new VaultPasswordWindow(false,false){Owner=this,Title=L.T("VaultUnlock")+" · "+Path.GetFileName(directory)};unlock.Caption.Title=unlock.Title;if(unlock.ShowDialog()!=true)return null;string? secret=unlock.Password;unlock.ClearSecret();return secret;}
+    private string? AskArchiveSecret(string directory){if(!NeedsArchiveSecret(directory))return "";var unlock=new VaultPasswordWindow(false,false){Owner=this,Title=L.T("VaultUnlock")+" / "+Path.GetFileName(directory)};unlock.Caption.Title=unlock.Title;if(unlock.ShowDialog()!=true)return null;string? secret=unlock.Password;unlock.ClearSecret();return secret;}
     private async Task CompareArchive(string? first=null,string? second=null){
         if(operation!=null)return;
         string? Pick(string title){var picker=new Microsoft.Win32.OpenFileDialog{Title=L.T(title),Filter="Storloom archive|archive.metadata;archive.storloom.json;archive.json;index.html;messages.html;vault.storloom.json"};return PickerHistory.Show(picker,this,"archive-comparison-input")==true?ArchiveMetadata.Inspect(picker.FileName).Directory:null;}
