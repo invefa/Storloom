@@ -80,7 +80,11 @@ public sealed record CleanupPlan {
 }
 
 public sealed record ApplyResult(int Deleted, int Skipped, long LogicalBytes,
-    long FreeSpaceChange, string Journal, bool Cancelled);
+    long FreeSpaceChange, string Journal, bool Cancelled) {
+    public List<CleanupFailure> Failures { get; init; } = [];
+    public int Pending { get; init; }
+}
+public sealed record CleanupFailure(string Path, string Code, string Reason, int HResult);
 
 public static class JsonFiles {
     public static readonly JsonSerializerOptions Options = new() {

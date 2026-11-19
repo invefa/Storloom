@@ -115,3 +115,13 @@ Each file/folder picker remembers its directory by purpose. Reading copies remem
 ## Archive library
 
 Chat archives > Archive library offers optional import of completed reading copies, direct indexed reading and search, incremental pack backup, password changes, verification and compatible export. See [Archive library](archive-library.md) for recovery and protection limits.
+
+## Cleanup outcomes, 0 B, and journals
+
+Select a result row for deleted/skipped/pending counts and concrete file errors. Buttons open its journal, the batch report, or the log folder. The cleanup page's Last cleanup results button reopens the latest report. Journals live in the local data directory's `journals` folder; Help also offers a direct shortcut.
+
+0 B can be valid: empty files have no logical bytes, copying while retaining originals frees no source space, and a native tool may find nothing reclaimable. Incomplete measurements and unexecuted items are unknown rather than zero. The measured total covers only known amounts. Logical bytes differ from available disk space changes.
+
+Skip details distinguish running applications, locked files, access errors, missing files, changes after scanning, and safety/I/O failures, preserving original error codes. Native journals include output and before/after measurement issues. Cancellation or failure does not undo completed work; later unexecuted items remain explicit. Scan again before retrying, without bypassing safety checks.
+
+Help supports content search and topic navigation, with links to detailed manuals. Search for “0 B”, “journal”, or “locked”. Review local paths and tool output for privacy before sharing logs.

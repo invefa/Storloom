@@ -36,8 +36,10 @@ public static class NativeFile {
     private static extern bool SetFileInformationByHandle(SafeFileHandle handle,
         int informationClass, ref byte delete, uint size);
 
-    private static IOException Failure(string path) =>
-        new($"{path}: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
+    private static IOException Failure(string path) {
+        int error=Marshal.GetLastWin32Error();
+        return new($"{path}: {new Win32Exception(error).Message}",unchecked((int)0x80070000)|(error&0xffff));
+    }
 
     internal static string ExtendedPath(string path){if(!OperatingSystem.IsWindows()||path.Length<240||path.StartsWith(@"\\?\",StringComparison.Ordinal))return path;path=Path.GetFullPath(path);return path.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+path[2..]:@"\\?\"+path;}
     private static SafeFileHandle Open(string path, bool delete, bool directory = false) {
@@ -46,7 +48,7 @@ public static class NativeFile {
             delete ? FileShare.Read : directory ? FileShare.ReadWrite :
                 FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, OpenExisting,
             OpenReparsePoint | BackupSemantics, IntPtr.Zero);
-        if (handle.IsInvalid) { handle.Dispose(); throw Failure(path); }
+        if (handle.IsInvalid) { var error=Failure(path);handle.Dispose();throw error; }
         return handle;
     }
 

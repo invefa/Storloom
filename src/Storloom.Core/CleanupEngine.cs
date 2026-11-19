@@ -86,11 +86,12 @@ public sealed class CleanupEngine {
                                             if (rule.Recursive) directories.Push(item);
                                             continue;
                                         }
-                                        if ((attrs & (FileAttributes.System | FileAttributes.ReadOnly)) != 0)
-                                            continue;
                                         FileStamp stamp = NativeFile.ReadStamp(item);
-                                        if (!matcher.Matches(Path.GetRelativePath(root, item), stamp,
-                                            plan.CreatedAt) || !seen.Add(item)) continue;
+                                        if (!matcher.Matches(Path.GetRelativePath(root, item), stamp, plan.CreatedAt)) continue;
+                                        if ((attrs & (FileAttributes.System | FileAttributes.ReadOnly)) != 0) {
+                                            AddIssue(plan, rule.Id, item, "Read-only or system file skipped; attributes were not changed."); continue;
+                                        }
+                                        if (!seen.Add(item)) continue;
                                         if (plan.Files.Count >= Settings.MaximumCandidates)
                                             throw new InvalidOperationException("Candidate limit reached; narrow the rules.");
                                         plan.Files.Add(new(rule.Id, root, item, stamp));
@@ -162,6 +163,7 @@ public sealed class CleanupEngine {
                 stream.Flush(true);
             }
             int deleted = 0, skipped = 0;
+            var failures = new List<CleanupFailure>();
             long bytes = 0;
             long Free() => Settings.AllowedDrives.Sum(d => new DriveInfo(
                 d.EndsWith(':') ? d + "\\" : d).AvailableFreeSpace);
@@ -178,7 +180,7 @@ public sealed class CleanupEngine {
                     processCache[rule.Id] = state;
                 }
                 Log(new { status = "Attempt", file.RuleId, file.Path, file.Stamp.Bytes });
-                string status, message = "";
+                string status, message = "", code = ""; int error = 0;
                 try {
                     if (state.Names.Length > 0) throw new IOException(
                         "Application is running: " + string.Join(", ", state.Names));
@@ -192,13 +194,21 @@ public sealed class CleanupEngine {
                     skipped++;
                     status = "Skipped";
                     message = ex.Message;
+                    error = ex.HResult;
+                    code = state.Names.Length > 0 ? "application-running" :
+                        ex is FileNotFoundException or DirectoryNotFoundException || (error & 0xffff) is 2 or 3 ? "missing" :
+                        ex is UnauthorizedAccessException || (error & 0xffff) == 5 ? "access-denied" :
+                        (error & 0xffff) is 32 or 33 ? "locked" :
+                        ex.Message == "File changed since preview." ? "changed" : "safety-or-io";
+                    failures.Add(new(file.Path, code, message, error));
                 }
-                Log(new { status, file.RuleId, file.Path, file.Stamp.Bytes, message });
+                Log(new { status, file.RuleId, file.Path, file.Stamp.Bytes, message, code, error });
                 if ((deleted + skipped) % 50 == 0)
                     progress?.Report(new(file.RuleId, deleted + skipped, bytes));
             }
             var result = new ApplyResult(deleted, skipped, bytes, Free() - freeBefore,
-                journalPath, cancellation.IsCancellationRequested);
+                journalPath, cancellation.IsCancellationRequested) { Failures = failures, Pending = files.Count - deleted - skipped };
+            progress?.Report(new("cleanup-complete", deleted + skipped, bytes, TotalFiles: files.Count));
             Log(new { status = "Completed", result });
             return result;
         } finally { mutex.ReleaseMutex(); }

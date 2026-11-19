@@ -296,7 +296,7 @@ public sealed partial class ShellWindow : ThemeWindow {
         operationView.RestoreHistory(history);operationView.AddLog(L.T(preferences.DebugLogging?"DebugEnabled":"DebugDisabled"));
         if (preferences.CloseToTray) EnsureTray(); tray?.Refresh();
     }
-    private void ShowHelp(int? topic = null, string? document = null) => new HelpWindow(topic ?? (currentPage == "chats" ? 2 : currentPage == "overview" ? 5 : 0), document) { Owner = this }.ShowDialog();
+    private void ShowHelp(int? topic = null, string? document = null) => new HelpWindow(topic ?? (currentPage == "chats" ? 2 : currentPage == "overview" ? 5 : 0), document, dataRoot) { Owner = this }.ShowDialog();
     private void ImportRules() {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "JSON|*.json" }; if (PickerHistory.Show(dialog,this,"rule-import") != true) return;
         var catalog = JsonFiles.Read<RuleCatalog>(dialog.FileName); _ = new CleanupEngine(catalog, engine.Settings);

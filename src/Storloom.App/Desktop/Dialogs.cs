@@ -130,45 +130,6 @@ internal sealed class ReviewWindow : ThemeWindow {
     }
 }
 
-internal sealed record CleanupItemResult(string Name, string Action, long? Before, long? After, long? Freed, string State);
-internal sealed class CleanupResultsWindow : ThemeWindow {
-    public CleanupResultsWindow(List<CleanupItemResult> results) : base(L.T("CleanupResults"), 1080, 600) {
-        var grid = View.Grid(View.Auto, View.Fill, View.Auto, View.Auto); grid.Margin = new Thickness(24); Body.Children.Add(grid);
-        View.Add(grid, View.Text(L.T("FreedTotal", View.Size(results.Sum(r => r.Freed ?? 0))), 23), 0);
-        var list = View.Table(("Rule", "Name", 0), ("Action", "Action", 120), ("BeforeSize", "Before", 110), ("AfterSize", "After", 110), ("FreedSize", "Freed", 110), ("State", "State", 120));
-        list.ItemsSource = results.Select(r => new { r.Name, r.Action, Before = r.Before is long before ? View.Size(before) : "-", After = r.After is long after ? View.Size(after) : "-",
-            Freed = r.Freed is long freed ? View.Size(freed) : L.T("SizeNotScanned"), BeforeBytes = r.Before, AfterBytes = r.After, FreedBytes = r.Freed, r.State }).ToArray(); View.Add(grid, list, 1);
-        View.Add(grid, View.Text(L.T("FreedNotice"), color: "Muted"), 2); var close = View.Button("Close", Close); close.HorizontalAlignment = HorizontalAlignment.Right; View.Add(grid, close, 3);
-    }
-}
-
-internal sealed class HelpWindow : ThemeWindow {
-    public HelpWindow(int topic = 0, string? document = null) : base(L.T("QuickStart"), 920, 700) {
-        var grid = View.Grid(View.Fill, View.Auto); grid.Margin = new Thickness(22); Body.Children.Add(grid);
-        var tabs = new TabControl();
-        foreach (var (title, body) in new[] { ("HelpCleanupTitle", "HelpCleanupBody"), ("HelpArchiveTitle", "HelpArchiveBody"), ("HelpChatTitle", "HelpChatBody"),
-            ("HelpCommandsTitle", "HelpCommandsBody"), ("HelpTroubleshootingTitle", "HelpTroubleshootingBody"), ("NavOverview", "HelpStorageBody") })
-            tabs.Items.Add(new TabItem { Header = L.T(title), Content = Document(L.T(title), L.T(body)) });
-        if (document != null) { tabs.Items.Add(new TabItem { Header = L.T("OpenAiGuide"), Content = Document(L.T("OpenAiGuide"), document) }); topic = tabs.Items.Count - 1; }
-        tabs.SelectedIndex = Math.Clamp(topic, 0, tabs.Items.Count - 1); View.Add(grid, tabs, 0);
-        var close = View.Button("Close", Close); close.Margin = new Thickness(0, 14, 0, 0); close.HorizontalAlignment = HorizontalAlignment.Right; View.Add(grid, close, 1);
-    }
-    private static FlowDocumentScrollViewer Document(string title, string text) {
-        var document = new FlowDocument { FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"), FontSize = 14, PagePadding = new Thickness(24), LineHeight = 24 };
-        document.SetResourceReference(FlowDocument.ForegroundProperty, "Ink"); document.SetResourceReference(FlowDocument.BackgroundProperty, "Surface");
-        document.Blocks.Add(new Paragraph(new Run(title)) { FontSize = 25, Margin = new Thickness(0, 0, 0, 22) });
-        bool code = false;
-        foreach (string line in text.Replace("\r", "").Split('\n')) {
-            if (line.StartsWith("```")) { code = !code; continue; }
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            bool heading = line.StartsWith('#') || System.Text.RegularExpressions.Regex.IsMatch(line, @"^\d+\. ");
-            var paragraph = new Paragraph(new Run(line.TrimStart('#').Trim())) { Margin = new Thickness(0, heading ? 12 : 0, 0, 10), FontWeight = heading ? FontWeights.SemiBold : FontWeights.Normal };
-            if (code) paragraph.FontFamily = new FontFamily("Consolas"); document.Blocks.Add(paragraph);
-        }
-        return new FlowDocumentScrollViewer { Document = document, IsToolBarVisible = false, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    }
-}
-
 internal sealed class AboutWindow : ThemeWindow {
     public AboutWindow() : base(L.T("About"), 530, 350) {
         MinWidth = 490; MinHeight = 330; ResizeMode = ResizeMode.NoResize; Caption.ShowMaximize = false; Caption.ShowMinimize = false;

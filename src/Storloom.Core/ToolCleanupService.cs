@@ -112,7 +112,7 @@ public static class ToolCleanupService {
             var result = new ToolCommandResult(rule.Id, process.ExitCode, cancelled, timedOut, journal,
                 before.Complete ? before.Bytes : null, after?.Complete == true ? after.Bytes : null);
             JsonFiles.Write(journal, new { state = cancelled ? "Cancelled" : timedOut ? "TimedOut" :
-                process.ExitCode == 0 ? "Completed" : "Failed", plan, result, output = output.ToString() });
+                process.ExitCode == 0 ? "Completed" : "Failed", plan, result, before, after, output = output.ToString() });
             return result;
         } catch (Exception ex) {
             JsonFiles.Write(journal, new { state = "Failed", plan, error = ex.Message }); throw;

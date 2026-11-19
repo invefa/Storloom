@@ -53,6 +53,12 @@ public sealed partial class ShellWindow {
         var footer = new DockPanel { Margin = new Thickness(0, 14, 0, 0) };
         reviewSelection = AsyncButton("ReviewSelection", ExecuteRules, true); reviewSelection.Name = "review_cleanup"; reviewSelection.IsEnabled = false;
         DockPanel.SetDock(reviewSelection, Dock.Right); footer.Children.Add(reviewSelection); selectionSummary = View.Text(""); footer.Children.Add(selectionSummary); View.Add(layout, footer, 3);
+        var lastResult=Button("CleanupLastReport",()=>{
+            try { string directory=Path.Combine(dataRoot,"journals");string? path=Directory.Exists(directory)?Directory.EnumerateFiles(directory,"cleanup-summary-*.json").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault():null;
+                if(path==null){Notice.Show(this,L.T("CleanupResults"),L.T("CleanupNoReport"));return;}
+                new CleanupResultsWindow(JsonFiles.Read<List<CleanupItemResult>>(path),path){Owner=this}.ShowDialog();
+            }catch(Exception ex){Error(ex);}
+        });lastResult.Name="cleanup_last_report";DockPanel.SetDock(lastResult,Dock.Right);footer.Children.Insert(1,lastResult);
         ruleList.SelectionChanged += (_, _) => RenderRuleDetails(); filter.TextChanged += (_, _) => ShowCandidates();
         treatment.SelectionChanged += (_, _) => {
             if (rendering || SelectedRule() is not CleanupRule rule || rule.Action == CleanupAction.Command) return;

@@ -17,6 +17,45 @@ using Xunit;
 namespace Storloom.App.Tests;
 
 public sealed class FormTests {
+    [Fact]public void PartialCleanupShowsReasonsAndCanReopenItsPersistedReport()=>OnUi(()=>{
+        string fixture=Fixture(),cache=Path.Combine(fixture,"cache"),data=Path.Combine(fixture,"data");Directory.CreateDirectory(cache);
+        string empty=Path.Combine(cache,"empty.tmp"),locked=Path.Combine(cache,"locked.tmp");File.WriteAllText(empty,"");File.WriteAllText(locked,"keep");
+        JsonFiles.Write(Path.Combine(data,"preferences.json"),new AppPreferences{Language="en",Theme=AppTheme.Light,EnabledRuleSets=[],ReduceMotion=true});
+        JsonFiles.Write(Path.Combine(data,"rules.json"),new RuleCatalog{Rules=[new CleanupRule{Id="fixture",Name="Fixture partial",Roots=[cache],MinimumAgeHours=0}]});
+        var window=new ShellWindow(automaticDiscovery:false,dataDirectory:data){ShowInTaskbar=false};
+        try{window.Show();Pump();var type=typeof(ShellWindow);Task Invoke(string method)=>(Task)type.GetMethod(method,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(window,null)!;
+            var rules=Descendants(window).OfType<DataGrid>().Single(g=>g.Name=="cleanup_rules");rules.Items[0].GetType().GetProperty("Selected")!.SetValue(rules.Items[0],true);Wait(AsResult(Invoke("ScanRules")));
+            using var handle=new FileStream(locked,FileMode.Open,FileAccess.Read,FileShare.None);
+            int reports=0;var dismiss=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(25)};
+            dismiss.Tick+=(_,_)=>{foreach(var dialog in Application.Current.Windows.Cast<Window>().Where(w=>w!=window).ToArray()){
+                if(dialog.GetType().Name=="ReviewWindow")dialog.DialogResult=true;
+                else if(dialog.GetType().Name=="CleanupResultsWindow") {var detail=Descendants(dialog).OfType<TextBox>().Single(t=>t.Name=="cleanup_result_details");Assert.Contains("locked.tmp",detail.Text);Assert.Contains("in use",detail.Text);Assert.Contains("Deleted 1; skipped 1; pending 0",detail.Text);reports++;Capture(dialog,"cleanup-partial-reasons");dialog.Close();}
+            }};dismiss.Start();
+            try{Wait(AsResult(Invoke("ExecuteRules")));Assert.Equal(1,reports);Assert.True((bool)type.GetField("operationIncomplete",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!);
+                Descendants(window).OfType<Button>().Single(b=>b.Name=="cleanup_last_report").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Assert.Equal(2,reports);
+                Assert.Contains("cleanup-summary-",Descendants(window).OfType<OperationPanel>().Single().Log.Text);
+            }finally{dismiss.Stop();}
+            Assert.False(File.Exists(empty));Assert.True(File.Exists(locked));Assert.Single(Directory.GetFiles(Path.Combine(data,"journals"),"cleanup-summary-*.json"));
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]public void HelpSupportsSearchingAndKeepsDiagnosticActionsVisible()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Light,ReduceMotion=true});L.SetLanguage("zh-CN");
+        string fixture=Fixture();var type=typeof(ShellWindow).Assembly.GetType("Storloom.App.HelpWindow")!;
+        var window=(Window)Activator.CreateInstance(type,[0,null,fixture])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();var nodes=Descendants(window).ToArray();var search=nodes.OfType<TextBox>().Single(t=>t.Name=="help_search");var topics=nodes.OfType<ListBox>().Single(t=>t.Name=="help_topics");
+            Assert.Equal(6,topics.Items.Count);search.Text="0 B";Pump();Assert.NotEmpty(topics.Items.Cast<object>());Assert.True(topics.Items.Count<6);
+            search.Text="no-such-help-unique";Pump();Assert.Empty(topics.Items.Cast<object>());Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("HelpNoResults"));
+            search.Clear();Pump();Assert.Equal(6,topics.Items.Count);Assert.Contains(Descendants(window).OfType<Button>(),b=>Equals(b.Content,L.T("CleanupOpenLogFolder"))&&b.IsEnabled);Capture(window,"help-searchable-light");
+        }finally{window.Close();Directory.Delete(fixture,true);}
+    });
+    [Fact]public void CleanupUnknownSizesAreNotPresentedAsZeroAndReasonsAreSelectable()=>OnUi(()=>{
+        Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=true});L.SetLanguage("zh-CN");var assembly=typeof(ShellWindow).Assembly;
+        var itemType=assembly.GetType("Storloom.App.CleanupItemResult")!;var items=(System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(itemType))!;
+        object row=Activator.CreateInstance(itemType,["Fixture tool","Command",null,null,null,L.T("Incomplete")])!;itemType.GetProperty("Detail")!.SetValue(row,"Fixture access denied");items.Add(row);
+        var window=(Window)Activator.CreateInstance(assembly.GetType("Storloom.App.CleanupResultsWindow")!,[items,null])!;window.ShowInTaskbar=false;
+        try{window.Show();Pump();Assert.Contains(Descendants(window).OfType<TextBlock>(),t=>t.Text==L.T("CleanupTotalUnknown"));var detail=Descendants(window).OfType<TextBox>().Single(t=>t.Name=="cleanup_result_details");Assert.True(detail.IsReadOnly);Assert.Contains("Fixture access denied",detail.Text);Capture(window,"cleanup-unknown-details");}
+        finally{window.Close();}
+    });
     [Fact]public void StatusBannerAnimatesOnlyWhileBusyAndVisible()=>OnUi(()=>{
         Theme.Apply(new AppPreferences{Theme=AppTheme.Dark,ReduceMotion=false});
         var type=typeof(Storloom.Wpf.StatusBanner);var tone=typeof(Storloom.Wpf.StatusTone);
@@ -136,7 +175,7 @@ public sealed class FormTests {
                 var check=nodes.OfType<CheckBox>().Single(c=>c.Name==item.Item1);check.ApplyTemplate();
                 Assert.Equal(item.Item2,((FrameworkElement)check.Template.FindName("mark",check)).Visibility);
                 Assert.Equal(item.Item3,((FrameworkElement)check.Template.FindName("partial",check)).Visibility);
-                if(check.IsChecked==null){var fill=(System.Windows.Shapes.Rectangle)check.Template.FindName("partial",check);Assert.Equal(((SolidColorBrush)Theme.Brush("OnAccent")).Color,((SolidColorBrush)fill.Fill).Color);Assert.Equal(8,fill.ActualWidth);Assert.Equal(8,fill.ActualHeight);Assert.Equal(2,fill.RadiusX);Assert.Equal(2,fill.RadiusY);}
+                if(check.IsChecked==null){var fill=(System.Windows.Shapes.Rectangle)check.Template.FindName("partial",check);Assert.Equal(((SolidColorBrush)Theme.Brush("OnAccent")).Color,((SolidColorBrush)fill.Fill).Color);Assert.Equal(6,fill.Width);Assert.Equal(6,fill.Height);double pixel=1/VisualTreeHelper.GetDpi(fill).DpiScaleX;Assert.InRange(fill.ActualWidth,6-pixel,6+pixel);Assert.InRange(fill.ActualHeight,6-pixel,6+pixel);Assert.Equal(1.5,fill.RadiusX);Assert.Equal(1.5,fill.RadiusY);}
             }
             var table=nodes.OfType<DataGrid>().Single(t=>t.Name=="gallery_table");var header=(CheckBox)table.Columns[0].Header;
             Assert.Null(header.IsChecked);Assert.Equal(Visibility.Visible,((FrameworkElement)header.Template.FindName("partial",header)).Visibility);

@@ -128,6 +128,34 @@ public sealed class CleanupTests : IDisposable {
     }
 
     [Fact]
+    public void ZeroByteDeletionIsDistinctFromSkippedFilesAndRetainsReasons() {
+        string empty=Old("empty.tmp",""),missing=Old("missing.tmp"),changed=Old("changed.tmp"),locked=Old("locked.tmp");
+        var engine=Engine();var plan=engine.Scan();File.Delete(missing);File.AppendAllText(changed,"new");
+        using var handle=new FileStream(locked,FileMode.Open,FileAccess.Read,FileShare.None);
+        var result=Apply(engine,plan);
+        Assert.Equal(1,result.Deleted);Assert.Equal(0,result.LogicalBytes);Assert.Equal(3,result.Skipped);Assert.Equal(0,result.Pending);
+        Assert.False(File.Exists(empty));Assert.True(File.Exists(changed));Assert.True(File.Exists(locked));
+        Assert.Contains(result.Failures,f=>f.Path==missing&&f.Code=="missing");Assert.Contains(result.Failures,f=>f.Path==changed&&f.Code=="changed");Assert.Contains(result.Failures,f=>f.Path==locked&&f.Code=="locked");
+        Assert.All(result.Failures,f=>Assert.False(string.IsNullOrWhiteSpace(f.Reason)));
+        string journal=File.ReadAllText(result.Journal);Assert.Contains("\"code\":\"locked\"",journal);Assert.Contains("\"Pending\":0",journal);
+    }
+    [Fact]
+    public void CancellationAfterPartialDeletionReportsRemainingFilesWithoutCallingThemSkipped() {
+        for(int i=0;i<52;i++)Old($"cancel-{i}.tmp");
+        var engine=Engine();var plan=engine.Scan();using var cancellation=new CancellationTokenSource();
+        var progress=new CallbackProgress(p=>{if(p.Files>=50)cancellation.Cancel();});
+        var result=engine.Apply(plan,[Rule.Id],Path.Combine(directory,"journals"),progress:progress,cancellation:cancellation.Token);
+        Assert.True(result.Cancelled);Assert.Equal(50,result.Deleted);Assert.Equal(0,result.Skipped);Assert.Equal(2,result.Pending);Assert.Empty(result.Failures);
+        Assert.Equal(2,Directory.GetFiles(cache).Length);
+    }
+    private sealed class CallbackProgress(Action<ScanProgress> callback):IProgress<ScanProgress> { public void Report(ScanProgress value)=>callback(value); }
+    [Fact]
+    public void ReadOnlyMatchingFilesAreDiagnosedWithoutChangingAttributes() {
+        string path=Old("read-only.tmp");File.SetAttributes(path,FileAttributes.ReadOnly);
+        try {var plan=Engine().Scan();Assert.Empty(plan.Files);Assert.Contains(plan.Issues,i=>i.Path==path&&i.Reason.Contains("Read-only"));Assert.True(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly));}
+        finally{File.SetAttributes(path,FileAttributes.Normal);}
+    }
+    [Fact]
     public void DryRunAndCancellationDoNotDeleteFiles() {
         string path = Old("a.tmp");
         var engine = Engine();
@@ -139,6 +167,7 @@ public sealed class CleanupTests : IDisposable {
         var result = Apply(engine, plan, cancellation: cancellation.Token);
         Assert.True(result.Cancelled);
         Assert.Equal(0, result.Deleted);
+        Assert.Equal(1, result.Pending);Assert.Empty(result.Failures);Assert.Equal(0,result.Skipped);
         Assert.True(File.Exists(path));
     }
 
